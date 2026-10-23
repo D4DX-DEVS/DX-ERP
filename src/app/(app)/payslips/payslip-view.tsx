@@ -41,8 +41,8 @@ export function PayslipView({ data, company, footer }: { data: PayslipPageData; 
             <Link
               key={m.id}
               href={`/payslips/${m.id}`}
-              aria-current={m.id === slip._id.toString() ? "page" : undefined}
-              className={cn("flex items-center justify-between gap-2 rounded-[10px] px-3 py-2.5 text-sm", m.id === slip._id.toString() ? "bg-brand-600 font-semibold text-white" : "font-medium text-ink hover:bg-field")}
+              aria-current={m.id === slip._id ? "page" : undefined}
+              className={cn("flex items-center justify-between gap-2 rounded-[10px] px-3 py-2.5 text-sm", m.id === slip._id ? "bg-brand-600 font-semibold text-white" : "font-medium text-ink hover:bg-field")}
             >
               <span>
                 {periodShort(m.period)}

@@ -1,6 +1,5 @@
 import type { CurrentUser } from "@/lib/auth/session";
 import { can } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
 import { workCalendar } from "@/lib/domain/calendar";
 import { getSettings } from "@/lib/settings";
 import { fmtDate } from "@/lib/time";
@@ -26,7 +25,6 @@ export function summaryAccess(user: CurrentUser) {
 
 /** This month vs last month vs financial year to date (FRS §4.1 monthly and annual operational summaries). */
 export async function OperationalSummaryCard({ user }: { user: CurrentUser }) {
-  await connectDB();
   const access = summaryAccess(user);
   const settings = await getSettings();
   const p = getPeriods();

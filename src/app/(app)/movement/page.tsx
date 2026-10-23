@@ -1,14 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import type { Types } from "mongoose";
+import { and, asc, desc, eq, gte, lt, lte, ne, type SQL } from "drizzle-orm";
 import { Download, LogOut, Plus } from "lucide-react";
 import { can, isStaff, requireUser, type CurrentUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Client, Department, Movement, Project, User, type IMovement } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
 import { directReportIds } from "@/lib/people";
 import { displayStatus, isOverdue, movementScope, overdueCutoff, scopeFilter, type MovementScope } from "@/lib/movement/access";
-import { dateParam, idParam, PAGE_SIZE, pageParam, param, searchRegex, type SearchParams, withParams } from "@/lib/query";
+import { dateParam, idParam, PAGE_SIZE, pageParam, param, type SearchParams, withParams } from "@/lib/query";
+import { inList, searchAny } from "@/lib/sql";
 import { addDays, eachDay, fmtDate, fmtTime, formatDuration, todayKey, weekStart, weekday } from "@/lib/time";
 import type { AppSettings } from "@/lib/config-defaults";
 import { PageBody, PageHeader, EmptyState, StatCard } from "@/components/ui/page";
@@ -26,7 +27,7 @@ import { ApprovalButtons, LiveElapsed } from "./movement-controls";
 
 export const metadata: Metadata = { title: "Movement register" };
 
-type Row = IMovement & { _id: Types.ObjectId };
+const REVIEW_STATUSES: IMovement["approvalStatus"][] = ["pending", "correction_requested"];
 
 interface Ctx {
   user: CurrentUser;
@@ -37,14 +38,13 @@ interface Ctx {
 
 function detailsVisible(ctx: Ctx, m: Pick<IMovement, "official" | "user">): boolean {
   if (m.official) return true;
-  const uid = m.user.toString();
+  const uid = m.user;
   return uid === ctx.user.id || ctx.reports.has(uid) || can(ctx.user, "movement.view_personal");
 }
 
 export default async function MovementPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
   const sp = await searchParams;
-  await connectDB();
   const settings = await getSettings();
   const today = todayKey();
   const scope = await movementScope(user);
@@ -53,10 +53,7 @@ export default async function MovementPage({ searchParams }: { searchParams: Pro
   const ctx: Ctx = { user, settings, today, reports };
 
   const canApproveAny = can(user, "movement.approve") || reports.size > 0;
-  const approvalFilter: Record<string, unknown> = can(user, "movement.approve")
-    ? { user: { $ne: user._id } }
-    : { user: { $in: [...reports] } };
-  const pendingCount = canApproveAny ? await Movement.countDocuments({ ...approvalFilter, approvalStatus: { $in: ["pending", "correction_requested"] } }) : 0;
+  const pendingCount = canApproveAny ? await db().$count(Movement, and(approvalFilter(ctx), inList(Movement.approvalStatus, REVIEW_STATUSES))) : 0;
 
   const defaultTab = scope.kind === "self" ? "mine" : "register";
   const tab = ["register", "mine", "approvals"].includes(param(sp, "tab")) ? param(sp, "tab") : defaultTab;
@@ -104,10 +101,15 @@ export default async function MovementPage({ searchParams }: { searchParams: Pro
       {tabs.length > 1 && <LinkTabs items={tabs} />}
       {tab === "register" && scope.kind !== "self" && <RegisterView ctx={ctx} scope={scope} sp={sp} />}
       {tab === "mine" && staff && <MineView ctx={ctx} sp={sp} />}
-      {tab === "approvals" && canApproveAny && <ApprovalsView ctx={ctx} filter={approvalFilter} />}
+      {tab === "approvals" && canApproveAny && <ApprovalsView ctx={ctx} />}
       {tab === "register" && scope.kind === "self" && !staff && <EmptyState title="Nothing to show" description="You don't have access to the movement register." />}
     </PageBody>
   );
+}
+
+/** Movements the viewer may decide: everyone else's with `movement.approve`, otherwise their direct reports'. */
+function approvalFilter(ctx: Ctx): SQL {
+  return can(ctx.user, "movement.approve") ? ne(Movement.user, ctx.user._id) : inList(Movement.user, [...ctx.reports]);
 }
 
 /* ---------------------------------------------------------------- */
@@ -122,57 +124,75 @@ async function RegisterView({ ctx, scope, sp }: { ctx: Ctx; scope: MovementScope
   const category = param(sp, "category");
   const approval = param(sp, "approval");
   const status = param(sp, "status");
-  const q = searchRegex(param(sp, "q"));
+  const q = param(sp, "q");
 
   // People filter (department / name search) resolved to user ids.
-  let personIds: Types.ObjectId[] | undefined;
+  let personIds: string[] | undefined;
   if (department || q) {
-    const pf: Record<string, unknown> = {};
-    if (department) pf.department = department;
-    if (q) pf.$or = [{ name: q }, { employeeId: q }];
-    personIds = (await User.find(pf, { _id: 1 }).lean()).map((u) => u._id);
+    const found = await db()
+      .select({ id: User._id })
+      .from(User)
+      .where(and(department ? eq(User.department, department) : undefined, searchAny(q, User.name, User.employeeId)));
+    personIds = found.map((u) => u.id);
   }
 
-  const filter: Record<string, unknown> = { ...base, date: { $gte: from <= to ? from : to, $lte: from <= to ? to : from } };
-  if (personIds) filter.user = scope.kind === "team" ? { $in: personIds.filter((id) => scope.userIds.includes(id.toString())) } : { $in: personIds };
-  if (category) filter.category = category;
-  if (approval) filter.approvalStatus = approval;
   const graceAgo = overdueCutoff(settings);
-  if (status === "returned" || status === "cancelled") filter.status = status;
-  if (status === "out") filter.status = "out";
-  if (status === "overdue") Object.assign(filter, { status: "out", expectedReturn: { $lt: graceAgo } });
-  if (status === "missing_in") Object.assign(filter, { status: "out", date: { $lt: today, $gte: from } });
+  let dateCond = and(gte(Movement.date, from <= to ? from : to), lte(Movement.date, from <= to ? to : from));
+  if (status === "missing_in") dateCond = and(lt(Movement.date, today), gte(Movement.date, from));
+  const filter = and(
+    base,
+    dateCond,
+    personIds ? inList(Movement.user, scope.kind === "team" ? personIds.filter((id) => scope.userIds.includes(id)) : personIds) : undefined,
+    category ? eq(Movement.category, category) : undefined,
+    approval ? eq(Movement.approvalStatus, approval as IMovement["approvalStatus"]) : undefined,
+    status === "returned" || status === "cancelled" ? eq(Movement.status, status) : undefined,
+    status === "out" || status === "overdue" || status === "missing_in" ? eq(Movement.status, "out") : undefined,
+    status === "overdue" ? lt(Movement.expectedReturn, graceAgo) : undefined,
+  );
 
   const monday = weekStart(today);
   const [rows, total, openAll, todayAll, pending, weekRows, departments] = await Promise.all([
-    Movement.find(filter).sort({ outTime: -1 }).skip((page - 1) * PAGE_SIZE).limit(PAGE_SIZE).lean<Row[]>(),
-    Movement.countDocuments(filter),
-    Movement.find({ ...base, status: "out" }).sort({ outTime: 1 }).lean<Row[]>(),
-    Movement.find({ ...base, date: today, status: { $ne: "cancelled" } }, { status: 1, durationMinutes: 1, official: 1 }).lean(),
-    Movement.find({ ...base, approvalStatus: { $in: ["pending", "correction_requested"] }, user: { $ne: user._id } }).sort({ updatedAt: -1 }).limit(6).lean<Row[]>(),
-    Movement.find({ ...base, date: { $gte: monday, $lte: addDays(monday, 6) }, status: "returned" }, { date: 1, durationMinutes: 1, official: 1 }).lean(),
-    Department.find({ active: true }, { name: 1 }).sort({ name: 1 }).lean(),
+    db().select().from(Movement).where(filter).orderBy(desc(Movement.outTime)).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
+    db().$count(Movement, filter),
+    db().select().from(Movement).where(and(base, eq(Movement.status, "out"))).orderBy(asc(Movement.outTime)),
+    db()
+      .select({ status: Movement.status, durationMinutes: Movement.durationMinutes, official: Movement.official })
+      .from(Movement)
+      .where(and(base, eq(Movement.date, today), ne(Movement.status, "cancelled"))),
+    db()
+      .select()
+      .from(Movement)
+      .where(and(base, inList(Movement.approvalStatus, REVIEW_STATUSES), ne(Movement.user, user._id)))
+      .orderBy(desc(Movement.updatedAt))
+      .limit(6),
+    db()
+      .select({ date: Movement.date, durationMinutes: Movement.durationMinutes, official: Movement.official })
+      .from(Movement)
+      .where(and(base, gte(Movement.date, monday), lte(Movement.date, addDays(monday, 6)), eq(Movement.status, "returned"))),
+    db().select({ _id: Department._id, name: Department.name }).from(Department).where(eq(Department.active, true)).orderBy(asc(Department.name)),
   ]);
 
-  const peopleIds = [...new Set([...rows, ...openAll, ...pending].map((m) => m.user.toString()))];
-  const projectIds = [...new Set(rows.map((m) => m.project?.toString()).filter(Boolean))] as string[];
-  const clientIds = [...new Set(rows.map((m) => m.client?.toString()).filter(Boolean))] as string[];
+  const peopleIds = [...new Set([...rows, ...openAll, ...pending].map((m) => m.user))];
+  const projectIds = [...new Set(rows.map((m) => m.project).filter((x): x is string => Boolean(x)))];
+  const clientIds = [...new Set(rows.map((m) => m.client).filter((x): x is string => Boolean(x)))];
   const [people, projects, clients] = await Promise.all([
-    User.find({ _id: { $in: peopleIds } }, { name: 1, employeeId: 1, photo: 1, designation: 1 }).lean(),
-    Project.find({ _id: { $in: projectIds } }, { projectNo: 1 }).lean(),
-    Client.find({ _id: { $in: clientIds } }, { clientNo: 1 }).lean(),
+    db().select({ _id: User._id, name: User.name, employeeId: User.employeeId, photo: User.photo }).from(User).where(inList(User._id, peopleIds)),
+    db().select({ _id: Project._id, projectNo: Project.projectNo }).from(Project).where(inList(Project._id, projectIds)),
+    db().select({ _id: Client._id, clientNo: Client.clientNo }).from(Client).where(inList(Client._id, clientIds)),
   ]);
-  const personById = new Map(people.map((p) => [p._id.toString(), p]));
-  const projectNo = new Map(projects.map((p) => [p._id.toString(), p.projectNo]));
-  const clientNo = new Map(clients.map((c) => [c._id.toString(), c.clientNo]));
+  const personById = new Map(people.map((p) => [p._id, { ...p, photo: p.photo ?? undefined }]));
+  const projectNo = new Map(projects.map((p) => [p._id, p.projectNo]));
+  const clientNo = new Map(clients.map((c) => [c._id, c.clientNo]));
 
   const missing = openAll.filter((m) => m.date < today);
   const overdue = openAll.filter((m) => m.date >= today && isOverdue(m, settings));
   const returnedToday = todayAll.filter((m) => m.status === "returned");
   const officialToday = returnedToday.filter((m) => m.official).reduce((s, m) => s + (m.durationMinutes ?? 0), 0);
   const personalToday = returnedToday.filter((m) => !m.official).reduce((s, m) => s + (m.durationMinutes ?? 0), 0);
-  const pendingTotal = await Movement.countDocuments({ ...base, approvalStatus: { $in: ["pending", "correction_requested"] } });
-  const corrections = await Movement.countDocuments({ ...base, approvalStatus: "correction_requested" });
+  const [pendingTotal, corrections] = await Promise.all([
+    db().$count(Movement, and(base, inList(Movement.approvalStatus, REVIEW_STATUSES))),
+    db().$count(Movement, and(base, eq(Movement.approvalStatus, "correction_requested"))),
+  ]);
 
   const workDays = eachDay(monday, addDays(monday, 6)).filter((d) => settings.attendance.workingDays.includes(weekday(d)) || weekRows.some((w) => w.date === d));
   const week = workDays.map((d) => {
@@ -203,13 +223,13 @@ async function RegisterView({ ctx, scope, sp }: { ctx: Ctx; scope: MovementScope
           ) : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {openAll.map((m) => {
-                const p = personById.get(m.user.toString());
+                const p = personById.get(m.user);
                 const st = displayStatus(m, settings, today);
                 const alert = st === "overdue" || st === "missing_in";
                 const show = detailsVisible(ctx, m);
                 return (
                   <Link
-                    key={m._id.toString()}
+                    key={m._id}
                     href={`/movement/${m._id}`}
                     className={`flex flex-col gap-2 rounded-[14px] bg-white p-3.5 transition-colors hover:bg-field ${alert ? "border-[1.5px] border-[#e7a3a3]" : "border border-line"}`}
                   >
@@ -245,7 +265,7 @@ async function RegisterView({ ctx, scope, sp }: { ctx: Ctx; scope: MovementScope
               <SearchInput placeholder="Search person or ID" className="sm:w-56" />
               <DateFilter param="from" label="From" />
               <DateFilter param="to" label="To" />
-              <SelectFilter param="department" allLabel="All departments" options={departments.map((d) => ({ value: d._id.toString(), label: d.name }))} />
+              <SelectFilter param="department" allLabel="All departments" options={departments.map((d) => ({ value: d._id, label: d.name }))} />
               <SelectFilter param="category" allLabel="All categories" options={settings.movement.categories.map((c) => ({ value: c.key, label: c.label }))} />
               <SelectFilter
                 param="status"
@@ -289,13 +309,13 @@ async function RegisterView({ ctx, scope, sp }: { ctx: Ctx; scope: MovementScope
             <tbody>
               {rows.length === 0 && <EmptyRow colSpan={10}>No movements match these filters.</EmptyRow>}
               {rows.map((m) => {
-                const p = personById.get(m.user.toString());
+                const p = personById.get(m.user);
                 const st = displayStatus(m, settings, today);
                 const show = detailsVisible(ctx, m);
-                const ref = (m.project && projectNo.get(m.project.toString())) || (m.client && clientNo.get(m.client.toString())) || "—";
+                const ref = (m.project && projectNo.get(m.project)) || (m.client && clientNo.get(m.client)) || "—";
                 const lateMins = m.inTime && m.expectedReturn && m.inTime > m.expectedReturn ? Math.round((m.inTime.getTime() - m.expectedReturn.getTime()) / 60_000) : 0;
                 return (
-                  <Tr key={m._id.toString()}>
+                  <Tr key={m._id}>
                     <Td className="font-mono text-xs whitespace-nowrap">
                       <Link href={`/movement/${m._id}`} className="text-brand-600 hover:underline">
                         {m.movementNo}
@@ -363,11 +383,11 @@ async function RegisterView({ ctx, scope, sp }: { ctx: Ctx; scope: MovementScope
             <CardBody className="flex flex-col gap-2.5">
               {pending.length === 0 && <p className="text-[13px] text-muted">Nothing waiting.</p>}
               {pending.map((m) => {
-                const p = personById.get(m.user.toString());
+                const p = personById.get(m.user);
                 const show = detailsVisible(ctx, m);
                 const corr = m.approvalStatus === "correction_requested";
                 return (
-                  <div key={m._id.toString()} className="flex items-center gap-3 rounded-xl border border-line p-3">
+                  <div key={m._id} className="flex items-center gap-3 rounded-xl border border-line p-3">
                     <Link href={`/movement/${m._id}`} className="min-w-0 flex-1">
                       <div className="truncate text-[13px] font-semibold text-ink">
                         {p?.name ?? "—"} · {corr ? "correction" : show ? m.categoryLabel.toLowerCase() : "personal"}
@@ -378,7 +398,7 @@ async function RegisterView({ ctx, scope, sp }: { ctx: Ctx; scope: MovementScope
                         {m.durationMinutes != null ? ` · ${formatDuration(m.durationMinutes)}` : ""}
                       </div>
                     </Link>
-                    {!corr && (ctx.reports.has(m.user.toString()) || can(user, "movement.approve")) && <ApprovalButtons id={m._id.toString()} compact />}
+                    {!corr && (ctx.reports.has(m.user) || can(user, "movement.approve")) && <ApprovalButtons id={m._id} compact />}
                   </div>
                 );
               })}
@@ -397,11 +417,14 @@ async function MineView({ ctx, sp }: { ctx: Ctx; sp: SearchParams }) {
   const from = dateParam(sp, "from") ?? addDays(today, -30);
   const to = dateParam(sp, "to") ?? today;
   const page = pageParam(sp);
-  const filter = { user: user._id, date: { $gte: from, $lte: to } };
+  const filter = and(eq(Movement.user, user._id), gte(Movement.date, from), lte(Movement.date, to));
   const [rows, total, totals] = await Promise.all([
-    Movement.find(filter).sort({ outTime: -1 }).skip((page - 1) * PAGE_SIZE).limit(PAGE_SIZE).lean<Row[]>(),
-    Movement.countDocuments(filter),
-    Movement.find({ ...filter, status: "returned" }, { durationMinutes: 1, official: 1 }).lean(),
+    db().select().from(Movement).where(filter).orderBy(desc(Movement.outTime)).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
+    db().$count(Movement, filter),
+    db()
+      .select({ durationMinutes: Movement.durationMinutes, official: Movement.official })
+      .from(Movement)
+      .where(and(filter, eq(Movement.status, "returned"))),
   ]);
   const official = totals.filter((m) => m.official).reduce((s, m) => s + (m.durationMinutes ?? 0), 0);
   const personal = totals.filter((m) => !m.official).reduce((s, m) => s + (m.durationMinutes ?? 0), 0);
@@ -456,7 +479,7 @@ async function MineView({ ctx, sp }: { ctx: Ctx; sp: SearchParams }) {
           <tbody>
             {rows.length === 0 && <EmptyRow colSpan={6}>No movements in this period.</EmptyRow>}
             {rows.map((m) => (
-              <Tr key={m._id.toString()}>
+              <Tr key={m._id}>
                 <Td className="whitespace-nowrap">
                   <Link href={`/movement/${m._id}`} className="font-semibold text-brand-600 hover:underline">
                     {fmtDate(m.date, "EEE d MMM")}
@@ -488,14 +511,18 @@ async function MineView({ ctx, sp }: { ctx: Ctx; sp: SearchParams }) {
 
 /* ---------------------------------------------------------------- */
 
-async function ApprovalsView({ ctx, filter }: { ctx: Ctx; filter: Record<string, unknown> }) {
+async function ApprovalsView({ ctx }: { ctx: Ctx }) {
   const { user } = ctx;
+  const filter = approvalFilter(ctx);
   const [pending, decided] = await Promise.all([
-    Movement.find({ ...filter, approvalStatus: { $in: ["pending", "correction_requested"] } }).sort({ createdAt: 1 }).limit(100).lean<Row[]>(),
-    Movement.find({ ...filter, approvedBy: user._id }).sort({ approvedAt: -1 }).limit(15).lean<Row[]>(),
+    db().select().from(Movement).where(and(filter, inList(Movement.approvalStatus, REVIEW_STATUSES))).orderBy(asc(Movement.createdAt)).limit(100),
+    db().select().from(Movement).where(and(filter, eq(Movement.approvedBy, user._id))).orderBy(desc(Movement.approvedAt)).limit(15),
   ]);
-  const people = await User.find({ _id: { $in: [...new Set([...pending, ...decided].map((m) => m.user.toString()))] } }, { name: 1, photo: 1, employeeId: 1 }).lean();
-  const byId = new Map(people.map((p) => [p._id.toString(), p]));
+  const people = await db()
+    .select({ _id: User._id, name: User.name, photo: User.photo, employeeId: User.employeeId })
+    .from(User)
+    .where(inList(User._id, [...new Set([...pending, ...decided].map((m) => m.user))]));
+  const byId = new Map(people.map((p) => [p._id, { ...p, photo: p.photo ?? undefined }]));
 
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
@@ -504,12 +531,12 @@ async function ApprovalsView({ ctx, filter }: { ctx: Ctx; filter: Record<string,
         <CardBody className="flex flex-col gap-3">
           {pending.length === 0 && <EmptyState title="No pending approvals" description="Movements and corrections that need your decision appear here." className="py-8" />}
           {pending.map((m) => {
-            const p = byId.get(m.user.toString());
+            const p = byId.get(m.user);
             const corr = m.approvalStatus === "correction_requested";
             const c = m.corrections.find((x) => x.status === "pending");
             const show = detailsVisible(ctx, m);
             return (
-              <div key={m._id.toString()} className="flex flex-col gap-3 rounded-[14px] border border-line p-4 sm:flex-row sm:items-center">
+              <div key={m._id} className="flex flex-col gap-3 rounded-[14px] border border-line p-4 sm:flex-row sm:items-center">
                 <Avatar name={p?.name ?? "?"} src={p?.photo} size="md" />
                 <Link href={`/movement/${m._id}`} className="min-w-0 flex-1">
                   <div className="text-sm font-semibold text-ink">
@@ -530,7 +557,7 @@ async function ApprovalsView({ ctx, filter }: { ctx: Ctx; filter: Record<string,
                     Review
                   </ButtonLink>
                 ) : (
-                  <ApprovalButtons id={m._id.toString()} />
+                  <ApprovalButtons id={m._id} />
                 )}
               </div>
             );
@@ -542,9 +569,9 @@ async function ApprovalsView({ ctx, filter }: { ctx: Ctx; filter: Record<string,
         <CardBody className="flex flex-col divide-y divide-line-soft pt-0">
           {decided.length === 0 && <p className="py-3 text-[13px] text-muted">No decisions yet.</p>}
           {decided.map((m) => (
-            <Link key={m._id.toString()} href={`/movement/${m._id}`} className="flex items-center justify-between gap-3 py-2.5">
+            <Link key={m._id} href={`/movement/${m._id}`} className="flex items-center justify-between gap-3 py-2.5">
               <span className="min-w-0">
-                <span className="block truncate text-[13px] font-semibold">{byId.get(m.user.toString())?.name ?? "—"} · {detailsVisible(ctx, m) ? m.categoryLabel : "Personal"}</span>
+                <span className="block truncate text-[13px] font-semibold">{byId.get(m.user)?.name ?? "—"} · {detailsVisible(ctx, m) ? m.categoryLabel : "Personal"}</span>
                 <span className="text-xs text-muted">{fmtDate(m.date, "d MMM")} · {m.movementNo}</span>
               </span>
               <StatusChip domain="movementApproval" value={m.approvalStatus} size="sm" />

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
+import { desc, eq } from "drizzle-orm";
 import { audit } from "@/lib/audit";
 import { can, getCurrentUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { exportResponse, isExportFormat } from "@/lib/export";
 import { titleCase } from "@/lib/format";
 import { AuditLog, User } from "@/lib/models";
@@ -24,13 +25,12 @@ export async function GET(request: Request) {
   if (!isExportFormat(format)) return new NextResponse("Unsupported format", { status: 400 });
   const sp: SearchParams = Object.fromEntries(url.searchParams.entries());
 
-  await connectDB();
   const filter = buildAuditFilter(sp);
   const actorId = idParam(sp, "actor");
-  const [rows, total, actor] = await Promise.all([
-    AuditLog.find(filter).sort({ at: -1, _id: -1 }).limit(MAX_ROWS).lean(),
-    AuditLog.countDocuments(filter),
-    actorId ? User.findById(actorId, { name: 1 }).lean() : null,
+  const [rows, total, [actor]] = await Promise.all([
+    db().select().from(AuditLog).where(filter).orderBy(desc(AuditLog.at), desc(AuditLog._id)).limit(MAX_ROWS),
+    db().$count(AuditLog, filter),
+    actorId ? db().select({ name: User.name }).from(User).where(eq(User._id, actorId)).limit(1) : Promise.resolve([]),
   ]);
 
   const description = describeAuditFilter(sp, actor?.name);

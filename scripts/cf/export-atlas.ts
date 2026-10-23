@@ -56,7 +56,7 @@ async function main() {
 
   const lines: string[] = ["PRAGMA defer_foreign_keys = on;"];
   const report: string[] = [];
-  const tables = Object.values(models).filter((v): v is SQLiteTable => is(v, SQLiteTable));
+  const tables = (Object.values(models) as unknown[]).filter((v): v is SQLiteTable => is(v, SQLiteTable));
 
   for (const table of tables) {
     const name = getTableName(table);

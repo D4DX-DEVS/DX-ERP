@@ -1,9 +1,11 @@
 import Link from "next/link";
+import { and, asc, count, desc, eq, gte, lt, or, sql } from "drizzle-orm";
 import type { CurrentUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Client, Lead, Project, Task } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
-import { hiddenClientIds, oid } from "@/lib/reports/shared";
+import { hiddenClientIds } from "@/lib/reports/shared";
+import { inList, notInList } from "@/lib/sql";
 import { diffDays, fmtDate } from "@/lib/time";
 import { inrCompact } from "@/lib/format";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -13,7 +15,6 @@ import { getPeriods } from "../_lib/queries";
 import { ListRow } from "./shared";
 
 export async function ProjectsCard() {
-  await connectDB();
   const settings = await getSettings();
   const { today, fy } = getPeriods();
   const keysIn = (...cats: string[]) => settings.projectStatuses.filter((s) => cats.includes(s.category)).map((s) => s.key);
@@ -21,10 +22,19 @@ export async function ProjectsCard() {
   const completedKeys = keysIn("completed");
   const categoryOf = (key: string) => settings.projectStatuses.find((s) => s.key === key)?.category;
 
-  const projects = await Project.find(
-    { $or: [{ status: { $in: openKeys } }, { status: { $in: completedKeys }, completedDate: { $gte: fy.from } }] },
-    { projectNo: 1, title: 1, status: 1, startDate: 1, targetDate: 1, completedDate: 1, milestones: 1 },
-  ).lean();
+  const projects = await db()
+    .select({
+      _id: Project._id,
+      projectNo: Project.projectNo,
+      title: Project.title,
+      status: Project.status,
+      startDate: Project.startDate,
+      targetDate: Project.targetDate,
+      completedDate: Project.completedDate,
+      milestones: Project.milestones,
+    })
+    .from(Project)
+    .where(or(inList(Project.status, openKeys), and(inList(Project.status, completedKeys), gte(Project.completedDate, fy.from))));
 
   let active = 0;
   let upcoming = 0;
@@ -43,18 +53,22 @@ export async function ProjectsCard() {
       .filter((m) => m.status !== "delivered" && m.status !== "approved" && !m.deliveredAt && m.dueDate && m.dueDate < today)
       .reduce((max, m) => Math.max(max, diffDays(m.dueDate as string, today)), 0);
     const days = Math.max(late, overdueMilestone);
-    if (days > 0 && category !== "enquiry") delayed.push({ id: p._id.toString(), projectNo: p.projectNo, title: p.title, days, reason: late >= overdueMilestone ? "past target date" : "milestone overdue" });
+    if (days > 0 && category !== "enquiry") delayed.push({ id: p._id, projectNo: p.projectNo, title: p.title, days, reason: late >= overdueMilestone ? "past target date" : "milestone overdue" });
   }
   delayed.sort((a, b) => b.days - a.days);
   const atRisk = delayed.slice(0, 3);
 
   const progress = atRisk.length
-    ? await Task.aggregate<{ _id: unknown; avg: number }>([
-        { $match: { project: { $in: atRisk.map((p) => oid(p.id)) }, status: { $nin: settings.taskStatuses.filter((s) => s.category === "cancelled").map((s) => s.key) } } },
-        { $group: { _id: "$project", avg: { $avg: { $cond: [{ $in: ["$status", settings.taskStatuses.filter((s) => s.category === "done").map((s) => s.key)] }, 100, "$progress"] } } } },
-      ])
+    ? await db()
+        .select({
+          project: Task.project,
+          avg: sql<number>`avg(case when ${inList(Task.status, settings.taskStatuses.filter((s) => s.category === "done").map((s) => s.key))} then 100 else ${Task.progress} end)`.mapWith(Number),
+        })
+        .from(Task)
+        .where(and(inList(Task.project, atRisk.map((p) => p.id)), notInList(Task.status, settings.taskStatuses.filter((s) => s.category === "cancelled").map((s) => s.key))))
+        .groupBy(Task.project)
     : [];
-  const progressOf = new Map(progress.map((p) => [String(p._id), Math.round(p.avg)]));
+  const progressOf = new Map(progress.map((p) => [String(p.project), Math.round(p.avg)]));
 
   return (
     <Card className="h-full">
@@ -90,22 +104,21 @@ export async function ProjectsCard() {
 }
 
 export async function PipelineCard({ user }: { user: CurrentUser }) {
-  await connectDB();
   const settings = await getSettings();
   const hidden = await hiddenClientIds(user);
-  const leadScope = hidden.length ? { client: { $nin: hidden } } : {};
   const [activeClients, stages] = await Promise.all([
-    Client.countDocuments({ status: "active", ...(hidden.length ? { _id: { $nin: hidden } } : {}) }),
-    Lead.aggregate<{ _id: string; count: number; value: number }>([
-      { $match: { status: "open", ...leadScope } },
-      { $group: { _id: "$stage", count: { $sum: 1 }, value: { $sum: { $ifNull: ["$expectedValue", { $ifNull: ["$budget", 0] }] } } } },
-    ]),
+    db().$count(Client, and(eq(Client.status, "active"), hidden.length ? notInList(Client._id, hidden) : undefined)),
+    db()
+      .select({ stage: Lead.stage, count: count(), value: sql<number>`coalesce(sum(coalesce(${Lead.expectedValue}, ${Lead.budget}, 0)), 0)`.mapWith(Number) })
+      .from(Lead)
+      .where(and(eq(Lead.status, "open"), hidden.length ? notInList(Lead.client, hidden) : undefined))
+      .groupBy(Lead.stage),
   ]);
   const openLeads = stages.reduce((s, r) => s + r.count, 0);
   const pipeline = stages.reduce((s, r) => s + r.value, 0);
   const funnel = settings.pipelineStages
     .filter((s) => s.category === "open")
-    .map((s) => ({ stage: s, row: stages.find((r) => r._id === s.key) }))
+    .map((s) => ({ stage: s, row: stages.find((r) => r.stage === s.key) }))
     .filter((x) => x.row)
     .map((x) => ({ label: x.stage.label, value: x.row?.value ?? 0, hint: `${x.stage.label}: ${x.row?.count ?? 0} open, ${inrCompact(x.row?.value ?? 0)}` }));
 
@@ -125,20 +138,24 @@ export async function PipelineCard({ user }: { user: CurrentUser }) {
 }
 
 export async function OverdueTasksCard() {
-  await connectDB();
   const settings = await getSettings();
   const { today } = getPeriods();
   const closed = settings.taskStatuses.filter((s) => s.category === "done" || s.category === "cancelled").map((s) => s.key);
-  const match = { status: { $nin: closed }, dueDate: { $lt: today } };
-  const [groups, oldest] = await Promise.all([
-    Task.aggregate<{ _id: unknown; n: number }>([{ $match: match }, { $group: { _id: "$project", n: { $sum: 1 } } }, { $sort: { n: -1 } }]),
-    Task.findOne(match, { taskNo: 1, title: 1, dueDate: 1 }).sort({ dueDate: 1 }).lean(),
+  const match = and(notInList(Task.status, closed), lt(Task.dueDate, today));
+  const n = count();
+  const [groups, [oldest]] = await Promise.all([
+    // Project titles come with the groups (join), so the card needs no second lookup.
+    db()
+      .select({ project: Task.project, title: Project.title, n })
+      .from(Task)
+      .leftJoin(Project, eq(Project._id, Task.project))
+      .where(match)
+      .groupBy(Task.project)
+      .orderBy(desc(n)),
+    db().select({ _id: Task._id, taskNo: Task.taskNo, title: Task.title, dueDate: Task.dueDate }).from(Task).where(match).orderBy(asc(Task.dueDate)).limit(1),
   ]);
   const total = groups.reduce((s, g) => s + g.n, 0);
   const top = groups.slice(0, 5);
-  const projectIds = top.map((g) => g._id).filter(Boolean) as string[];
-  const projects = projectIds.length ? await Project.find({ _id: { $in: projectIds } }, { title: 1 }).lean() : [];
-  const title = new Map(projects.map((p) => [p._id.toString(), p.title]));
 
   return (
     <Card className="h-full">
@@ -148,7 +165,7 @@ export async function OverdueTasksCard() {
           <div className={`font-display text-[28px] leading-none font-semibold tabular ${total > 0 ? "text-danger" : "text-ink"}`}>{total}</div>
           <div className="mt-1.5 text-xs text-muted">{total === 0 ? "Nothing is past its deadline" : `past deadline across ${groups.length} project${groups.length === 1 ? "" : "s"}`}</div>
         </div>
-        {top.length > 0 && <HBarList color="#B42323" rows={top.map((g) => ({ label: g._id ? (title.get(String(g._id)) ?? "Unknown project") : "No project", value: g.n }))} />}
+        {top.length > 0 && <HBarList color="#B42323" rows={top.map((g) => ({ label: g.project ? (g.title ?? "Unknown project") : "No project", value: g.n }))} />}
         {oldest?.dueDate && (
           <p className="border-t border-line-soft pt-3 text-xs text-muted">
             Oldest:{" "}

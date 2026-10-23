@@ -1,21 +1,26 @@
 "use server";
 
+import { and, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import { actionPermission, ActionError, parse, runAction, type ActionResult } from "@/lib/actions";
 import { audit, diff } from "@/lib/audit";
 import { can, revokeUserSessions, type CurrentUser } from "@/lib/auth/session";
-import { Role, User, type LifecycleEvent } from "@/lib/models";
+import { db } from "@/lib/db";
+import { Role, User, type Address, type EmergencyContact, type Internship, type LifecycleEvent, type NewUser } from "@/lib/models";
 import { notify } from "@/lib/notify";
+import { jsonPush } from "@/lib/sql";
 import { isObjectId, zs } from "@/lib/validation";
 import { EMPLOYMENT_TYPE_KEYS } from "./_lib/constants";
 import { analyseImport, importSchema, type ImportPreviewRow } from "./_lib/import";
 import {
   autoCompleteSteps,
   buildSalary,
+  createPeopleBulk,
   createPersonRecord,
   createPersonSchema,
-  emailRegex,
+  emailMatch,
   lifecycleEvent,
+  orNull,
   parseMoneyLines,
   superAdminEmail,
 } from "./_lib/person";
@@ -74,6 +79,27 @@ export async function createPerson(input: Record<string, unknown>): Promise<Acti
   }, "Person added");
 }
 
+/** Columns the edit form reads and compares (never the big/confidential JSON columns). */
+const editableColumns = {
+  _id: User._id,
+  employeeId: User.employeeId,
+  name: User.name,
+  email: User.email,
+  phone: User.phone,
+  personalEmail: User.personalEmail,
+  personType: User.personType,
+  role: User.role,
+  dob: User.dob,
+  gender: User.gender,
+  bloodGroup: User.bloodGroup,
+  address: User.address,
+  emergencyContact: User.emergencyContact,
+  employmentType: User.employmentType,
+  team: User.team,
+  joiningDate: User.joiningDate,
+  internship: User.internship,
+};
+
 const updateSchema = z.object({
   userId: zs.id("Person"),
   name: zs.text("Name", 120),
@@ -123,7 +149,7 @@ export async function updatePersonSection(userId: string, section: ProfileSectio
     const user = await actionPermission("staff.edit");
     if (!isObjectId(userId)) throw new ActionError("Person not found.");
     if (typeof section !== "string" || !Object.hasOwn(SECTION_FIELDS, section)) throw new ActionError("Unknown section.");
-    const target = await User.findById(userId).lean();
+    const [target] = await db().select(editableColumns).from(User).where(eq(User._id, userId)).limit(1);
     if (!target || target.personType === "admin") throw new ActionError("Person not found.");
     if (section === "internship" && target.personType !== "intern" && target.personType !== "trainee") throw new ActionError("Only interns and trainees have internship details.");
 
@@ -154,7 +180,7 @@ export async function updatePersonSection(userId: string, section: ProfileSectio
       college: i?.college,
       course: i?.course,
       assignedRole: i?.assignedRole,
-      mentor: i?.mentor?.toString(),
+      mentor: i?.mentor,
     };
     // The dialog posts every field of its section; a missing one means it was cleared.
     for (const field of SECTION_FIELDS[section]) merged[field] = input[field] ?? "";
@@ -165,36 +191,34 @@ export async function updatePersonSection(userId: string, section: ProfileSectio
 /** Shared by the full edit form and the per-section dialogs. Designation, department, manager and status go through lifecycle actions. */
 async function savePerson(user: CurrentUser, input: Record<string, unknown>): Promise<{ id: string }> {
   const data = parse(updateSchema, input);
-  const target = await User.findById(data.userId).lean();
+  const [target] = await db().select(editableColumns).from(User).where(eq(User._id, data.userId)).limit(1);
   if (!target || target.personType === "admin") throw new ActionError("Person not found.");
-  if (target._id.toString() === user.id && (data.joiningDate !== target.joiningDate || (data.employmentType && data.employmentType !== target.employmentType))) {
+  if (target._id === user.id && (data.joiningDate !== target.joiningDate || (data.employmentType && data.employmentType !== target.employmentType))) {
     throw new ActionError("You can't change your own joining date or employment type. Ask another HR administrator.", { joiningDate: "Not allowed" });
   }
 
-  const set: Record<string, unknown> = {};
-  const unset: Record<string, ""> = {};
-  const put = (key: string, value: unknown) => {
-    if (value === undefined || value === "") unset[key] = "";
-    else set[key] = value;
+  const address: Address = {
+    line1: data.addrLine1,
+    line2: data.addrLine2,
+    city: data.city,
+    state: data.state,
+    postalCode: data.postalCode,
+    country: data.country,
   };
-
-  put("name", data.name);
-  put("phone", data.phone);
-  put("personalEmail", data.personalEmail);
-  put("dob", data.dob);
-  put("gender", data.gender);
-  put("bloodGroup", data.bloodGroup);
-  put("team", data.team);
-  put("joiningDate", data.joiningDate);
-  put("address.line1", data.addrLine1);
-  put("address.line2", data.addrLine2);
-  put("address.city", data.city);
-  put("address.state", data.state);
-  put("address.postalCode", data.postalCode);
-  put("address.country", data.country);
-  put("emergencyContact.name", data.emergencyName);
-  put("emergencyContact.relation", data.emergencyRelation);
-  put("emergencyContact.phone", data.emergencyPhone);
+  const emergencyContact: EmergencyContact = { name: data.emergencyName, relation: data.emergencyRelation, phone: data.emergencyPhone };
+  // `null` clears a column (the old `$unset`); nested objects are rebuilt from the form fields.
+  const set: Partial<NewUser> = {
+    name: data.name,
+    phone: data.phone ?? null,
+    personalEmail: data.personalEmail ?? null,
+    dob: data.dob ?? null,
+    gender: data.gender ?? null,
+    bloodGroup: data.bloodGroup ?? null,
+    team: data.team ?? null,
+    joiningDate: data.joiningDate,
+    address: orNull(address),
+    emergencyContact: orNull(emergencyContact),
+  };
 
   if (data.employmentType) {
     if (!EMPLOYMENT_TYPE_KEYS.includes(data.employmentType)) throw new ActionError("Choose a valid employment type.", { employmentType: "Invalid" });
@@ -205,11 +229,11 @@ async function savePerson(user: CurrentUser, input: Record<string, unknown>): Pr
   let emailChanged = false;
   if (data.email && data.email !== target.email) {
     if (!can(user, "users.manage")) throw new ActionError("Only users who manage access can change the work email.", { email: "Not allowed" });
-    if (target._id.toString() === user.id) throw new ActionError("You can't change your own work email. Ask another administrator.", { email: "Not allowed" });
+    if (target._id === user.id) throw new ActionError("You can't change your own work email. Ask another administrator.", { email: "Not allowed" });
     if (!user.isSuperAdmin) {
       // The next Google sign-in with the new email binds that Google account to this record and its role,
       // so a delegated admin may only re-point accounts whose role is within their own ceiling.
-      const role = await Role.findOne({ key: target.role }, { permissions: 1 }).lean();
+      const [role] = await db().select({ permissions: Role.permissions }).from(Role).where(eq(Role.key, target.role)).limit(1);
       const own = new Set<string>(user.permissions);
       if (!role || role.permissions.some((p) => !own.has(p))) {
         throw new ActionError(`${target.name}'s role has permissions you don't hold, so you can't change their work email. Ask the super admin.`, { email: "Not allowed" });
@@ -217,10 +241,10 @@ async function savePerson(user: CurrentUser, input: Record<string, unknown>): Pr
     }
     const adminEmail = superAdminEmail();
     if (adminEmail && data.email === adminEmail) throw new ActionError("This email belongs to the super admin account.", { email: "Reserved for the super admin" });
-    const clash = await User.exists({ _id: { $ne: target._id }, email: emailRegex(data.email) });
+    const [clash] = await db().select({ id: User._id }).from(User).where(and(ne(User._id, target._id), emailMatch(data.email))).limit(1);
     if (clash) throw new ActionError("A person with this email already exists.", { email: "Already in use" });
     set.email = data.email;
-    unset.googleSub = "";
+    set.googleSub = null;
     emailChanged = true;
     events.push(lifecycleEvent(user, { type: "access_change", summary: "Work email changed — Google sign-in re-links on next login", from: target.email, to: data.email }));
   }
@@ -235,7 +259,7 @@ async function savePerson(user: CurrentUser, input: Record<string, unknown>): Pr
     if (!current) {
       if (data.mentor) {
         if (data.mentor === data.userId) throw new ActionError("A person can't mentor themself.", { mentor: "Invalid" });
-        const mentor = await User.findById(data.mentor, { personType: 1, status: 1 }).lean();
+        const [mentor] = await db().select({ personType: User.personType, status: User.status }).from(User).where(eq(User._id, data.mentor)).limit(1);
         if (!mentor || mentor.personType === "admin" || ["resigned", "terminated", "inactive"].includes(mentor.status)) {
           throw new ActionError("Choose an active staff member as mentor.", { mentor: "Not available" });
         }
@@ -255,33 +279,38 @@ async function savePerson(user: CurrentUser, input: Record<string, unknown>): Pr
         certificateStatus: "none",
       };
     } else {
-      put("internship.startDate", data.internStartDate);
-      put("internship.endDate", data.internEndDate);
-      put("internship.college", data.college);
-      put("internship.course", data.course);
-      put("internship.assignedRole", data.assignedRole);
-      if ((data.mentor ?? "") !== (current.mentor?.toString() ?? "")) {
+      // Nested fields of the embedded internship object; an unset form value clears the field.
+      const next: Internship = {
+        ...current,
+        startDate: data.internStartDate,
+        endDate: data.internEndDate,
+        college: data.college,
+        course: data.course,
+        assignedRole: data.assignedRole,
+      };
+      if ((data.mentor ?? "") !== (current.mentor ?? "")) {
         if (data.mentor) {
           if (data.mentor === data.userId) throw new ActionError("A person can't mentor themself.", { mentor: "Invalid" });
-          const mentor = await User.findById(data.mentor, { name: 1, personType: 1, status: 1 }).lean();
+          const [mentor] = await db().select({ name: User.name, personType: User.personType, status: User.status }).from(User).where(eq(User._id, data.mentor)).limit(1);
           if (!mentor || mentor.personType === "admin" || ["resigned", "terminated", "inactive"].includes(mentor.status)) {
             throw new ActionError("Choose an active staff member as mentor.", { mentor: "Not available" });
           }
-          const previous = current.mentor ? await User.findById(current.mentor, { name: 1 }).lean() : null;
+          const [previous] = current.mentor ? await db().select({ name: User.name }).from(User).where(eq(User._id, current.mentor)).limit(1) : [];
           events.push(lifecycleEvent(user, { type: "manager_change", summary: `Mentor changed to ${mentor.name}`, from: previous?.name, to: mentor.name }));
         } else {
           events.push(lifecycleEvent(user, { type: "manager_change", summary: "Mentor removed" }));
         }
-        put("internship.mentor", data.mentor);
+        next.mentor = data.mentor;
         mentorChanged = true;
       }
+      set.internship = next;
     }
   }
 
-  const update: Record<string, unknown> = { $set: set };
-  if (Object.keys(unset).length > 0) update.$unset = unset;
-  if (events.length > 0) update.$push = { history: { $each: events } };
-  await User.updateOne({ _id: target._id }, update, { runValidators: true });
+  await db()
+    .update(User)
+    .set({ ...set, ...(events.length > 0 ? { history: jsonPush(User.history, ...events) } : {}) })
+    .where(eq(User._id, target._id));
 
   if (emailChanged) await revokeUserSessions(target._id, "email changed");
   if (mentorChanged) {
@@ -336,16 +365,17 @@ export async function importPeople(
     const failed: { line: number; error: string }[] = [];
     const perManager = new Map<string, number>();
     let created = 0;
-    for (let i = 0; i < people.length; i++) {
-      const person = people[i];
-      if (!person) continue;
-      try {
-        await createPersonRecord(user, { ...person, accountActive: enableLogin }, { notifyPeople: false, allowedRoles: new Set([person.role]) });
-        created++;
+    // One bulk write (see `createPeopleBulk`): the rows go in atomically, so a failure fails every row.
+    const valid = people.flatMap((person, i) => (person ? [{ person: { ...person, accountActive: enableLogin }, line: preview[i].line }] : []));
+    try {
+      await createPeopleBulk(user, valid.map((v) => v.person));
+      created = valid.length;
+      for (const { person } of valid) {
         if (person.reportingManager) perManager.set(person.reportingManager, (perManager.get(person.reportingManager) ?? 0) + 1);
-      } catch (error) {
-        failed.push({ line: preview[i].line, error: error instanceof ActionError ? error.message : "Could not be saved" });
       }
+    } catch (error) {
+      console.error("[import] bulk create failed", error);
+      for (const { line } of valid) failed.push({ line, error: error instanceof ActionError ? error.message : "Could not be saved" });
     }
 
     for (const [managerId, count] of perManager) {

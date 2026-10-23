@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { Lock } from "lucide-react";
+import { eq } from "drizzle-orm";
 import { can, requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Client, Contract, Project, Proposal } from "@/lib/models";
 import { namesFor } from "@/lib/people";
 import { inr } from "@/lib/format";
@@ -31,16 +32,15 @@ export default async function ContractPage({ params }: { params: Promise<{ id: s
   const { id } = await params;
   const user = await requirePagePermission("contracts.view");
   const c = await pageContract(user, id);
-  await connectDB();
   const canManage = can(user, "contracts.manage");
   const secrets = canSeeContractSecrets(user, c);
 
   const [client, project, proposal, renewedFrom, renewedTo, names] = await Promise.all([
-    Client.findById(c.client, { name: 1, clientNo: 1 }).lean(),
-    c.project ? Project.findById(c.project, { projectNo: 1, title: 1 }).lean() : null,
-    c.proposal ? Proposal.findById(c.proposal, { proposalNo: 1, title: 1 }).lean() : null,
-    c.renewedFrom ? Contract.findById(c.renewedFrom, { contractNo: 1 }).lean() : null,
-    c.status === "renewed" ? Contract.findOne({ renewedFrom: c._id }, { contractNo: 1 }).lean() : null,
+    db().select({ _id: Client._id, name: Client.name, clientNo: Client.clientNo }).from(Client).where(eq(Client._id, c.client)).limit(1).then((r) => r[0]),
+    c.project ? db().select({ _id: Project._id, projectNo: Project.projectNo, title: Project.title }).from(Project).where(eq(Project._id, c.project)).limit(1).then((r) => r[0]) : undefined,
+    c.proposal ? db().select({ _id: Proposal._id, proposalNo: Proposal.proposalNo, title: Proposal.title }).from(Proposal).where(eq(Proposal._id, c.proposal)).limit(1).then((r) => r[0]) : undefined,
+    c.renewedFrom ? db().select({ _id: Contract._id, contractNo: Contract.contractNo }).from(Contract).where(eq(Contract._id, c.renewedFrom)).limit(1).then((r) => r[0]) : undefined,
+    c.status === "renewed" ? db().select({ _id: Contract._id, contractNo: Contract.contractNo }).from(Contract).where(eq(Contract.renewedFrom, c._id)).limit(1).then((r) => r[0]) : undefined,
     namesFor([c.createdBy]),
   ]);
 
@@ -49,7 +49,7 @@ export default async function ContractPage({ params }: { params: Promise<{ id: s
   const history: TimelineItem[] = [...c.history]
     .sort((a, b) => b.at.getTime() - a.at.getTime())
     .map((h, i) => ({
-      id: h._id?.toString() ?? String(i),
+      id: h._id ?? String(i),
       title: HISTORY_TITLES[h.action] ?? h.action,
       meta: h.byName ?? "System",
       at: h.at,
@@ -135,7 +135,7 @@ export default async function ContractPage({ params }: { params: Promise<{ id: s
                   { label: "Signed on", value: c.signedOn ? fmtDate(c.signedOn) : c.status === "draft" ? "Awaiting signature" : undefined },
                   { label: "Renewal reminder", value: `${c.renewalReminderDays} days before the end date` },
                   { label: "Auto-renew", value: c.autoRenew ? "Yes" : "No" },
-                  { label: "Created", value: `${fmtDate(c.createdAt)}${c.createdBy ? ` · ${names.get(c.createdBy.toString()) ?? ""}` : ""}` },
+                  { label: "Created", value: `${fmtDate(c.createdAt)}${c.createdBy ? ` · ${names.get(c.createdBy) ?? ""}` : ""}` },
                   ...(renewedFrom
                     ? [{ label: "Renews", value: <Link href={`/contracts/${renewedFrom._id}`} className="font-medium text-brand-600 hover:text-brand-800">{renewedFrom.contractNo}</Link> }]
                     : []),
@@ -159,7 +159,7 @@ export default async function ContractPage({ params }: { params: Promise<{ id: s
                   confidential={c.confidential}
                   add={addContractFiles.bind(null, id)}
                   remove={removeContractFile.bind(null, id)}
-                  files={c.attachments.map((a) => ({ refId: a._id?.toString() ?? a.file.toString(), file: a.file.toString(), name: a.name, size: a.size }))}
+                  files={c.attachments.map((a) => ({ refId: a._id ?? a.file, file: a.file, name: a.name, size: a.size }))}
                 />
               ) : (
                 <p className="flex items-center gap-2 text-[13px] text-muted">

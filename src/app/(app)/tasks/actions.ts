@@ -1,15 +1,19 @@
 "use server";
 
+import { and, eq } from "drizzle-orm";
+import type { SQLiteUpdateSetSource } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 import { actionUser, ActionError, parse, runAction, type ActionResult } from "@/lib/actions";
 import { can, type CurrentUser } from "@/lib/auth/session";
 import { audit, diff } from "@/lib/audit";
 import { ID_PREFIX, nextNumber } from "@/lib/counters";
 import { resolveFileRefs } from "@/lib/files";
-import { Project, PRIORITIES, Task, User, type ObjectId } from "@/lib/models";
+import { db } from "@/lib/db";
+import { newId, Project, PRIORITIES, Task, User, type Id, type TaskSubmission } from "@/lib/models";
 import { notify, notifyPermission } from "@/lib/notify";
 import { EXITED_STATUSES } from "@/lib/people";
 import { getSettings } from "@/lib/settings";
+import { inList, jsonPush, notInList } from "@/lib/sql";
 import { optionLabel } from "@/lib/status";
 import { isObjectId, zs } from "@/lib/validation";
 import {
@@ -44,22 +48,25 @@ const taskSchema = z.object({
 
 type TaskInput = z.infer<typeof taskSchema>;
 
-const idList = (ids: { toString(): string }[]) => ids.map((x) => x.toString());
+/** File refs get an id when embedded (they were sub-documents before), so they can be addressed later. */
+const withIds = <T extends { _id?: Id }>(refs: T[]): T[] => refs.map((r) => ({ ...r, _id: r._id ?? newId() }));
 
 /** Loads a task the user may see, with the project manager and the user's capabilities on it. */
 async function loadTask(user: CurrentUser, id: string) {
   if (!isObjectId(id)) throw new ActionError("Task not found.");
   const filter = await taskFilter(user);
-  const task = await Task.findOne({ $and: [{ _id: id }, filter] });
+  const [task] = await db().select().from(Task).where(and(eq(Task._id, id), filter)).limit(1);
   if (!task) throw new ActionError("Task not found, or you don't have access to it.");
-  const project = task.project ? await Project.findById(task.project, { manager: 1, title: 1, projectNo: 1, milestones: 1 }).lean() : null;
+  const [project] = task.project
+    ? await db().select({ manager: Project.manager, title: Project.title, projectNo: Project.projectNo, milestones: Project.milestones }).from(Project).where(eq(Project._id, task.project)).limit(1)
+    : [];
   return { task, project, caps: taskCaps(user, task, project?.manager) };
 }
 
 async function assertStaff(ids: string[], field: string) {
   const unique = [...new Set(ids)];
   if (unique.length === 0) return;
-  const count = await User.countDocuments({ _id: { $in: unique }, personType: { $in: ["employee", "trainee", "intern"] }, status: { $nin: EXITED_STATUSES } });
+  const count = await db().$count(User, and(inList(User._id, unique), inList(User.personType, ["employee", "trainee", "intern"]), notInList(User.status, EXITED_STATUSES)));
   if (count !== unique.length) throw new ActionError("Choose active staff members only.", { [field]: "Choose active staff members only." });
 }
 
@@ -72,8 +79,8 @@ async function dependsOn(start: string[], target: string): Promise<boolean> {
     const fresh = frontier.filter((x) => !seen.has(x));
     fresh.forEach((x) => seen.add(x));
     if (fresh.length === 0) return false;
-    const rows = await Task.find({ _id: { $in: fresh } }, { dependencies: 1 }).lean();
-    frontier = rows.flatMap((r) => r.dependencies.map((d) => d.toString()));
+    const rows = await db().select({ dependencies: Task.dependencies }).from(Task).where(inList(Task._id, fresh));
+    frontier = rows.flatMap((r) => r.dependencies);
   }
   return false;
 }
@@ -87,15 +94,15 @@ async function validateTaskInput(data: TaskInput, projectId: string | undefined,
   await assertStaff(data.sharedWith, "sharedWith");
   if (data.reviewer) await assertStaff([data.reviewer], "reviewer");
   if (data.milestone) {
-    const project = projectId ? await Project.findById(projectId, { milestones: 1 }).lean() : null;
-    if (!project?.milestones.some((m) => m._id.toString() === data.milestone)) {
+    const [project] = projectId ? await db().select({ milestones: Project.milestones }).from(Project).where(eq(Project._id, projectId)).limit(1) : [];
+    if (!project?.milestones.some((m) => m._id === data.milestone)) {
       throw new ActionError("That milestone doesn't belong to the project.", { milestone: "Choose a milestone of this project" });
     }
   }
   if (data.dependencies.length) {
     if (selfId && data.dependencies.includes(selfId)) throw new ActionError("A task can't depend on itself.", { dependencies: "A task can't depend on itself" });
-    const deps = await Task.find({ _id: { $in: data.dependencies } }, { project: 1 }).lean();
-    const sameProject = deps.every((d) => (d.project?.toString() ?? "") === (projectId ?? ""));
+    const deps = await db().select({ project: Task.project }).from(Task).where(inList(Task._id, data.dependencies));
+    const sameProject = deps.every((d) => (d.project ?? "") === (projectId ?? ""));
     if (deps.length !== new Set(data.dependencies).size || !sameProject) {
       throw new ActionError("Dependencies must be tasks of the same project.", { dependencies: "Choose tasks of the same project" });
     }
@@ -105,7 +112,7 @@ async function validateTaskInput(data: TaskInput, projectId: string | undefined,
   }
 }
 
-function recipients(task: { assignees: ObjectId[]; reporter?: ObjectId | null; reviewer?: ObjectId | null; sharedWith?: ObjectId[] }, projectManager?: ObjectId | null) {
+function recipients(task: { assignees: Id[]; reporter?: Id | null; reviewer?: Id | null; sharedWith?: Id[] }, projectManager?: Id | null) {
   return [...task.assignees, task.reporter, task.reviewer, projectManager, ...(task.sharedWith ?? [])];
 }
 
@@ -121,18 +128,24 @@ export async function createTask(input: Record<string, unknown>): Promise<Action
 
     let projectId = data.project;
     let milestone = data.milestone;
-    let parentTask = null;
+    let parentTask: { _id: Id; project: Id | null; parent: Id | null; milestone: Id | null } | undefined;
     if (data.parent) {
-      parentTask = await Task.findOne({ $and: [{ _id: data.parent }, await taskFilter(user)] }, { project: 1, parent: 1, milestone: 1 }).lean();
+      [parentTask] = await db()
+        .select({ _id: Task._id, project: Task.project, parent: Task.parent, milestone: Task.milestone })
+        .from(Task)
+        .where(and(eq(Task._id, data.parent), await taskFilter(user)))
+        .limit(1);
       if (!parentTask) throw new ActionError("The parent task no longer exists, or you don't have access to it.", { parent: "Not found" });
       if (parentTask.parent) throw new ActionError("Subtasks can't have their own subtasks.", { parent: "Choose a top-level task" });
-      if (data.project && data.project !== (parentTask.project?.toString() ?? "")) {
+      if (data.project && data.project !== (parentTask.project ?? "")) {
         throw new ActionError("The parent task belongs to a different project.", { parent: "Choose a task of the same project" });
       }
-      projectId = parentTask.project?.toString();
-      milestone = milestone ?? parentTask.milestone?.toString();
+      projectId = parentTask.project ?? undefined;
+      milestone = milestone ?? parentTask.milestone ?? undefined;
     }
-    const project = projectId ? await Project.findOne({ $and: [{ _id: projectId }, projectFilter(user)] }, { manager: 1, title: 1 }).lean() : null;
+    const [project] = projectId
+      ? await db().select({ _id: Project._id, manager: Project.manager, title: Project.title }).from(Project).where(and(eq(Project._id, projectId), projectFilter(user))).limit(1)
+      : [];
     if (projectId && !project) throw new ActionError("The project no longer exists, or you don't have access to it.", { project: "Not found" });
     if (!projectId && !can(user, "tasks.manage")) throw new ActionError("Choose a project.", { project: "Choose a project" });
     if (!canCreateTask(user, project)) throw new ActionError("You don't have permission to create tasks in this project.");
@@ -142,26 +155,29 @@ export async function createTask(input: Record<string, unknown>): Promise<Action
     const status = firstInCategory(settings.taskStatuses, "open") ?? settings.taskStatuses[0]?.key;
     if (!status) throw new ActionError("No task statuses are configured.");
     const taskNo = await nextNumber("task", ID_PREFIX.task, 4);
-    const task = await Task.create({
-      taskNo,
-      project: project?._id,
-      milestone,
-      parent: parentTask?._id,
-      title: data.title,
-      description: data.description,
-      assignees: data.assignees,
-      sharedWith: data.sharedWith,
-      reporter: user._id,
-      reviewer: data.reviewer,
-      priority: data.priority,
-      status,
-      startDate: data.startDate,
-      dueDate: data.dueDate,
-      estimateHours: data.estimateHours ?? 0,
-      dependencies: data.dependencies,
-      isLearning: data.isLearning,
-      history: [historyEntry(user, parentTask ? "Subtask created" : "Task created", { to: optionLabel(settings.taskStatuses, status) })],
-    });
+    const [task] = await db()
+      .insert(Task)
+      .values({
+        taskNo,
+        project: project?._id,
+        milestone,
+        parent: parentTask?._id,
+        title: data.title,
+        description: data.description,
+        assignees: data.assignees,
+        sharedWith: data.sharedWith,
+        reporter: user._id,
+        reviewer: data.reviewer,
+        priority: data.priority,
+        status,
+        startDate: data.startDate,
+        dueDate: data.dueDate,
+        estimateHours: data.estimateHours ?? 0,
+        dependencies: data.dependencies,
+        isLearning: data.isLearning,
+        history: [historyEntry(user, parentTask ? "Subtask created" : "Task created", { to: optionLabel(settings.taskStatuses, status) })],
+      })
+      .returning();
 
     await audit(user, { action: "create", entity: "task", entityId: task._id, ref: taskNo, summary: `Created task ${taskNo}: ${task.title}` });
     await notify(
@@ -172,7 +188,7 @@ export async function createTask(input: Record<string, unknown>): Promise<Action
     if (data.reviewer && !data.assignees.includes(data.reviewer)) {
       await notify([data.reviewer], { type: "task", title: `You will review: ${task.title}`, body: taskNo, link: `/tasks/${task._id}` }, [user._id]);
     }
-    return { id: task._id.toString() };
+    return { id: task._id };
   }, "Task created");
 }
 
@@ -182,37 +198,24 @@ export async function updateTask(id: string, input: Record<string, unknown>): Pr
     const { task, project, caps } = await loadTask(user, id);
     if (!caps.manage) throw new ActionError("You don't have permission to edit this task.");
     const data = parse(taskSchema, input);
-    const projectId = task.project?.toString();
-    await validateTaskInput(data, projectId, task._id.toString());
+    const projectId = task.project ?? undefined;
+    await validateTaskInput(data, projectId, task._id);
 
     const before = {
       title: task.title,
-      description: task.description,
+      description: task.description ?? undefined,
       priority: task.priority,
-      startDate: task.startDate,
-      dueDate: task.dueDate,
+      startDate: task.startDate ?? undefined,
+      dueDate: task.dueDate ?? undefined,
       estimateHours: task.estimateHours,
-      reviewer: task.reviewer?.toString(),
-      milestone: task.milestone?.toString(),
-      assignees: idList(task.assignees).sort().join(","),
-      dependencies: idList(task.dependencies).sort().join(","),
-      sharedWith: idList(task.sharedWith).sort().join(","),
+      reviewer: task.reviewer ?? undefined,
+      milestone: task.milestone ?? undefined,
+      assignees: [...task.assignees].sort().join(","),
+      dependencies: [...task.dependencies].sort().join(","),
+      sharedWith: [...task.sharedWith].sort().join(","),
       isLearning: task.isLearning,
     };
-    const previousAssignees = idList(task.assignees);
-
-    task.title = data.title;
-    task.description = data.description;
-    task.priority = data.priority;
-    task.startDate = data.startDate;
-    task.dueDate = data.dueDate;
-    task.estimateHours = data.estimateHours ?? 0;
-    task.set("reviewer", data.reviewer);
-    task.set("milestone", data.milestone);
-    task.set("assignees", data.assignees);
-    task.set("dependencies", data.dependencies);
-    task.set("sharedWith", data.sharedWith);
-    task.isLearning = data.isLearning;
+    const previousAssignees = [...task.assignees];
 
     const after = {
       title: data.title,
@@ -229,25 +232,41 @@ export async function updateTask(id: string, input: Record<string, unknown>): Pr
       isLearning: data.isLearning,
     };
     const changes = diff(before, after, ["title", "description", "priority", "startDate", "dueDate", "estimateHours", "reviewer", "milestone", "assignees", "dependencies", "sharedWith", "isLearning"]);
-    if (changes.length === 0) return { id: task._id.toString() };
-    task.history.push(historyEntry(user, "Task updated", { note: changes.map((c) => c.field).join(", ") }));
-    await task.save();
+    if (changes.length === 0) return { id: task._id };
+    await db()
+      .update(Task)
+      .set({
+        title: data.title,
+        description: data.description ?? null,
+        priority: data.priority,
+        startDate: data.startDate ?? null,
+        dueDate: data.dueDate ?? null,
+        estimateHours: data.estimateHours ?? 0,
+        reviewer: data.reviewer ?? null,
+        milestone: data.milestone ?? null,
+        assignees: data.assignees,
+        dependencies: data.dependencies,
+        sharedWith: data.sharedWith,
+        isLearning: data.isLearning,
+        history: jsonPush(Task.history, historyEntry(user, "Task updated", { note: changes.map((c) => c.field).join(", ") })),
+      })
+      .where(eq(Task._id, task._id));
 
     await audit(user, { action: "update", entity: "task", entityId: task._id, ref: task.taskNo, summary: `Updated task ${task.taskNo}`, changes });
     const added = data.assignees.filter((a) => !previousAssignees.includes(a));
     const removed = previousAssignees.filter((a) => !data.assignees.includes(a));
     if (added.length) {
       await audit(user, { action: "assign", entity: "task", entityId: task._id, ref: task.taskNo, summary: `Assigned ${task.taskNo} to ${added.length} ${added.length === 1 ? "person" : "people"}` });
-      await notify(added, { type: "task", title: `Task assigned to you: ${task.title}`, body: `${task.taskNo}${project ? ` · ${project.title}` : ""}`, link: `/tasks/${task._id}` }, [user._id]);
+      await notify(added, { type: "task", title: `Task assigned to you: ${data.title}`, body: `${task.taskNo}${project ? ` · ${project.title}` : ""}`, link: `/tasks/${task._id}` }, [user._id]);
     }
     if (removed.length) {
-      await notify(removed, { type: "task", title: `You were removed from: ${task.title}`, body: task.taskNo, link: `/tasks/${task._id}` }, [user._id]);
+      await notify(removed, { type: "task", title: `You were removed from: ${data.title}`, body: task.taskNo, link: `/tasks/${task._id}` }, [user._id]);
     }
     const stillOn = data.assignees.filter((a) => !added.includes(a));
     if (changes.some((c) => ["dueDate", "priority", "title"].includes(c.field)) && stillOn.length) {
-      await notify(stillOn, { type: "task", title: `Task updated: ${task.title}`, body: `${task.taskNo} · ${changes.map((c) => c.field).join(", ")} changed`, link: `/tasks/${task._id}` }, [user._id]);
+      await notify(stillOn, { type: "task", title: `Task updated: ${data.title}`, body: `${task.taskNo} · ${changes.map((c) => c.field).join(", ")} changed`, link: `/tasks/${task._id}` }, [user._id]);
     }
-    return { id: task._id.toString() };
+    return { id: task._id };
   }, "Task updated");
 }
 
@@ -275,26 +294,29 @@ export async function changeTaskStatus(id: string, status: string, rawNote?: str
 
     const targetCat = categoryOf(options, status);
     if (targetCat === "done") {
-      const unmet = await Task.find({ _id: { $in: task.dependencies }, status: { $nin: keysInCategories(options, TASK_CLOSED_CATEGORIES) } }, { taskNo: 1 }).lean();
+      const unmet = await db()
+        .select({ taskNo: Task.taskNo })
+        .from(Task)
+        .where(and(inList(Task._id, task.dependencies), notInList(Task.status, keysInCategories(options, TASK_CLOSED_CATEGORIES))));
       if (unmet.length) throw new ActionError(`Finish the dependencies first: ${unmet.map((t) => t.taskNo).join(", ")}.`);
     }
 
     const previous = task.status;
     const wasDone = categoryOf(options, previous) === "done";
-    task.status = status;
+    const patch: SQLiteUpdateSetSource<typeof Task> = { status };
     if (targetCat === "done") {
-      task.progress = 100;
-      task.completedAt = new Date();
+      patch.progress = 100;
+      patch.completedAt = new Date();
     } else if (wasDone) {
-      task.completedAt = undefined;
+      patch.completedAt = null;
     }
     if (targetCat === "blocked") {
-      if (note?.trim()) task.blocker = note.trim();
+      if (note?.trim()) patch.blocker = note.trim();
     } else if (categoryOf(options, previous) === "blocked") {
-      task.blocker = undefined;
+      patch.blocker = null;
     }
-    task.history.push(historyEntry(user, "Status changed", { from: optionLabel(options, previous), to: optionLabel(options, status), note: note?.trim() || undefined }));
-    await task.save();
+    patch.history = jsonPush(Task.history, historyEntry(user, "Status changed", { from: optionLabel(options, previous), to: optionLabel(options, status), note: note?.trim() || undefined }));
+    await db().update(Task).set(patch).where(eq(Task._id, task._id));
 
     await audit(user, { action: "status", entity: "task", entityId: task._id, ref: task.taskNo, summary: `${task.taskNo}: ${optionLabel(options, previous)} → ${optionLabel(options, status)}` });
     const text = `${task.taskNo} moved to ${optionLabel(options, status)}`;
@@ -320,9 +342,10 @@ export async function updateTaskProgress(id: string, progress: number): Promise<
     const rounded = Math.round(value);
     if (rounded === task.progress) return null;
     const previous = task.progress;
-    task.progress = rounded;
-    task.history.push(historyEntry(user, "Progress updated", { from: `${previous}%`, to: `${rounded}%` }));
-    await task.save();
+    await db()
+      .update(Task)
+      .set({ progress: rounded, history: jsonPush(Task.history, historyEntry(user, "Progress updated", { from: `${previous}%`, to: `${rounded}%` })) })
+      .where(eq(Task._id, task._id));
     return null;
   }, "Progress saved");
 }
@@ -333,9 +356,10 @@ export async function updateTaskBlocker(id: string, blocker: string): Promise<Ac
     const { task, caps } = await loadTask(user, id);
     if (!caps.isAssignee && !caps.manage) throw new ActionError("Only the assignees can update the blocker note.");
     const text = blocker.trim().slice(0, 1000);
-    task.blocker = text || undefined;
-    task.history.push(historyEntry(user, text ? "Blocker noted" : "Blocker cleared", { note: text || undefined }));
-    await task.save();
+    await db()
+      .update(Task)
+      .set({ blocker: text || null, history: jsonPush(Task.history, historyEntry(user, text ? "Blocker noted" : "Blocker cleared", { note: text || undefined })) })
+      .where(eq(Task._id, task._id));
     return null;
   }, "Blocker note saved");
 }
@@ -355,23 +379,26 @@ export async function addSubtask(parentId: string, input: Record<string, unknown
     const status = firstInCategory(settings.taskStatuses, "open") ?? settings.taskStatuses[0]?.key;
     if (!status) throw new ActionError("No task statuses are configured.");
     const taskNo = await nextNumber("task", ID_PREFIX.task, 4);
-    const sub = await Task.create({
-      taskNo,
-      project: parent.project,
-      milestone: parent.milestone,
-      parent: parent._id,
-      title: data.title,
-      assignees: parent.assignees,
-      reporter: user._id,
-      reviewer: parent.reviewer,
-      priority: parent.priority,
-      status,
-      dueDate: parent.dueDate,
-      history: [historyEntry(user, "Subtask created", { note: `Added under ${parent.taskNo}` })],
-    });
+    const [sub] = await db()
+      .insert(Task)
+      .values({
+        taskNo,
+        project: parent.project,
+        milestone: parent.milestone,
+        parent: parent._id,
+        title: data.title,
+        assignees: parent.assignees,
+        reporter: user._id,
+        reviewer: parent.reviewer,
+        priority: parent.priority,
+        status,
+        dueDate: parent.dueDate,
+        history: [historyEntry(user, "Subtask created", { note: `Added under ${parent.taskNo}` })],
+      })
+      .returning();
     await audit(user, { action: "create", entity: "task", entityId: sub._id, ref: taskNo, summary: `Created subtask ${taskNo} under ${parent.taskNo}` });
     await notify(parent.assignees, { type: "task", title: `New subtask: ${data.title}`, body: `${taskNo} under ${parent.taskNo}${project ? ` · ${project.title}` : ""}`, link: `/tasks/${sub._id}` }, [user._id]);
-    return { id: sub._id.toString() };
+    return { id: sub._id };
   }, "Subtask added");
 }
 
@@ -381,8 +408,10 @@ export async function addTaskComment(id: string, input: Record<string, unknown>)
     const data = parse(z.object({ text: zs.text("Comment", 5000), attachments: zs.ids() }), input);
     const { task, project } = await loadTask(user, id);
     const attachments = await resolveFileRefs(user, data.attachments);
-    task.comments.push({ user: user._id, userName: user.name, text: data.text, attachments, at: new Date() });
-    await task.save();
+    await db()
+      .update(Task)
+      .set({ comments: jsonPush(Task.comments, { _id: newId(), user: user._id, userName: user.name, text: data.text, attachments: withIds(attachments), at: new Date() }) })
+      .where(eq(Task._id, task._id));
     await notify(recipients(task, project?.manager), { type: "task", title: `${user.name} commented on ${task.taskNo}`, body: data.text.slice(0, 200), link: `/tasks/${task._id}` }, [user._id]);
     return null;
   }, "Comment added");
@@ -396,9 +425,13 @@ export async function addTaskAttachments(id: string, input: Record<string, unkno
     if (!caps.attach) throw new ActionError("You can't attach files to this task.");
     const files = await resolveFileRefs(user, data.attachments);
     if (files.length === 0) throw new ActionError("Choose at least one file to attach.");
-    task.attachments.push(...files);
-    task.history.push(historyEntry(user, "Files attached", { note: files.map((f) => f.name).join(", ") }));
-    await task.save();
+    await db()
+      .update(Task)
+      .set({
+        attachments: jsonPush(Task.attachments, ...withIds(files)),
+        history: jsonPush(Task.history, historyEntry(user, "Files attached", { note: files.map((f) => f.name).join(", ") })),
+      })
+      .where(eq(Task._id, task._id));
     return null;
   }, "Files attached");
 }
@@ -434,13 +467,18 @@ export async function submitWork(id: string, input: Record<string, unknown>): Pr
 
     const attachments = await resolveFileRefs(user, data.attachments);
     const previous = task.status;
-    task.submissions.push({ note: data.note, link: data.link, attachments, submittedBy: user._id, submittedByName: user.name, submittedAt: new Date(), reviewStatus: "pending" });
-    task.status = reviewStatus;
-    task.history.push(historyEntry(user, "Work submitted for review", { from: optionLabel(settings.taskStatuses, previous), to: optionLabel(settings.taskStatuses, reviewStatus), note: data.note.slice(0, 300) }));
-    await task.save();
+    const submission: TaskSubmission = { _id: newId(), note: data.note, link: data.link, attachments: withIds(attachments), submittedBy: user._id, submittedByName: user.name, submittedAt: new Date(), reviewStatus: "pending" };
+    await db()
+      .update(Task)
+      .set({
+        submissions: jsonPush(Task.submissions, submission),
+        status: reviewStatus,
+        history: jsonPush(Task.history, historyEntry(user, "Work submitted for review", { from: optionLabel(settings.taskStatuses, previous), to: optionLabel(settings.taskStatuses, reviewStatus), note: data.note.slice(0, 300) })),
+      })
+      .where(eq(Task._id, task._id));
 
     await audit(user, { action: "submit", entity: "task", entityId: task._id, ref: task.taskNo, summary: `${user.name} submitted work on ${task.taskNo} for review` });
-    const targets = [task.reviewer, task.reporter, project?.manager].filter((x) => x && x.toString() !== user.id);
+    const targets = [task.reviewer, task.reporter, project?.manager].filter((x) => x && x !== user.id);
     if (targets.length) {
       await notify(targets, { type: "task", title: `Work submitted for review: ${task.title}`, body: `${user.name} · ${task.taskNo}`, link: `/tasks/${task._id}`, actionable: true }, [user._id]);
     } else {
@@ -466,10 +504,14 @@ export async function approveSubmission(id: string, input: Record<string, unknow
     const { task, settings } = await reviewable(user, id);
     const doneStatus = firstInCategory(settings.taskStatuses, "done");
     if (!doneStatus) throw new ActionError("No done status is configured. Ask an administrator to add one.");
-    const unmet = await Task.find({ _id: { $in: task.dependencies }, status: { $nin: keysInCategories(settings.taskStatuses, TASK_CLOSED_CATEGORIES) } }, { taskNo: 1 }).lean();
+    const unmet = await db()
+      .select({ taskNo: Task.taskNo })
+      .from(Task)
+      .where(and(inList(Task._id, task.dependencies), notInList(Task.status, keysInCategories(settings.taskStatuses, TASK_CLOSED_CATEGORIES))));
     if (unmet.length) throw new ActionError(`Finish the dependencies first: ${unmet.map((t) => t.taskNo).join(", ")}.`);
 
-    const pending = [...task.submissions].reverse().find((s) => s.reviewStatus === "pending");
+    const submissions = [...task.submissions];
+    const pending = [...submissions].reverse().find((s) => s.reviewStatus === "pending");
     if (pending) {
       pending.reviewStatus = "approved";
       pending.reviewedBy = user._id;
@@ -479,18 +521,24 @@ export async function approveSubmission(id: string, input: Record<string, unknow
       if (data.rating !== undefined) pending.rating = Math.round(data.rating);
     }
     const previous = task.status;
-    task.status = doneStatus;
-    task.progress = 100;
-    task.completedAt = new Date();
-    task.blocker = undefined;
-    task.history.push(
-      historyEntry(user, "Work approved", {
-        from: optionLabel(settings.taskStatuses, previous),
-        to: optionLabel(settings.taskStatuses, doneStatus),
-        note: [data.rating ? `Rating ${Math.round(data.rating)}/5` : "", data.note ?? ""].filter(Boolean).join(" · ") || undefined,
-      }),
-    );
-    await task.save();
+    await db()
+      .update(Task)
+      .set({
+        ...(pending ? { submissions } : {}),
+        status: doneStatus,
+        progress: 100,
+        completedAt: new Date(),
+        blocker: null,
+        history: jsonPush(
+          Task.history,
+          historyEntry(user, "Work approved", {
+            from: optionLabel(settings.taskStatuses, previous),
+            to: optionLabel(settings.taskStatuses, doneStatus),
+            note: [data.rating ? `Rating ${Math.round(data.rating)}/5` : "", data.note ?? ""].filter(Boolean).join(" · ") || undefined,
+          }),
+        ),
+      })
+      .where(eq(Task._id, task._id));
 
     await audit(user, { action: "approve", entity: "task", entityId: task._id, ref: task.taskNo, summary: `Approved work on ${task.taskNo}${data.rating ? ` (rating ${Math.round(data.rating)}/5)` : ""}` });
     await notify(task.assignees, { type: "task", title: `Work approved: ${task.title}`, body: data.note ?? `${task.taskNo} is done`, link: `/tasks/${task._id}` }, [user._id]);
@@ -506,7 +554,8 @@ export async function requestTaskChanges(id: string, note: string): Promise<Acti
     const activeStatus = firstInCategory(settings.taskStatuses, "active") ?? firstInCategory(settings.taskStatuses, "open");
     if (!activeStatus) throw new ActionError("No active status is configured.");
 
-    const pending = [...task.submissions].reverse().find((s) => s.reviewStatus === "pending");
+    const submissions = [...task.submissions];
+    const pending = [...submissions].reverse().find((s) => s.reviewStatus === "pending");
     if (pending) {
       pending.reviewStatus = "changes_requested";
       pending.reviewedBy = user._id;
@@ -515,9 +564,14 @@ export async function requestTaskChanges(id: string, note: string): Promise<Acti
       pending.reviewNote = reason;
     }
     const previous = task.status;
-    task.status = activeStatus;
-    task.history.push(historyEntry(user, "Changes requested", { from: optionLabel(settings.taskStatuses, previous), to: optionLabel(settings.taskStatuses, activeStatus), note: reason }));
-    await task.save();
+    await db()
+      .update(Task)
+      .set({
+        ...(pending ? { submissions } : {}),
+        status: activeStatus,
+        history: jsonPush(Task.history, historyEntry(user, "Changes requested", { from: optionLabel(settings.taskStatuses, previous), to: optionLabel(settings.taskStatuses, activeStatus), note: reason })),
+      })
+      .where(eq(Task._id, task._id));
 
     await audit(user, { action: "reject", entity: "task", entityId: task._id, ref: task.taskNo, summary: `Requested changes on ${task.taskNo}` });
     await notify(task.assignees, { type: "task", title: `Changes requested: ${task.title}`, body: reason.slice(0, 200), link: `/tasks/${task._id}`, actionable: true, priority: "high" }, [user._id]);

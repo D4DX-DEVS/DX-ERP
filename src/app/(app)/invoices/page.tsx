@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { Download, Plus } from "lucide-react";
+import { and, asc, desc, isNotNull } from "drizzle-orm";
 import { can, requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
-import { Client, Invoice, Project } from "@/lib/models";
+import { db } from "@/lib/db";
+import { Client, Invoice, Payment, Project } from "@/lib/models";
 import { pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
 import { inr, plural } from "@/lib/format";
 import { fmtDate, todayKey } from "@/lib/time";
@@ -48,7 +49,6 @@ function exportHref(sp: SearchParams, format: string): string {
 export default async function InvoicesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePagePermission("invoices.view");
   const sp = await searchParams;
-  await connectDB();
   const today = todayKey();
   const page = pageParam(sp);
   const fy = fiscalRange(today);
@@ -56,31 +56,45 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
 
   // Restricted clients (FRS §3.2) are hidden from the list, the totals and the filter options, like the finance reports.
   const hidden = await hiddenClientIds(user);
-  const scope = notHiddenClient(hidden);
+  const scope = notHiddenClient(hidden, Invoice.client);
+  const paymentScope = notHiddenClient(hidden, Payment.client);
   const filter = invoiceFilter(sp, today, hidden);
   const baseNoStatus = invoiceFilter({ ...sp, status: "" }, today, hidden);
-  const withBase = (extra: Record<string, unknown>) => (Object.keys(baseNoStatus).length ? { $and: [baseNoStatus, extra] } : extra);
 
   const [rows, total, allCount, bucketCounts, fyInvoiced, monthInvoiced, fyReceived, monthReceived, receivables, clients, projects] = await Promise.all([
-    Invoice.find(filter, { invoiceNo: 1, draftNo: 1, client: 1, project: 1, issueDate: 1, dueDate: 1, total: 1, balance: 1, status: 1, items: 1 })
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * PAGE_SIZE)
+    db()
+      .select({
+        _id: Invoice._id,
+        invoiceNo: Invoice.invoiceNo,
+        draftNo: Invoice.draftNo,
+        client: Invoice.client,
+        project: Invoice.project,
+        issueDate: Invoice.issueDate,
+        dueDate: Invoice.dueDate,
+        total: Invoice.total,
+        balance: Invoice.balance,
+        status: Invoice.status,
+        items: Invoice.items,
+      })
+      .from(Invoice)
+      .where(filter)
+      .orderBy(desc(Invoice.createdAt))
       .limit(PAGE_SIZE)
-      .lean(),
-    Invoice.countDocuments(filter),
-    Invoice.countDocuments(baseNoStatus),
-    Promise.all(INVOICE_BUCKETS.map((b) => Invoice.countDocuments(withBase(bucketFilter(b, today))))),
+      .offset((page - 1) * PAGE_SIZE),
+    db().$count(Invoice, filter),
+    db().$count(Invoice, baseNoStatus),
+    Promise.all(INVOICE_BUCKETS.map((b) => db().$count(Invoice, and(baseNoStatus, bucketFilter(b, today))))),
     invoicedBetween(fy.from, fy.to, scope),
     invoicedBetween(month.from, month.to, scope),
-    receivedBetween(fy.from, fy.to, scope),
-    receivedBetween(month.from, month.to, scope),
+    receivedBetween(fy.from, fy.to, paymentScope),
+    receivedBetween(month.from, month.to, paymentScope),
     loadReceivables(today, scope),
-    Client.find(clientScope(user), { name: 1 }).sort({ name: 1 }).limit(1000).lean(),
-    Project.find({ client: { $exists: true, $ne: null } }, { projectNo: 1, title: 1 }).sort({ createdAt: -1 }).limit(500).lean(),
+    db().select({ _id: Client._id, name: Client.name }).from(Client).where(clientScope(user)).orderBy(asc(Client.name)).limit(1000),
+    db().select({ _id: Project._id, projectNo: Project.projectNo, title: Project.title }).from(Project).where(isNotNull(Project.client)).orderBy(desc(Project.createdAt)).limit(500),
   ]);
 
-  const clientName = new Map(clients.map((c) => [c._id.toString(), c.name]));
-  const projectNo = new Map(projects.map((p) => [p._id.toString(), p.projectNo]));
+  const clientName = new Map(clients.map((c) => [c._id, c.name]));
+  const projectNo = new Map(projects.map((p) => [p._id, p.projectNo]));
 
   const outstanding = receivables.reduce((s, r) => s + r.balance, 0);
   const overdue = receivables.filter((r) => r.daysPastDue > 0);
@@ -176,8 +190,8 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
           />
           <FilterBar>
             <SearchInput placeholder="Search invoice number…" />
-            <SelectFilter param="client" allLabel="All clients" label="Client" options={clients.map((c) => ({ value: c._id.toString(), label: c.name }))} className="w-44" />
-            <SelectFilter param="project" allLabel="All projects" label="Project" options={projects.map((p) => ({ value: p._id.toString(), label: `${p.projectNo} · ${p.title}` }))} className="w-44" />
+            <SelectFilter param="client" allLabel="All clients" label="Client" options={clients.map((c) => ({ value: c._id, label: c.name }))} className="w-44" />
+            <SelectFilter param="project" allLabel="All projects" label="Project" options={projects.map((p) => ({ value: p._id, label: `${p.projectNo} · ${p.title}` }))} className="w-44" />
             <DateFilter param="from" label="Issued from" />
             <DateFilter param="to" label="to" />
             <ClearFilters />
@@ -207,16 +221,16 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             {rows.map((r) => {
               const status = effectiveStatus(r, today);
               const isOverdue = status === "overdue";
-              const ref = [r.items[0]?.description, r.project ? projectNo.get(r.project.toString()) : undefined].filter(Boolean).join(" · ");
+              const ref = [r.items[0]?.description, r.project ? projectNo.get(r.project) : undefined].filter(Boolean).join(" · ");
               return (
-                <Tr key={r._id.toString()}>
+                <Tr key={r._id}>
                   <Td>
                     <Link href={`/invoices/${r._id}`} className="font-mono text-xs font-semibold text-brand-600 hover:text-brand-800">
                       {r.invoiceNo ?? r.draftNo}
                     </Link>
                   </Td>
                   <Td>
-                    <div className="font-semibold">{clientName.get(r.client.toString()) ?? "Unknown client"}</div>
+                    <div className="font-semibold">{clientName.get(r.client) ?? "Unknown client"}</div>
                     {ref && <div className="max-w-xs truncate text-xs text-muted">{ref}</div>}
                   </Td>
                   <Td className="whitespace-nowrap text-ink-2">{r.status === "draft" ? "—" : fmtDate(r.issueDate)}</Td>

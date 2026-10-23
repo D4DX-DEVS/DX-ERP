@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { forbidden } from "next/navigation";
 import { Download, Plus } from "lucide-react";
+import { and, asc, desc, eq, gte, isNotNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import { can, isStaff, requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Department, Expense, Project } from "@/lib/models";
+import { inList, jsonHasField } from "@/lib/sql";
 import { getSettings } from "@/lib/settings";
 import { namesFor, peopleOptions } from "@/lib/people";
 import { pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
@@ -30,8 +32,10 @@ interface Total {
   count: number;
 }
 
-async function totalOf(match: Record<string, unknown>): Promise<Total> {
-  const [row] = await Expense.aggregate<Total>([{ $match: match }, { $group: { _id: null, amount: { $sum: "$amount" }, count: { $sum: 1 } } }]);
+const sumAmount = sql<number>`coalesce(sum(${Expense.amount}), 0)`.mapWith(Number);
+
+async function totalOf(match: SQL | undefined): Promise<Total> {
+  const [row] = await db().select({ amount: sumAmount, count: sql<number>`count(*)`.mapWith(Number) }).from(Expense).where(match);
   return { amount: row?.amount ?? 0, count: row?.count ?? 0 };
 }
 
@@ -43,7 +47,6 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
   const view = resolveView(user, param(sp, "view"));
   if (!view) forbidden();
 
-  await connectDB();
   const viewAll = can(user, "expenses.view_all");
   const approve = can(user, "expenses.approve");
   const pay = can(user, "expenses.pay");
@@ -52,34 +55,65 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
   const month = monthRange(monthKey());
   const page = pageParam(sp);
   const { filter, withoutStatus } = expenseFilters(user, view, sp);
-  const scope: Record<string, unknown> = viewAll ? {} : { user: user._id };
+  const scope = viewAll ? undefined : eq(Expense.user, user._id);
   const showAside = view === "mine" || view === "all";
   const settings = await getSettings();
 
   const [rows, total, byStatus, byCategory, recorded, waiting, toReimburse, charged, approvalCount, payCount, pendingForMe, projects, departments, people] = await Promise.all([
-    Expense.find(filter).sort({ date: -1, createdAt: -1 }).skip((page - 1) * PAGE_SIZE).limit(PAGE_SIZE).lean(),
-    Expense.countDocuments(filter),
-    Expense.aggregate<{ _id: string; amount: number; count: number }>([{ $match: withoutStatus }, { $group: { _id: "$status", amount: { $sum: "$amount" }, count: { $sum: 1 } } }]),
-    Expense.aggregate<{ _id: string; amount: number; count: number }>([{ $match: filter }, { $group: { _id: "$category", amount: { $sum: "$amount" }, count: { $sum: 1 } } }, { $sort: { amount: -1 } }]),
-    totalOf({ ...scope, status: { $in: ["submitted", "approved", "paid"] }, date: { $gte: month.from, $lte: month.to } }),
-    totalOf({ ...scope, status: "submitted" }),
-    totalOf({ ...scope, status: "approved", type: "reimbursable" }),
-    Expense.aggregate<{ _id: string; amount: number }>([
-      { $match: { ...scope, project: { $exists: true, $ne: null }, status: { $in: ["approved", "paid"] }, date: { $gte: month.from, $lte: month.to } } },
-      { $group: { _id: "$project", amount: { $sum: "$amount" } } },
-    ]),
-    approve ? Expense.countDocuments({ status: "submitted", user: { $ne: user._id } }) : Promise.resolve(0),
-    pay ? Expense.countDocuments({ status: "approved" }) : Promise.resolve(0),
-    approve && view !== "approve" ? Expense.find({ status: "submitted", user: { $ne: user._id } }).sort({ submittedAt: 1 }).limit(5).lean() : Promise.resolve([]),
+    db()
+      .select({
+        _id: Expense._id,
+        description: Expense.description,
+        expenseNo: Expense.expenseNo,
+        date: Expense.date,
+        category: Expense.category,
+        project: Expense.project,
+        type: Expense.type,
+        user: Expense.user,
+        amount: Expense.amount,
+        receipts: Expense.receipts,
+        status: Expense.status,
+      })
+      .from(Expense)
+      .where(filter)
+      .orderBy(desc(Expense.date), desc(Expense.createdAt))
+      .limit(PAGE_SIZE)
+      .offset((page - 1) * PAGE_SIZE),
+    db().$count(Expense, filter),
+    db().select({ status: Expense.status, amount: sumAmount, count: sql<number>`count(*)`.mapWith(Number) }).from(Expense).where(withoutStatus).groupBy(Expense.status),
+    db().select({ category: Expense.category, amount: sumAmount, count: sql<number>`count(*)`.mapWith(Number) }).from(Expense).where(filter).groupBy(Expense.category).orderBy(desc(sumAmount)),
+    totalOf(and(scope, inList(Expense.status, ["submitted", "approved", "paid"]), gte(Expense.date, month.from), lte(Expense.date, month.to))),
+    totalOf(and(scope, eq(Expense.status, "submitted"))),
+    totalOf(and(scope, eq(Expense.status, "approved"), eq(Expense.type, "reimbursable"))),
+    db()
+      .select({ project: Expense.project, amount: sumAmount })
+      .from(Expense)
+      .where(and(scope, isNotNull(Expense.project), inList(Expense.status, ["approved", "paid"]), gte(Expense.date, month.from), lte(Expense.date, month.to)))
+      .groupBy(Expense.project),
+    approve ? db().$count(Expense, and(eq(Expense.status, "submitted"), ne(Expense.user, user._id))) : Promise.resolve(0),
+    pay ? db().$count(Expense, eq(Expense.status, "approved")) : Promise.resolve(0),
+    approve && view !== "approve"
+      ? db()
+          .select({ _id: Expense._id, user: Expense.user, amount: Expense.amount, category: Expense.category, receipts: Expense.receipts })
+          .from(Expense)
+          .where(and(eq(Expense.status, "submitted"), ne(Expense.user, user._id)))
+          .orderBy(asc(Expense.submittedAt))
+          .limit(5)
+      : Promise.resolve([]),
     // Only projects the viewer can see (the filter must not list every project to every claimant).
-    Project.find(can(user, "projects.view_all") ? {} : { $or: [{ manager: user._id }, { "team.user": user._id }] }, { projectNo: 1, title: 1 }).sort({ createdAt: -1 }).limit(500).lean(),
-    Department.find({}, { name: 1 }).sort({ name: 1 }).lean(),
+    db()
+      .select({ _id: Project._id, projectNo: Project.projectNo, title: Project.title })
+      .from(Project)
+      .where(can(user, "projects.view_all") ? undefined : or(eq(Project.manager, user._id), jsonHasField(Project.team, "user", user._id)))
+      .orderBy(desc(Project.createdAt))
+      .limit(500),
+    db().select({ _id: Department._id, name: Department.name }).from(Department).orderBy(asc(Department.name)),
     view === "all" ? peopleOptions({ includeExited: true }) : Promise.resolve([]),
   ]);
 
   const names = await namesFor([...rows.map((r) => r.user), ...pendingForMe.map((r) => r.user)]);
-  const projectLabel = new Map(projects.map((p) => [p._id.toString(), p.projectNo]));
-  const statusTotals = new Map(byStatus.map((s) => [s._id, s]));
+  const projectLabel = new Map(projects.map((p) => [p._id, p.projectNo]));
+  const statusTotals = new Map(byStatus.map((s) => [s.status, s]));
   const chargedTotal = charged.reduce((s, c) => s + c.amount, 0);
   const hasFilters = ["status", "category", "project", "department", "person", "from", "to", "q"].some((k) => param(sp, k));
   const scopeLabel = viewAll ? "Everyone" : "You";
@@ -156,8 +190,8 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
             <FilterBar>
               <SearchInput placeholder="Search number, description, vendor…" />
               <SelectFilter param="category" allLabel="All categories" label="Category" options={settings.expenseCategories.map((c) => ({ value: c, label: c }))} className="w-44" />
-              <SelectFilter param="project" allLabel="All projects" label="Project" options={projects.map((p) => ({ value: p._id.toString(), label: `${p.projectNo} · ${p.title}` }))} className="w-44" />
-              <SelectFilter param="department" allLabel="All departments" label="Department" options={departments.map((d) => ({ value: d._id.toString(), label: d.name }))} className="w-44" />
+              <SelectFilter param="project" allLabel="All projects" label="Project" options={projects.map((p) => ({ value: p._id, label: `${p.projectNo} · ${p.title}` }))} className="w-44" />
+              <SelectFilter param="department" allLabel="All departments" label="Department" options={departments.map((d) => ({ value: d._id, label: d.name }))} className="w-44" />
               {view === "all" && <SelectFilter param="person" allLabel="Everyone" label="Person" options={people.map((p) => ({ value: p.id, label: p.name }))} className="w-44" />}
               <DateFilter param="from" label="From" />
               <DateFilter param="to" label="to" />
@@ -189,7 +223,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
                 </EmptyRow>
               )}
               {rows.map((r) => {
-                const id = r._id.toString();
+                const id = r._id;
                 return (
                   <Tr key={id}>
                     <Td>
@@ -202,9 +236,9 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
                     </Td>
                     <Td>
                       <div>{r.category}</div>
-                      <div className="text-xs text-muted">{r.project ? (projectLabel.get(r.project.toString()) ?? "Project") : EXPENSE_TYPE_LABEL[r.type]}</div>
+                      <div className="text-xs text-muted">{r.project ? (projectLabel.get(r.project) ?? "Project") : EXPENSE_TYPE_LABEL[r.type]}</div>
                     </Td>
-                    {showPerson && <Td className="text-ink-2">{names.get(r.user.toString()) ?? "—"}</Td>}
+                    {showPerson && <Td className="text-ink-2">{names.get(r.user) ?? "—"}</Td>}
                     <Td align="right" className="font-semibold">
                       {inr(r.amount, true)}
                     </Td>
@@ -241,7 +275,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
             <Card>
               <CardHeader title="By category" subtitle={hasFilters ? "For the current filters" : "All time"} />
               <CardBody>
-                {byCategory.length === 0 ? <p className="text-[13px] text-muted">No expenses to total yet.</p> : <HBarList format="inr" rows={byCategory.map((c) => ({ label: c._id, value: c.amount, hint: `${c._id} · ${plural(c.count, "entry", "entries")}` }))} />}
+                {byCategory.length === 0 ? <p className="text-[13px] text-muted">No expenses to total yet.</p> : <HBarList format="inr" rows={byCategory.map((c) => ({ label: c.category, value: c.amount, hint: `${c.category} · ${plural(c.count, "entry", "entries")}` }))} />}
               </CardBody>
             </Card>
           )}
@@ -269,18 +303,18 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
               <CardHeader title="Waiting for your approval" href="/expenses?view=approve" hrefLabel="Open queue" />
               <CardBody className="flex flex-col">
                 {pendingForMe.map((r) => (
-                  <div key={r._id.toString()} className="flex flex-col gap-2 border-t border-line-soft py-3 first:border-t-0 first:pt-0">
+                  <div key={r._id} className="flex flex-col gap-2 border-t border-line-soft py-3 first:border-t-0 first:pt-0">
                     <div className="text-[13px]">
                       <Link href={`/expenses/${r._id}`} className="font-semibold text-ink hover:text-brand-600">
-                        {names.get(r.user.toString()) ?? "Someone"} · {inr(r.amount, true)}
+                        {names.get(r.user) ?? "Someone"} · {inr(r.amount, true)}
                       </Link>
                       <div className="text-muted">
                         {r.category} · {r.receipts.length ? "receipt attached" : "no receipt"}
                       </div>
                     </div>
                     <div className="flex gap-2">
-                      <RejectExpenseButton id={r._id.toString()} size="sm" />
-                      <ApproveExpenseButton id={r._id.toString()} size="sm" />
+                      <RejectExpenseButton id={r._id} size="sm" />
+                      <ApproveExpenseButton id={r._id} size="sm" />
                     </div>
                   </div>
                 ))}

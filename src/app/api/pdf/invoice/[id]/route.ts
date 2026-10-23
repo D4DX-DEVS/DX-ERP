@@ -1,5 +1,6 @@
+import { eq } from "drizzle-orm";
 import { can, getCurrentUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Client, Contract, Invoice, Project } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
 import { isObjectId } from "@/lib/validation";
@@ -23,14 +24,17 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
   const { id } = await ctx.params;
   if (!isObjectId(id)) return new Response("Not found", { status: 404 });
 
-  await connectDB();
-  const inv = await Invoice.findById(id).lean();
+  const [inv] = await db().select().from(Invoice).where(eq(Invoice._id, id)).limit(1);
   if (!inv) return new Response("Not found", { status: 404 });
-  const [settings, client, project, contract] = await Promise.all([
+  const [settings, [client], [project], [contract]] = await Promise.all([
     getSettings(),
-    Client.findById(inv.client, { name: 1, address: 1, gstin: 1, email: 1, confidential: 1, owner: 1 }).lean(),
-    inv.project ? Project.findById(inv.project, { projectNo: 1, title: 1, milestones: 1 }).lean() : null,
-    inv.contract && can(user, "contracts.view") ? Contract.findById(inv.contract, { contractNo: 1 }).lean() : null,
+    db()
+      .select({ name: Client.name, address: Client.address, gstin: Client.gstin, email: Client.email, confidential: Client.confidential, owner: Client.owner })
+      .from(Client)
+      .where(eq(Client._id, inv.client))
+      .limit(1),
+    inv.project ? db().select({ projectNo: Project.projectNo, title: Project.title, milestones: Project.milestones }).from(Project).where(eq(Project._id, inv.project)).limit(1) : [],
+    inv.contract && can(user, "contracts.view") ? db().select({ contractNo: Contract.contractNo }).from(Contract).where(eq(Contract._id, inv.contract)).limit(1) : [],
   ]);
   if (client && !canSeeClient(user, client)) return new Response("You don't have access to this client.", { status: 403 });
 
@@ -49,10 +53,10 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
   // --- bill to / reference ------------------------------------------------------------------------
   const snap = inv.billingSnapshot;
   // Once issued, only the frozen snapshot is used so a printed invoice never changes after the client record is edited.
-  const gstin = snap ? snap.gstin : client?.gstin;
-  const email = snap ? snap.email : client?.email;
-  const billTo = [snap ? snap.name : (client?.name ?? "Client"), ...(snap ? (snap.address ? [snap.address] : []) : addressLines(client?.address)), gstin ? `GSTIN ${gstin}` : "", email ?? ""].filter(Boolean);
-  const milestone = project?.milestones.find((m) => m._id.toString() === inv.milestone?.toString());
+  const gstin = snap ? snap.gstin : (client?.gstin ?? undefined);
+  const email = snap ? snap.email : (client?.email ?? undefined);
+  const billTo = [snap ? snap.name : (client?.name ?? "Client"), ...(snap ? (snap.address ? [snap.address] : []) : addressLines(client?.address ?? undefined)), gstin ? `GSTIN ${gstin}` : "", email ?? ""].filter(Boolean);
+  const milestone = project?.milestones.find((m) => m._id === inv.milestone);
   const reference = [project ? `Project ${project.projectNo}` : "", contract ? `Contract ${contract.contractNo}` : "", milestone ? `Milestone: ${milestone.title}` : "", inv.placeOfSupply ? `Place of supply: ${inv.placeOfSupply}` : ""].filter(Boolean);
 
   let y = b.y;

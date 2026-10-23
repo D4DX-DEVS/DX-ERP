@@ -1,9 +1,12 @@
 import "server-only";
 import { can, type CurrentUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
-import { Issue, Project, Task, TimesheetEntry, User, ISSUE_STATUSES, type ITask } from "@/lib/models";
-import type { Types } from "mongoose";
+import { and, asc, count, desc, eq, gte, isNotNull, lt, lte, ne, or, sql, type SQL } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { Issue, Project, Task, TimesheetEntry, ISSUE_STATUSES, type Id, type IssueSeverity, type IssueStatus } from "@/lib/models";
+import { directReportIds } from "@/lib/people";
 import { getSettings } from "@/lib/settings";
+import { inList, jsonHas, notInList } from "@/lib/sql";
+import { myProjectIds } from "@/lib/work-access";
 import { optionLabel, statusLabel } from "@/lib/status";
 import { diffDays, fmtDate, todayKey } from "@/lib/time";
 import { round2, titleCase } from "@/lib/format";
@@ -17,6 +20,7 @@ import {
   projectMap,
   rangeOf,
   RANGE_FILTERS,
+  sumOf,
   userScope,
   type PersonInfo,
 } from "./shared";
@@ -27,13 +31,19 @@ import { defineReport } from "./types";
  * everything with the matching view-all permission, otherwise only projects they manage or belong
  * to (and, for tasks / issues / timesheets, their own plus their direct reports').
  */
-async function memberProjectIds(user: CurrentUser): Promise<Types.ObjectId[]> {
-  return Project.distinct("_id", { $or: [{ manager: user._id }, { "team.user": user._id }] });
+async function memberProjectIds(user: CurrentUser): Promise<Id[]> {
+  return myProjectIds(user);
 }
 
 /** `null` means unrestricted. */
-async function projectReach(user: CurrentUser): Promise<Types.ObjectId[] | null> {
+async function projectReach(user: CurrentUser): Promise<Id[] | null> {
   return can(user, "projects.view_all") ? null : memberProjectIds(user);
+}
+
+/** Condition on `Project._id` from the reach (`null` = unrestricted) and the optional `project` filter. */
+function projectIdScope(reach: Id[] | null, project: string): SQL | undefined {
+  if (reach) return project ? (reach.includes(project) ? eq(Project._id, project) : inList(Project._id, [])) : inList(Project._id, reach);
+  return project ? eq(Project._id, project) : undefined;
 }
 
 const SCOPE_NOTE = "You see the projects you manage or belong to.";
@@ -72,43 +82,51 @@ const projectProgress = defineReport<ProjectProgressRow>({
     { key: "project", label: "Project", type: "project" },
   ],
   async run(f, user) {
-    await connectDB();
     const settings = await getSettings();
     const today = todayKey();
     const reach = await projectReach(user);
-    const filter: Record<string, unknown> = {};
-    if (f.status) filter.status = f.status;
-    if (f.client) filter.client = f.client;
-    if (reach) filter._id = f.project ? (reach.some((id) => id.toString() === f.project) ? f.project : { $in: [] }) : { $in: reach };
-    else if (f.project) filter._id = f.project;
-    const projects = await Project.find(filter, { projectNo: 1, title: 1, client: 1, manager: 1, status: 1, priority: 1, startDate: 1, targetDate: 1, completedDate: 1, milestones: 1 })
-      .sort({ createdAt: -1 })
-      .limit(2000)
-      .lean();
-    const ids = projects.map((p) => p._id);
+    const projects = await db()
+      .select({
+        id: Project._id,
+        projectNo: Project.projectNo,
+        title: Project.title,
+        client: Project.client,
+        manager: Project.manager,
+        status: Project.status,
+        priority: Project.priority,
+        startDate: Project.startDate,
+        targetDate: Project.targetDate,
+        completedDate: Project.completedDate,
+        milestones: Project.milestones,
+      })
+      .from(Project)
+      .where(and(f.status ? eq(Project.status, f.status) : undefined, f.client ? eq(Project.client, f.client) : undefined, projectIdScope(reach, f.project)))
+      .orderBy(desc(Project.createdAt))
+      .limit(2000);
+    const ids = projects.map((p) => p.id);
     const doneKeys = settings.taskStatuses.filter((s) => s.category === "done").map((s) => s.key);
     const cancelledKeys = settings.taskStatuses.filter((s) => s.category === "cancelled").map((s) => s.key);
+    const isDone = inList(Task.status, doneKeys);
     const [taskStats, clients, people] = await Promise.all([
-      Task.aggregate<{ _id: Types.ObjectId; total: number; done: number; progress: number }>([
-        { $match: { project: { $in: ids }, status: { $nin: cancelledKeys } } },
-        {
-          $group: {
-            _id: "$project",
-            total: { $sum: 1 },
-            done: { $sum: { $cond: [{ $in: ["$status", doneKeys] }, 1, 0] } },
-            progress: { $avg: { $cond: [{ $in: ["$status", doneKeys] }, 100, "$progress"] } },
-          },
-        },
-      ]),
+      db()
+        .select({
+          project: Task.project,
+          total: count(),
+          done: sumOf(sql`case when ${isDone} then 1 else 0 end`),
+          progress: sql<number>`avg(case when ${isDone} then 100 else ${Task.progress} end)`.mapWith(Number),
+        })
+        .from(Task)
+        .where(and(inList(Task.project, ids), notInList(Task.status, cancelledKeys)))
+        .groupBy(Task.project),
       clientNames(projects.map((p) => p.client), user),
       peopleMap(projects.map((p) => p.manager)),
     ]);
-    const stats = new Map(taskStats.map((s) => [s._id.toString(), s]));
+    const stats = new Map(taskStats.flatMap((s) => (s.project ? [[s.project, s] as const] : [])));
     const closedCategories = new Set(["completed", "cancelled"]);
 
     const rows: ProjectProgressRow[] = projects.map((p) => {
       const category = settings.projectStatuses.find((s) => s.key === p.status)?.category;
-      const s = stats.get(p._id.toString());
+      const s = stats.get(p.id);
       let onTime = 0;
       let late = 0;
       let overdue = 0;
@@ -130,13 +148,13 @@ const projectProgress = defineReport<ProjectProgressRow>({
       return {
         projectNo: p.projectNo,
         title: p.title,
-        client: p.client ? (clients.get(p.client.toString()) ?? "") : "Internal",
-        manager: p.manager ? (people.get(p.manager.toString())?.name ?? "") : "",
+        client: p.client ? (clients.get(p.client) ?? "") : "Internal",
+        manager: p.manager ? (people.get(p.manager)?.name ?? "") : "",
         status: optionLabel(settings.projectStatuses, p.status),
         priority: statusLabel("priority", p.priority),
-        startDate: p.startDate,
-        targetDate: p.targetDate,
-        completedDate: p.completedDate,
+        startDate: p.startDate ?? undefined,
+        targetDate: p.targetDate ?? undefined,
+        completedDate: p.completedDate ?? undefined,
         progress: s ? Math.round(s.progress) : category === "completed" ? 100 : undefined,
         tasks: s?.total ?? 0,
         tasksDone: s?.done ?? 0,
@@ -199,8 +217,6 @@ interface TaskRow {
   onTime: boolean;
 }
 
-type TaskLean = Pick<ITask, "taskNo" | "title" | "project" | "assignees" | "priority" | "status" | "dueDate" | "completedAt" | "estimateHours" | "progress"> & { _id: Types.ObjectId };
-
 const taskCompletion = defineReport<TaskRow>({
   key: "task-completion",
   title: "Task completion & overdue tasks",
@@ -223,7 +239,6 @@ const taskCompletion = defineReport<TaskRow>({
     },
   ],
   async run(f, user) {
-    await connectDB();
     const settings = await getSettings();
     const today = todayKey();
     const { from, to } = rangeOf(f);
@@ -231,20 +246,30 @@ const taskCompletion = defineReport<TaskRow>({
     const scoped = !can(user, "tasks.view_all");
     const doneKeys = settings.taskStatuses.filter((s) => s.category === "done").map((s) => s.key);
     const closedKeys = settings.taskStatuses.filter((s) => s.category === "done" || s.category === "cancelled").map((s) => s.key);
-    const and: Record<string, unknown>[] = [{ $or: [{ dueDate: { $gte: from, $lte: to } }, { completedAt: { $gte: start, $lte: end } }] }];
-    if (scoped) and.push({ $or: [{ assignees: user._id }, { reporter: user._id }, { reviewer: user._id }, { project: { $in: await memberProjectIds(user) } }] });
-    if (f.project) and.push({ project: f.project });
-    if (f.person) and.push({ assignees: f.person });
-    if (f.state === "overdue") and.push({ status: { $nin: closedKeys }, dueDate: { $lt: today } });
-    if (f.state === "completed") and.push({ status: { $in: doneKeys } });
-    if (f.state === "open") and.push({ status: { $nin: closedKeys } });
-    const tasks: TaskLean[] = await Task.find(
-      { $and: and },
-      { taskNo: 1, title: 1, project: 1, assignees: 1, priority: 1, status: 1, dueDate: 1, completedAt: 1, estimateHours: 1, progress: 1 },
-    )
-      .sort({ dueDate: 1 })
-      .limit(20_000)
-      .lean();
+    const conditions: (SQL | undefined)[] = [or(and(gte(Task.dueDate, from), lte(Task.dueDate, to)), and(gte(Task.completedAt, start), lte(Task.completedAt, end)))];
+    if (scoped) conditions.push(or(jsonHas(Task.assignees, user._id), eq(Task.reporter, user._id), eq(Task.reviewer, user._id), inList(Task.project, await memberProjectIds(user))));
+    if (f.project) conditions.push(eq(Task.project, f.project));
+    if (f.person) conditions.push(jsonHas(Task.assignees, f.person));
+    if (f.state === "overdue") conditions.push(and(notInList(Task.status, closedKeys), lt(Task.dueDate, today)));
+    if (f.state === "completed") conditions.push(inList(Task.status, doneKeys));
+    if (f.state === "open") conditions.push(notInList(Task.status, closedKeys));
+    const tasks = await db()
+      .select({
+        taskNo: Task.taskNo,
+        title: Task.title,
+        project: Task.project,
+        assignees: Task.assignees,
+        priority: Task.priority,
+        status: Task.status,
+        dueDate: Task.dueDate,
+        completedAt: Task.completedAt,
+        estimateHours: Task.estimateHours,
+        progress: Task.progress,
+      })
+      .from(Task)
+      .where(and(...conditions))
+      .orderBy(asc(Task.dueDate))
+      .limit(20_000);
     const [projects, people] = await Promise.all([projectMap(tasks.map((t) => t.project)), peopleMap(tasks.flatMap((t) => t.assignees))]);
     const rows: TaskRow[] = tasks.map((t) => {
       const done = doneKeys.includes(t.status);
@@ -264,16 +289,16 @@ const taskCompletion = defineReport<TaskRow>({
         timing = `Overdue by ${diffDays(t.dueDate, today)} d`;
         overdue = true;
       }
-      const project = t.project ? projects.get(t.project.toString()) : undefined;
+      const project = t.project ? projects.get(t.project) : undefined;
       return {
         taskNo: t.taskNo,
         title: t.title,
         project: project ? `${project.projectNo} · ${project.title}` : "No project",
-        assignees: t.assignees.map((a) => people.get(a.toString())?.name ?? "").filter(Boolean).join(", "),
+        assignees: t.assignees.map((a) => people.get(a)?.name ?? "").filter(Boolean).join(", "),
         priority: statusLabel("priority", t.priority),
         status: optionLabel(settings.taskStatuses, t.status),
-        dueDate: t.dueDate,
-        completedAt: t.completedAt,
+        dueDate: t.dueDate ?? undefined,
+        completedAt: t.completedAt ?? undefined,
         timing,
         estimate: t.estimateHours,
         progress: t.progress,
@@ -330,40 +355,52 @@ const workloadTimesheets = defineReport<WorkloadRow>({
   permissions: ["reports.view"],
   filters: [...RANGE_FILTERS, DEPARTMENT_FILTER, PERSON_FILTER, { key: "project", label: "Project", type: "project" }],
   async run(f, user) {
-    await connectDB();
     const { from, to } = rangeOf(f);
     const scoped = !can(user, "timesheets.view_all");
-    const team = scoped ? [user._id, ...(await User.distinct("_id", { reportingManager: user._id }))] : [];
-    const filter: Record<string, unknown> = { date: { $gte: from, $lte: to }, $and: [await userScope(f), ...(scoped ? [{ user: { $in: team } }] : [])] };
-    if (f.project) filter.project = f.project;
-    const entries = await TimesheetEntry.find(filter, { user: 1, project: 1, minutes: 1, billable: 1, status: 1 }).limit(100_000).lean();
+    const team = scoped ? [user._id, ...(await directReportIds(user._id))] : [];
+    // One row per person and project, summed in SQL.
+    const entries = await db()
+      .select({
+        user: TimesheetEntry.user,
+        project: TimesheetEntry.project,
+        entries: count(),
+        minutes: sumOf(TimesheetEntry.minutes),
+        billableMin: sumOf(sql`case when ${TimesheetEntry.billable} = 1 then ${TimesheetEntry.minutes} else 0 end`),
+        approvedMin: sumOf(sql`case when ${TimesheetEntry.status} = 'approved' then ${TimesheetEntry.minutes} else 0 end`),
+        submittedMin: sumOf(sql`case when ${TimesheetEntry.status} = 'submitted' then ${TimesheetEntry.minutes} else 0 end`),
+      })
+      .from(TimesheetEntry)
+      .where(
+        and(
+          gte(TimesheetEntry.date, from),
+          lte(TimesheetEntry.date, to),
+          userScope(f, TimesheetEntry.user),
+          scoped ? inList(TimesheetEntry.user, team) : undefined,
+          f.project ? eq(TimesheetEntry.project, f.project) : undefined,
+        ),
+      )
+      .groupBy(TimesheetEntry.user, TimesheetEntry.project);
     const [people, projects] = await Promise.all([peopleMap(entries.map((e) => e.user)), projectMap(entries.map((e) => e.project))]);
     const map = new Map<string, WorkloadRow & { minutes: number; billableMin: number; approvedMin: number; submittedMin: number }>();
     for (const e of entries) {
-      const person = people.get(e.user.toString());
+      const person = people.get(e.user);
       if (!person) continue;
-      const key = `${person.id}|${e.project?.toString() ?? ""}`;
-      const project = e.project ? projects.get(e.project.toString()) : undefined;
-      const row = map.get(key) ?? {
+      const key = `${person.id}|${e.project ?? ""}`;
+      const project = e.project ? projects.get(e.project) : undefined;
+      map.set(key, {
         person,
         project: project ? `${project.projectNo} · ${project.title}` : "No project",
-        entries: 0,
+        entries: e.entries,
         hours: 0,
         billable: 0,
         approved: 0,
         submitted: 0,
         other: 0,
-        minutes: 0,
-        billableMin: 0,
-        approvedMin: 0,
-        submittedMin: 0,
-      };
-      row.entries += 1;
-      row.minutes += e.minutes;
-      if (e.billable) row.billableMin += e.minutes;
-      if (e.status === "approved") row.approvedMin += e.minutes;
-      if (e.status === "submitted") row.submittedMin += e.minutes;
-      map.set(key, row);
+        minutes: e.minutes,
+        billableMin: e.billableMin,
+        approvedMin: e.approvedMin,
+        submittedMin: e.submittedMin,
+      });
     }
     const rows: WorkloadRow[] = [...map.values()]
       .map((r) => ({
@@ -437,37 +474,42 @@ const qaIssues = defineReport<IssueRow>({
     { ...PERSON_FILTER, label: "Assignee" },
   ],
   async run(f, user) {
-    await connectDB();
     const { from, to } = rangeOf(f);
     const scoped = !can(user, "qa.view_all");
-    const filter: Record<string, unknown> = { reportedDate: { $gte: from, $lte: to } };
-    if (scoped) filter.$or = [{ assignee: user._id }, { reporter: user._id }, { project: { $in: await memberProjectIds(user) } }];
-    if (f.project) filter.project = f.project;
-    if (f.status) filter.status = f.status;
-    if (f.severity) filter.severity = f.severity;
-    if (f.person) filter.assignee = f.person;
-    const issues = await Issue.find(filter, {
-      issueNo: 1,
-      project: 1,
-      title: 1,
-      severity: 1,
-      priority: 1,
-      status: 1,
-      assignee: 1,
-      reporter: 1,
-      reportedDate: 1,
-      targetDate: 1,
-      resolvedAt: 1,
-      createdAt: 1,
-      reopenCount: 1,
-    })
-      .sort({ reportedDate: -1 })
-      .limit(20_000)
-      .lean();
+    const issues = await db()
+      .select({
+        issueNo: Issue.issueNo,
+        project: Issue.project,
+        title: Issue.title,
+        severity: Issue.severity,
+        priority: Issue.priority,
+        status: Issue.status,
+        assignee: Issue.assignee,
+        reporter: Issue.reporter,
+        reportedDate: Issue.reportedDate,
+        targetDate: Issue.targetDate,
+        resolvedAt: Issue.resolvedAt,
+        createdAt: Issue.createdAt,
+        reopenCount: Issue.reopenCount,
+      })
+      .from(Issue)
+      .where(
+        and(
+          gte(Issue.reportedDate, from),
+          lte(Issue.reportedDate, to),
+          scoped ? or(eq(Issue.assignee, user._id), eq(Issue.reporter, user._id), inList(Issue.project, await memberProjectIds(user))) : undefined,
+          f.project ? eq(Issue.project, f.project) : undefined,
+          f.status ? eq(Issue.status, f.status as IssueStatus) : undefined,
+          f.severity ? eq(Issue.severity, f.severity as IssueSeverity) : undefined,
+          f.person ? eq(Issue.assignee, f.person) : undefined,
+        ),
+      )
+      .orderBy(desc(Issue.reportedDate))
+      .limit(20_000);
     const [projects, people] = await Promise.all([projectMap(issues.map((i) => i.project)), peopleMap([...issues.map((i) => i.assignee), ...issues.map((i) => i.reporter)])]);
     const resolvedStatuses = new Set(["fixed", "ready_for_testing", "verified", "closed"]);
     const rows: IssueRow[] = issues.map((i) => {
-      const project = projects.get(i.project.toString());
+      const project = projects.get(i.project);
       return {
         issueNo: i.issueNo,
         project: project ? `${project.projectNo} · ${project.title}` : "",
@@ -475,11 +517,11 @@ const qaIssues = defineReport<IssueRow>({
         severity: statusLabel("severity", i.severity),
         priority: statusLabel("priority", i.priority),
         status: statusLabel("issue", i.status),
-        assignee: i.assignee ? (people.get(i.assignee.toString())?.name ?? "") : "",
-        reporter: people.get(i.reporter.toString())?.name ?? "",
+        assignee: i.assignee ? (people.get(i.assignee)?.name ?? "") : "",
+        reporter: people.get(i.reporter)?.name ?? "",
         reportedDate: i.reportedDate,
-        targetDate: i.targetDate,
-        resolvedAt: i.resolvedAt,
+        targetDate: i.targetDate ?? undefined,
+        resolvedAt: i.resolvedAt ?? undefined,
         resolutionDays: i.resolvedAt ? round2((i.resolvedAt.getTime() - i.createdAt.getTime()) / 86_400_000) : undefined,
         reopened: i.reopenCount,
         unresolved: !resolvedStatuses.has(i.status),
@@ -547,51 +589,60 @@ const effort = defineReport<EffortRow>({
     { key: "status", label: "Project status", type: "select", optionsFrom: "projectStatuses" },
   ],
   async run(f, user) {
-    await connectDB();
     const settings = await getSettings();
     const taskLevel = f.level === "task";
     const reach = await projectReach(user);
-    const projectFilter: Record<string, unknown> = {};
-    if (reach) projectFilter._id = f.project ? (reach.some((id) => id.toString() === f.project) ? f.project : { $in: [] }) : { $in: reach };
-    else if (f.project) projectFilter._id = f.project;
-    if (f.status) projectFilter.status = f.status;
-    const projects = await Project.find(projectFilter, { projectNo: 1, title: 1, status: 1, estimatedHours: 1 }).sort({ createdAt: -1 }).limit(2000).lean();
-    const projectIds = projects.map((p) => p._id);
-    const projectById = new Map(projects.map((p) => [p._id.toString(), p]));
-    const entryMatch = { project: { $in: projectIds }, status: { $ne: "rejected" } };
+    const projects = await db()
+      .select({ id: Project._id, projectNo: Project.projectNo, title: Project.title, status: Project.status, estimatedHours: Project.estimatedHours })
+      .from(Project)
+      .where(and(projectIdScope(reach, f.project), f.status ? eq(Project.status, f.status) : undefined))
+      .orderBy(desc(Project.createdAt))
+      .limit(2000);
+    const projectIds = projects.map((p) => p.id);
+    const projectById = new Map(projects.map((p) => [p.id, p]));
+    const entryMatch = and(inList(TimesheetEntry.project, projectIds), ne(TimesheetEntry.status, "rejected"));
     let rows: EffortRow[];
 
     if (!taskLevel) {
       const [logged, taskSums] = await Promise.all([
-        TimesheetEntry.aggregate<{ _id: Types.ObjectId; minutes: number }>([{ $match: entryMatch }, { $group: { _id: "$project", minutes: { $sum: "$minutes" } } }]),
-        Task.aggregate<{ _id: Types.ObjectId; hours: number }>([{ $match: { project: { $in: projectIds } } }, { $group: { _id: "$project", hours: { $sum: "$estimateHours" } } }]),
+        db().select({ project: TimesheetEntry.project, minutes: sumOf(TimesheetEntry.minutes) }).from(TimesheetEntry).where(entryMatch).groupBy(TimesheetEntry.project),
+        db().select({ project: Task.project, hours: sumOf(Task.estimateHours) }).from(Task).where(inList(Task.project, projectIds)).groupBy(Task.project),
       ]);
-      const loggedBy = new Map(logged.map((l) => [l._id.toString(), l.minutes]));
-      const taskBy = new Map(taskSums.map((t) => [t._id.toString(), t.hours]));
+      const loggedBy = new Map(logged.map((l) => [l.project, l.minutes]));
+      const taskBy = new Map(taskSums.map((t) => [t.project, t.hours]));
       rows = projects.map((p) => ({
         ref: p.projectNo,
         title: p.title,
         project: "",
         status: optionLabel(settings.projectStatuses, p.status),
         estimate: p.estimatedHours,
-        taskEstimate: taskBy.get(p._id.toString()) ?? 0,
-        logged: hoursOf(loggedBy.get(p._id.toString()) ?? 0),
+        taskEstimate: taskBy.get(p.id) ?? 0,
+        logged: hoursOf(loggedBy.get(p.id) ?? 0),
       }));
     } else {
       const [tasks, logged] = await Promise.all([
-        Task.find({ project: { $in: projectIds } }, { taskNo: 1, title: 1, project: 1, status: 1, estimateHours: 1 }).sort({ createdAt: -1 }).limit(20_000).lean(),
-        TimesheetEntry.aggregate<{ _id: Types.ObjectId; minutes: number }>([{ $match: { ...entryMatch, task: { $exists: true, $ne: null } } }, { $group: { _id: "$task", minutes: { $sum: "$minutes" } } }]),
+        db()
+          .select({ id: Task._id, taskNo: Task.taskNo, title: Task.title, project: Task.project, status: Task.status, estimateHours: Task.estimateHours })
+          .from(Task)
+          .where(inList(Task.project, projectIds))
+          .orderBy(desc(Task.createdAt))
+          .limit(20_000),
+        db()
+          .select({ task: TimesheetEntry.task, minutes: sumOf(TimesheetEntry.minutes) })
+          .from(TimesheetEntry)
+          .where(and(entryMatch, isNotNull(TimesheetEntry.task)))
+          .groupBy(TimesheetEntry.task),
       ]);
-      const loggedBy = new Map(logged.map((l) => [l._id.toString(), l.minutes]));
+      const loggedBy = new Map(logged.map((l) => [l.task, l.minutes]));
       rows = tasks.map((t) => {
-        const p = t.project ? projectById.get(t.project.toString()) : undefined;
+        const p = t.project ? projectById.get(t.project) : undefined;
         return {
           ref: t.taskNo,
           title: t.title,
           project: p ? `${p.projectNo} · ${p.title}` : "",
           status: optionLabel(settings.taskStatuses, t.status),
           estimate: t.estimateHours,
-          logged: hoursOf(loggedBy.get(t._id.toString()) ?? 0),
+          logged: hoursOf(loggedBy.get(t.id) ?? 0),
         };
       });
     }

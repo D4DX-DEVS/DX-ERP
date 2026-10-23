@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { connectDB } from "@/lib/db";
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db";
 import { exchangeGoogleCode } from "@/lib/auth/google";
 import { createSession } from "@/lib/auth/session";
 import { OAUTH_STATE_COOKIE, verifyToken } from "@/lib/auth/token";
 import { User } from "@/lib/models";
 import { audit } from "@/lib/audit";
 import { env } from "@/lib/env";
-import { escapeRegex } from "@/lib/format";
 import { safeNextPath } from "@/lib/safe-redirect";
+import { eqIgnoreCase } from "@/lib/sql";
 
 function fail(code: string) {
   const res = NextResponse.redirect(new URL(`/login?error=${code}`, env.appUrl));
@@ -43,8 +44,21 @@ export async function GET(request: Request) {
   if (!identity.email || !identity.emailVerified) return fail("email_unverified");
   if (env.google.allowedDomain && identity.email.split("@")[1] !== env.google.allowedDomain) return fail("domain_not_allowed");
 
-  await connectDB();
-  const user = await User.findOne({ email: new RegExp(`^${escapeRegex(identity.email)}$`, "i") });
+  const [user] = await db()
+    .select({
+      _id: User._id,
+      name: User.name,
+      role: User.role,
+      isSuperAdmin: User.isSuperAdmin,
+      accountActive: User.accountActive,
+      status: User.status,
+      googleSub: User.googleSub,
+      photo: User.photo,
+      onboarding: User.onboarding,
+    })
+    .from(User)
+    .where(eqIgnoreCase(User.email, identity.email))
+    .limit(1);
 
   if (!user || user.isSuperAdmin) {
     await audit(null, { action: "login_failed", entity: "auth", summary: `Google sign-in refused for ${identity.email} (not registered)` });
@@ -63,13 +77,16 @@ export async function GET(request: Request) {
     return fail("account_mismatch");
   }
 
-  const updates: Record<string, unknown> = { googleSub: identity.sub };
-  if (!user.photo && identity.picture) updates.photo = identity.picture;
   const step = user.onboarding?.find((s) => s.key === "first_login");
-  if (step && !step.done) {
-    await User.updateOne({ _id: user._id, "onboarding.key": "first_login" }, { $set: { "onboarding.$.done": true, "onboarding.$.doneAt": new Date() } });
-  }
-  await User.updateOne({ _id: user._id }, { $set: updates });
+  await db()
+    .update(User)
+    .set({
+      googleSub: identity.sub,
+      ...(!user.photo && identity.picture ? { photo: identity.picture } : {}),
+      // Marks the automatic "first sign-in" onboarding step.
+      ...(step && !step.done ? { onboarding: user.onboarding.map((s) => (s.key === "first_login" ? { ...s, done: true, doneAt: new Date() } : s)) } : {}),
+    })
+    .where(eq(User._id, user._id));
 
   await createSession(user._id, "google", Boolean(saved.remember));
   await audit({ _id: user._id, name: user.name, role: user.role }, { action: "login", entity: "auth", entityId: user._id, summary: `${user.name} signed in with Google` });

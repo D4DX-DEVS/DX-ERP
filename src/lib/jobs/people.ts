@@ -1,24 +1,17 @@
 import "server-only";
-import type { Types } from "mongoose";
-import { connectDB } from "@/lib/db";
-import { Review, StoredFile, User } from "@/lib/models";
-import { notify, notifyPermission } from "@/lib/notify";
+import { and, asc, eq, gt, gte, isNotNull, isNull, lte, ne, sql } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { PERSON_TYPES, Review, StoredFile, User } from "@/lib/models";
+import { usersWithPermission } from "@/lib/notify";
 import { getSettings } from "@/lib/settings";
+import { inList, jsonPath, notInList } from "@/lib/sql";
 import { addDays, fmtDate, monthKey, todayKey } from "@/lib/time";
+import { notifyBatch, type BatchedNotification } from "./batch";
 import type { Job } from "./registry";
 
 const EXITED = ["resigned", "terminated", "inactive"];
-const ACTIVE_STAFF: Record<string, unknown> = { personType: { $in: ["employee", "trainee", "intern"] }, status: { $nin: EXITED } };
-
-/** Dotted projections lose Mongoose's static types, so the jobs name the row shape they read. */
-interface PersonRow {
-  _id: Types.ObjectId;
-  name: string;
-  employeeId: string;
-  reportingManager?: Types.ObjectId;
-  exit?: { lastWorkingDay?: string };
-  internship?: { mentor?: Types.ObjectId; endDate?: string };
-}
+/** Employees, trainees and interns who have not left. */
+const activeStaff = () => and(inList(User.personType, PERSON_TYPES), notInList(User.status, EXITED));
 
 /**
  * Document expiry reminders: a document that is about to expire (within `reminderDaysBefore`) or
@@ -26,23 +19,38 @@ interface PersonRow {
  * document + expiry date (and once more when it actually expires).
  */
 async function documentExpiry(): Promise<string> {
-  await connectDB();
   const settings = await getSettings();
   const today = todayKey();
   const horizon = addDays(today, Math.max(1, settings.notifications.reminderDaysBefore));
-  const files = await StoredFile.find(
-    { entityType: "user", deletedAt: null, replacedBy: null, category: { $nin: [null, ""] }, expiryDate: { $gt: "", $lte: horizon } },
-    { entityId: 1, category: 1, expiryDate: 1, name: 1 },
-  )
-    .sort({ expiryDate: 1 })
-    .limit(500)
-    .lean();
+  const files = await db()
+    .select({ id: StoredFile._id, entityId: StoredFile.entityId, category: StoredFile.category, expiryDate: StoredFile.expiryDate, name: StoredFile.name })
+    .from(StoredFile)
+    .where(
+      and(
+        eq(StoredFile.entityType, "user"),
+        isNull(StoredFile.deletedAt),
+        isNull(StoredFile.replacedBy),
+        isNotNull(StoredFile.category),
+        ne(StoredFile.category, ""),
+        gt(StoredFile.expiryDate, ""),
+        lte(StoredFile.expiryDate, horizon),
+      ),
+    )
+    .orderBy(asc(StoredFile.expiryDate))
+    .limit(500);
   if (files.length === 0) return "no documents expiring";
 
-  const owners = await User.find({ _id: { $in: [...new Set(files.flatMap((f) => (f.entityId ? [f.entityId] : [])))] }, ...ACTIVE_STAFF }, { name: 1, employeeId: 1 }).lean();
-  const ownerById = new Map(owners.map((o) => [o._id.toString(), o]));
+  const [owners, editors] = await Promise.all([
+    db()
+      .select({ id: User._id, name: User.name, employeeId: User.employeeId })
+      .from(User)
+      .where(and(inList(User._id, [...new Set(files.flatMap((f) => (f.entityId ? [f.entityId] : [])))]), activeStaff())),
+    usersWithPermission("staff.edit"),
+  ]);
+  const ownerById = new Map(owners.map((o) => [o.id, o]));
   const labels = new Map(settings.documentCategories.map((c) => [c.key, c.label]));
 
+  const items: BatchedNotification[] = [];
   let sent = 0;
   for (const f of files) {
     const owner = f.entityId ? ownerById.get(f.entityId) : undefined;
@@ -50,10 +58,10 @@ async function documentExpiry(): Promise<string> {
     const expired = f.expiryDate < today;
     const label = labels.get(f.category ?? "") ?? f.name;
     const when = fmtDate(f.expiryDate);
-    const dedupeKey = `doc-expiry:${f._id}:${f.expiryDate}${expired ? ":expired" : ""}`;
-    await notify(
-      [owner._id],
-      {
+    const dedupeKey = `doc-expiry:${f.id}:${f.expiryDate}${expired ? ":expired" : ""}`;
+    items.push({
+      recipients: [owner.id],
+      input: {
         type: "document",
         title: expired ? `Your ${label} has expired` : `Your ${label} expires on ${when}`,
         body: expired ? `It expired on ${when}. Please upload a renewed copy.` : "Please upload a renewed copy before it expires.",
@@ -61,32 +69,36 @@ async function documentExpiry(): Promise<string> {
         priority: expired ? "high" : "normal",
         dedupeKey,
       },
-    );
-    await notifyPermission(
-      "staff.edit",
-      {
+    });
+    items.push({
+      recipients: editors,
+      exclude: [owner.id],
+      input: {
         type: "document",
         title: expired ? `${owner.name}: ${label} expired` : `${owner.name}: ${label} expires on ${when}`,
         body: `${owner.name} (${owner.employeeId}) — follow up for a renewed document.`,
-        link: `/staff/${owner._id}?tab=documents`,
+        link: `/staff/${owner.id}?tab=documents`,
         priority: expired ? "high" : "normal",
         dedupeKey,
       },
-      [owner._id],
-    );
+    });
     sent++;
   }
+  await notifyBatch(items);
   return `${sent} document reminder${sent === 1 ? "" : "s"} processed`;
 }
 
 /** Notice periods ending within 7 days → people who can edit staff records (+ the manager). */
 async function noticeEnding(): Promise<string> {
-  await connectDB();
   const today = todayKey();
-  const people = await User.find(
-    { personType: { $in: ["employee", "trainee", "intern"] }, "exit.stage": "notice", "exit.lastWorkingDay": { $gte: today, $lte: addDays(today, 7) } },
-    { name: 1, employeeId: 1, reportingManager: 1, "exit.lastWorkingDay": 1 },
-  ).lean<PersonRow[]>();
+  const lastWorkingDay = jsonPath<string | null>(User.exit, "lastWorkingDay");
+  const people = await db()
+    .select({ id: User._id, name: User.name, employeeId: User.employeeId, reportingManager: User.reportingManager, exit: User.exit })
+    .from(User)
+    .where(and(inList(User.personType, PERSON_TYPES), eq(jsonPath(User.exit, "stage"), "notice"), gte(lastWorkingDay, today), lte(lastWorkingDay, addDays(today, 7))));
+  if (people.length === 0) return "0 notice periods ending soon";
+  const editors = await usersWithPermission("staff.edit");
+  const items: BatchedNotification[] = [];
   for (const p of people) {
     const last = p.exit?.lastWorkingDay;
     if (!last) continue;
@@ -94,24 +106,34 @@ async function noticeEnding(): Promise<string> {
       type: "system",
       title: `${p.name}'s notice period ends ${last === today ? "today" : `on ${fmtDate(last)}`}`,
       body: `${p.name} (${p.employeeId}) — complete the exit: assets, handover and access.`,
-      link: `/staff/${p._id}?tab=history`,
+      link: `/staff/${p.id}?tab=history`,
       actionable: true,
-      dedupeKey: `notice-end:${p._id}:${last}`,
+      dedupeKey: `notice-end:${p.id}:${last}`,
     };
-    await notifyPermission("staff.edit", input);
-    await notify([p.reportingManager], input);
+    items.push({ recipients: editors, input });
+    items.push({ recipients: [p.reportingManager], input });
   }
+  await notifyBatch(items);
   return `${people.length} notice period${people.length === 1 ? "" : "s"} ending soon`;
 }
 
 /** Internships ending within 7 days (or already past their end date) → mentor + interns.manage. */
 async function internshipEnding(): Promise<string> {
-  await connectDB();
   const today = todayKey();
-  const people = await User.find(
-    { personType: { $in: ["trainee", "intern"] }, status: { $nin: EXITED }, "internship.status": { $in: ["active", "extended"] }, "internship.endDate": { $lte: addDays(today, 7) } },
-    { name: 1, employeeId: 1, "internship.mentor": 1, "internship.endDate": 1 },
-  ).lean<PersonRow[]>();
+  const people = await db()
+    .select({ id: User._id, name: User.name, employeeId: User.employeeId, internship: User.internship })
+    .from(User)
+    .where(
+      and(
+        inList(User.personType, ["trainee", "intern"]),
+        notInList(User.status, EXITED),
+        inList(jsonPath(User.internship, "status"), ["active", "extended"]),
+        lte(jsonPath<string | null>(User.internship, "endDate"), addDays(today, 7)),
+      ),
+    );
+  if (people.length === 0) return "0 internships ending soon";
+  const managers = await usersWithPermission("interns.manage");
+  const items: BatchedNotification[] = [];
   for (const p of people) {
     const end = p.internship?.endDate;
     if (!end) continue;
@@ -120,53 +142,72 @@ async function internshipEnding(): Promise<string> {
       type: "internship",
       title: over ? `${p.name}'s internship end date has passed` : `${p.name}'s internship ends ${end === today ? "today" : `on ${fmtDate(end)}`}`,
       body: over ? "Complete or extend the internship." : "Schedule the final evaluation and complete or extend the internship.",
-      link: `/interns/${p._id}?tab=completion`,
+      link: `/interns/${p.id}?tab=completion`,
       actionable: true,
-      dedupeKey: `${over ? "internship-ended" : "internship-end"}:${p._id}:${end}`,
+      dedupeKey: `${over ? "internship-ended" : "internship-end"}:${p.id}:${end}`,
     };
-    await notify([p.internship?.mentor], input);
-    await notifyPermission("interns.manage", input, [p.internship?.mentor]);
+    const mentor = p.internship?.mentor;
+    items.push({ recipients: [mentor], input });
+    items.push({ recipients: managers, exclude: [mentor], input });
   }
+  await notifyBatch(items);
   return `${people.length} internship${people.length === 1 ? "" : "s"} ending soon`;
 }
 
 /** Monthly evaluation reminder: running internships with no shared evaluation in the last 30 days → mentor. */
 async function reviewDue(): Promise<string> {
-  await connectDB();
   const today = todayKey();
   const month = monthKey();
-  const running = await User.find(
-    { personType: { $in: ["trainee", "intern"] }, status: { $nin: EXITED }, "internship.status": { $in: ["active", "extended"] }, "internship.startDate": { $lte: addDays(today, -30) } },
-    { name: 1, employeeId: 1, "internship.mentor": 1 },
-  ).lean<PersonRow[]>();
+  const running = await db()
+    .select({ id: User._id, name: User.name, internship: User.internship })
+    .from(User)
+    .where(
+      and(
+        inList(User.personType, ["trainee", "intern"]),
+        notInList(User.status, EXITED),
+        inList(jsonPath(User.internship, "status"), ["active", "extended"]),
+        lte(jsonPath<string | null>(User.internship, "startDate"), addDays(today, -30)),
+      ),
+    );
   if (running.length === 0) return "no running internships";
-  const recent = new Set((await Review.distinct("user", { user: { $in: running.map((p) => p._id) }, status: "shared", date: { $gte: addDays(today, -30) } })).map(String));
-  let due = 0;
-  for (const p of running) {
-    if (recent.has(p._id.toString())) continue;
-    due++;
-    const input = {
+  const reviewed = await db()
+    .selectDistinct({ user: Review.user })
+    .from(Review)
+    .where(and(inList(Review.user, running.map((p) => p.id)), eq(Review.status, "shared"), gte(Review.date, addDays(today, -30))));
+  const recent = new Set(reviewed.map((r) => r.user));
+  const due = running.filter((p) => !recent.has(p.id));
+  const managers = due.some((p) => !p.internship?.mentor) ? await usersWithPermission("interns.manage") : [];
+  const items: BatchedNotification[] = due.map((p) => ({
+    recipients: p.internship?.mentor ? [p.internship.mentor] : managers,
+    input: {
       type: "internship",
       title: `Evaluation due for ${p.name}`,
       body: "No evaluation has been shared in the last 30 days.",
-      link: `/interns/${p._id}?tab=evaluations`,
+      link: `/interns/${p.id}?tab=evaluations`,
       actionable: true,
-      dedupeKey: `review-due:${p._id}:${month}`,
-    };
-    if (p.internship?.mentor) await notify([p.internship.mentor], input);
-    else await notifyPermission("interns.manage", input);
-  }
-  return `${due} evaluation reminder${due === 1 ? "" : "s"} due`;
+      dedupeKey: `review-due:${p.id}:${month}`,
+    },
+  }));
+  await notifyBatch(items);
+  return `${due.length} evaluation reminder${due.length === 1 ? "" : "s"} due`;
 }
 
 /** Registered internships whose start date has arrived become active. */
 async function activateInternships(): Promise<string> {
-  await connectDB();
-  const res = await User.updateMany(
-    { personType: { $in: ["trainee", "intern"] }, status: { $nin: EXITED }, "internship.status": "registered", "internship.startDate": { $lte: todayKey() } },
-    { $set: { "internship.status": "active" } },
-  );
-  return `${res.modifiedCount} internship${res.modifiedCount === 1 ? "" : "s"} activated`;
+  const res = await db()
+    .update(User)
+    .set({ internship: sql`json_set(${User.internship}, '$.status', 'active')` })
+    .where(
+      and(
+        inList(User.personType, ["trainee", "intern"]),
+        notInList(User.status, EXITED),
+        eq(jsonPath(User.internship, "status"), "registered"),
+        lte(jsonPath<string | null>(User.internship, "startDate"), todayKey()),
+      ),
+    )
+    .run();
+  const n = res.meta.changes;
+  return `${n} internship${n === 1 ? "" : "s"} activated`;
 }
 
 export const peopleJobs: Job[] = [

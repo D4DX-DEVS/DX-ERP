@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
+import { eq } from "drizzle-orm";
 import { requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Invoice } from "@/lib/models";
 import { PageBody, PageHeader } from "@/components/ui/page";
 import { isObjectId } from "@/lib/validation";
@@ -14,8 +15,7 @@ export default async function EditInvoicePage({ params }: { params: Promise<{ id
   const user = await requirePagePermission("invoices.manage");
   const { id } = await params;
   if (!isObjectId(id)) notFound();
-  await connectDB();
-  const inv = await Invoice.findById(id).lean();
+  const [inv] = await db().select().from(Invoice).where(eq(Invoice._id, id)).limit(1);
   if (!inv) notFound();
   if (inv.status !== "draft") redirect(`/invoices/${id}`);
   const options = await loadInvoiceFormOptions(user, id);
@@ -23,10 +23,10 @@ export default async function EditInvoicePage({ params }: { params: Promise<{ id
   const matching = options.paymentTerms.find((t) => t.days === inv.paymentTermDays);
   const initial: InvoiceFormInitial = {
     id,
-    client: inv.client.toString(),
-    project: inv.project?.toString() ?? "",
-    contract: inv.contract?.toString() ?? "",
-    milestone: inv.milestone?.toString() ?? "",
+    client: inv.client,
+    project: inv.project ?? "",
+    contract: inv.contract ?? "",
+    milestone: inv.milestone ?? "",
     issueDate: inv.issueDate,
     paymentTerm: matching ? String(matching.days) : CUSTOM_TERM,
     dueDate: inv.dueDate,

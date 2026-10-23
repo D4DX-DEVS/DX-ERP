@@ -1,11 +1,13 @@
+import { and, asc, eq, gte, lte, type SQL } from "drizzle-orm";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { EmptyState, PageBody, PageHeader } from "@/components/ui/page";
 import { requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { workCalendar } from "@/lib/domain/calendar";
 import { LeaveRequest, LeaveType, User, type LeaveStatus } from "@/lib/models";
 import type { SearchParams } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
+import { inList, notInList } from "@/lib/sql";
 import { cn } from "@/lib/cn";
 import { addDays, eachDay, fmtDate, monthKey, monthRange, todayKey, weekday } from "@/lib/time";
 import { MonthNav } from "../../attendance/_components/month-nav";
@@ -32,7 +34,6 @@ export default async function LeaveCalendarPage({ searchParams }: { searchParams
   const user = await requireUser();
   const access = await leaveAccess(user);
   const sp = await searchParams;
-  await connectDB();
   const settings = await getSettings();
   const today = todayKey();
   const month = validMonthParam(sp, "month") ?? monthKey();
@@ -42,43 +43,62 @@ export default async function LeaveCalendarPage({ searchParams }: { searchParams
   // Scope: org-wide for leave.view_all; managers see their reports (and themselves, including pending requests);
   // everyone else sees approved leave of their own department (names and dates only — never reasons).
   let scopeLabel: string;
-  let userScope: Record<string, unknown> = {};
+  let userScope: SQL | undefined;
   let statuses: LeaveStatus[] = ["approved", "pending_manager", "pending_hr"];
   if (access.viewAll) {
     scopeLabel = "Everyone · approved and pending leave";
   } else if (access.isManager) {
     scopeLabel = "You and your reports · approved and pending leave";
-    userScope = { user: { $in: [user.id, ...access.reportIds] } };
+    userScope = inList(LeaveRequest.user, [user.id, ...access.reportIds]);
   } else {
     scopeLabel = user.departmentName ? `${user.departmentName} · approved leave` : "Your approved leave";
     statuses = ["approved"];
     const mates = user.departmentId
-      ? await User.find({ department: user.departmentId, personType: { $in: STAFF_TYPES }, status: { $nin: EXITED_STATUSES } }, { _id: 1 }).lean()
+      ? await db()
+          .select({ _id: User._id })
+          .from(User)
+          .where(and(eq(User.department, user.departmentId), inList(User.personType, STAFF_TYPES), notInList(User.status, EXITED_STATUSES)))
       : [];
-    userScope = { user: { $in: [user.id, ...mates.map((m) => m._id.toString())] } };
+    userScope = inList(LeaveRequest.user, [user.id, ...mates.map((m) => m._id)]);
   }
 
   const [requests, cal, types] = await Promise.all([
-    LeaveRequest.find({ ...userScope, status: { $in: statuses }, startDate: { $lte: to }, endDate: { $gte: from } }, { user: 1, leaveType: 1, leaveTypeName: 1, startDate: 1, endDate: 1, halfDay: 1, halfDaySession: 1, status: 1 }).lean(),
+    db()
+      .select({
+        user: LeaveRequest.user,
+        leaveType: LeaveRequest.leaveType,
+        leaveTypeName: LeaveRequest.leaveTypeName,
+        startDate: LeaveRequest.startDate,
+        endDate: LeaveRequest.endDate,
+        halfDay: LeaveRequest.halfDay,
+        halfDaySession: LeaveRequest.halfDaySession,
+        status: LeaveRequest.status,
+      })
+      .from(LeaveRequest)
+      .where(and(userScope, inList(LeaveRequest.status, statuses), lte(LeaveRequest.startDate, to), gte(LeaveRequest.endDate, from))),
     workCalendar(settings, from, to),
-    LeaveType.find({}, { color: 1 }).lean(),
+    db().select({ _id: LeaveType._id, color: LeaveType.color }).from(LeaveType),
   ]);
-  const colorOf = new Map(types.map((t) => [t._id.toString(), t.color && SAFE_COLOR.test(t.color) ? t.color : undefined]));
+  const colorOf = new Map(types.map((t) => [t._id, t.color && SAFE_COLOR.test(t.color) ? t.color : undefined]));
 
   const byUser = new Map<string, Map<string, Cell>>();
   for (const r of requests) {
     const start = r.startDate > from ? r.startDate : from;
     const end = r.endDate < to ? r.endDate : to;
-    const key = r.user.toString();
+    const key = r.user;
     const cells = byUser.get(key) ?? new Map<string, Cell>();
     for (const d of leaveDaysIn(settings, cal, start, end)) {
-      cells.set(d, { pending: r.status !== "approved", half: r.halfDay, session: r.halfDaySession, typeName: r.leaveTypeName ?? "Leave", color: colorOf.get(r.leaveType.toString()) });
+      cells.set(d, { pending: r.status !== "approved", half: r.halfDay, session: r.halfDaySession ?? undefined, typeName: r.leaveTypeName ?? "Leave", color: colorOf.get(r.leaveType) });
     }
     byUser.set(key, cells);
   }
-  const people = await User.find({ _id: { $in: [...byUser.keys()] } }, { name: 1, employeeId: 1 }).sort({ name: 1 }).lean();
-  const rows = people.filter((p) => (byUser.get(p._id.toString())?.size ?? 0) > 0);
-  const outToday = today >= from && today <= to ? rows.filter((p) => byUser.get(p._id.toString())?.get(today) && !byUser.get(p._id.toString())?.get(today)?.pending) : [];
+  const people = await db()
+    .select({ _id: User._id, name: User.name, employeeId: User.employeeId })
+    .from(User)
+    .where(inList(User._id, [...byUser.keys()]))
+    .orderBy(asc(User.name));
+  const rows = people.filter((p) => (byUser.get(p._id)?.size ?? 0) > 0);
+  const outToday = today >= from && today <= to ? rows.filter((p) => byUser.get(p._id)?.get(today) && !byUser.get(p._id)?.get(today)?.pending) : [];
 
   // Fluid: the day columns share whatever width there is, so the grid never scrolls sideways.
   const cols = `minmax(88px, 176px) repeat(${days.length}, minmax(0, 1fr))`;
@@ -131,10 +151,10 @@ export default async function LeaveCalendarPage({ searchParams }: { searchParams
           <CardBody>
             <ul className="flex flex-col divide-y divide-line-soft md:hidden">
               {rows.map((p) => (
-                <li key={p._id.toString()} className="py-2.5 first:pt-0 last:pb-0">
+                <li key={p._id} className="py-2.5 first:pt-0 last:pb-0">
                   <div className="text-[13px] font-semibold text-ink">{p.name}</div>
                   <div className="mt-1 flex flex-wrap gap-1.5">
-                    {rangesOf(byUser.get(p._id.toString())).map((r) => (
+                    {rangesOf(byUser.get(p._id)).map((r) => (
                       <span key={r.start} className="inline-flex items-center gap-1.5 rounded-full bg-field px-2 py-0.5 text-[11px] font-medium text-ink-2">
                         <span
                           className={cn("size-2 shrink-0 rounded-full", r.cell.pending ? "border border-brand-500" : !r.cell.color && "bg-brand-500")}
@@ -163,9 +183,9 @@ export default async function LeaveCalendarPage({ searchParams }: { searchParams
                   ))}
                 </div>
                 {rows.map((p) => {
-                  const cells = byUser.get(p._id.toString());
+                  const cells = byUser.get(p._id);
                   return (
-                    <div key={p._id.toString()} className="grid items-center gap-0.5 border-t border-line-soft py-1" style={{ gridTemplateColumns: cols }} role="row">
+                    <div key={p._id} className="grid items-center gap-0.5 border-t border-line-soft py-1" style={{ gridTemplateColumns: cols }} role="row">
                       <span role="rowheader" className="sticky left-0 z-10 truncate bg-white pr-2 text-[13px] font-medium text-ink" title={p.name}>
                         {p.name}
                       </span>
@@ -198,8 +218,8 @@ export default async function LeaveCalendarPage({ searchParams }: { searchParams
           <CardBody>
             <ul className="flex flex-wrap gap-2">
               {outToday.map((p) => (
-                <li key={p._id.toString()} className="rounded-full bg-tone-blue-bg px-3 py-1 text-[13px] font-medium text-tone-blue">
-                  {p.name} · {byUser.get(p._id.toString())?.get(today)?.typeName}
+                <li key={p._id} className="rounded-full bg-tone-blue-bg px-3 py-1 text-[13px] font-medium text-tone-blue">
+                  {p.name} · {byUser.get(p._id)?.get(today)?.typeName}
                 </li>
               ))}
             </ul>

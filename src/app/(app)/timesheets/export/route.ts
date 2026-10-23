@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
+import { and, asc, eq, gte, lte } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
-import { connectDB } from "@/lib/db";
-import { Project, Task, TimesheetEntry, Types } from "@/lib/models";
+import { db } from "@/lib/db";
+import { Project, Task, TimesheetEntry } from "@/lib/models";
 import { exportResponse, isExportFormat } from "@/lib/export";
 import { fmtDate, fmtDateTime } from "@/lib/time";
+import { inList } from "@/lib/sql";
 import { isObjectId } from "@/lib/validation";
 import { peopleMap, timesheetScope, type Filter } from "@/lib/work-access";
 
@@ -17,7 +19,6 @@ const MAX_ROWS = 20_000;
 export async function GET(request: Request) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
-  await connectDB();
   const scope = await timesheetScope(user, "view");
   if (!scope.hasAccess) return NextResponse.json({ error: "You don't have permission to export timesheets." }, { status: 403 });
 
@@ -30,23 +31,40 @@ export async function GET(request: Request) {
   const to = url.searchParams.get("to") ?? "";
   const dateOk = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
 
-  const and: Filter[] = [scope.all ? {} : scope.filter];
-  if (isObjectId(employee)) and.push({ user: new Types.ObjectId(employee) });
-  if (isObjectId(project)) and.push({ project: new Types.ObjectId(project) });
-  if (dateOk(from)) and.push({ date: { $gte: from } });
-  if (dateOk(to)) and.push({ date: { $lte: to } });
-  const filter: Filter = { $and: and };
+  const conds: Filter[] = [scope.all ? undefined : scope.filter];
+  if (isObjectId(employee)) conds.push(eq(TimesheetEntry.user, employee));
+  if (isObjectId(project)) conds.push(eq(TimesheetEntry.project, project));
+  if (dateOk(from)) conds.push(gte(TimesheetEntry.date, from));
+  if (dateOk(to)) conds.push(lte(TimesheetEntry.date, to));
+  const filter: Filter = and(...conds);
 
-  const entries = await TimesheetEntry.find(filter).sort({ date: 1, user: 1, createdAt: 1 }).limit(MAX_ROWS).lean();
-  const projectIds = [...new Set(entries.map((e) => e.project?.toString()).filter(Boolean) as string[])];
-  const taskIds = [...new Set(entries.map((e) => e.task?.toString()).filter(Boolean) as string[])];
+  const entries = await db()
+    .select({
+      user: TimesheetEntry.user,
+      date: TimesheetEntry.date,
+      weekStart: TimesheetEntry.weekStart,
+      project: TimesheetEntry.project,
+      task: TimesheetEntry.task,
+      description: TimesheetEntry.description,
+      billable: TimesheetEntry.billable,
+      minutes: TimesheetEntry.minutes,
+      status: TimesheetEntry.status,
+      reviewerName: TimesheetEntry.reviewerName,
+      reviewedAt: TimesheetEntry.reviewedAt,
+    })
+    .from(TimesheetEntry)
+    .where(filter)
+    .orderBy(asc(TimesheetEntry.date), asc(TimesheetEntry.user), asc(TimesheetEntry.createdAt))
+    .limit(MAX_ROWS);
+  const projectIds = [...new Set(entries.map((e) => e.project).filter(Boolean) as string[])];
+  const taskIds = [...new Set(entries.map((e) => e.task).filter(Boolean) as string[])];
   const [people, projects, tasks] = await Promise.all([
     peopleMap(entries.map((e) => e.user)),
-    projectIds.length ? Project.find({ _id: { $in: projectIds } }, { projectNo: 1, title: 1 }).lean() : [],
-    taskIds.length ? Task.find({ _id: { $in: taskIds } }, { taskNo: 1, title: 1 }).lean() : [],
+    projectIds.length ? db().select({ _id: Project._id, projectNo: Project.projectNo, title: Project.title }).from(Project).where(inList(Project._id, projectIds)) : [],
+    taskIds.length ? db().select({ _id: Task._id, taskNo: Task.taskNo, title: Task.title }).from(Task).where(inList(Task._id, taskIds)) : [],
   ]);
-  const projectLabel = new Map(projects.map((p) => [p._id.toString(), `${p.projectNo} ${p.title}`]));
-  const taskLabel = new Map(tasks.map((t) => [t._id.toString(), `${t.taskNo} ${t.title}`]));
+  const projectLabel = new Map(projects.map((p) => [p._id, `${p.projectNo} ${p.title}`]));
+  const taskLabel = new Map(tasks.map((t) => [t._id, `${t.taskNo} ${t.title}`]));
 
   const subtitle = [
     isObjectId(employee) ? `Employee: ${people.get(employee)?.name ?? employee}` : "All employees",
@@ -63,11 +81,11 @@ export async function GET(request: Request) {
     subtitle,
     rows: entries,
     columns: [
-      { header: "Employee", value: (e) => people.get(e.user.toString())?.name ?? "Unknown", width: 24 },
+      { header: "Employee", value: (e) => people.get(e.user)?.name ?? "Unknown", width: 24 },
       { header: "Date", value: (e) => e.date, width: 12 },
       { header: "Week starting", value: (e) => e.weekStart, width: 14 },
-      { header: "Project", value: (e) => (e.project ? projectLabel.get(e.project.toString()) : "—"), width: 30 },
-      { header: "Task", value: (e) => (e.task ? taskLabel.get(e.task.toString()) : "—"), width: 30 },
+      { header: "Project", value: (e) => (e.project ? projectLabel.get(e.project) : "—"), width: 30 },
+      { header: "Task", value: (e) => (e.task ? taskLabel.get(e.task) : "—"), width: 30 },
       { header: "Description", value: (e) => e.description, width: 40 },
       { header: "Billable", value: (e) => (e.billable ? "Yes" : "No"), width: 10 },
       { header: "Hours", value: (e) => Math.round((e.minutes / 60) * 100) / 100, type: "number", width: 8 },

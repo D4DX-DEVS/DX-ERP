@@ -1,14 +1,18 @@
 "use server";
 
+import { and, eq, isNull } from "drizzle-orm";
+import type { SQLiteUpdateSetSource } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 import { actionUser, ActionError, parse, runAction, type ActionResult } from "@/lib/actions";
 import { can, type CurrentUser } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { ID_PREFIX, nextNumber } from "@/lib/counters";
 import { resolveFileRefs } from "@/lib/files";
-import { Issue, PRIORITIES, Project, StoredFile, Task, User } from "@/lib/models";
+import { db } from "@/lib/db";
+import { Issue, newId, PRIORITIES, Project, StoredFile, Task, User, type Id } from "@/lib/models";
 import { notify } from "@/lib/notify";
 import { EXITED_STATUSES } from "@/lib/people";
+import { increment, inList, jsonPush, notInList } from "@/lib/sql";
 import { statusLabel } from "@/lib/status";
 import { todayKey } from "@/lib/time";
 import { isObjectId, zs } from "@/lib/validation";
@@ -30,17 +34,20 @@ const createSchema = z.object({
   targetDate: zs.optDate(),
 });
 
+/** File refs get an id when embedded (they were sub-documents before), so they can be addressed later. */
+const withIds = <T extends { _id?: Id }>(refs: T[]): T[] => refs.map((r) => ({ ...r, _id: r._id ?? newId() }));
+
 async function assertStaff(userId: string, field: string) {
-  const count = await User.countDocuments({ _id: userId, personType: { $in: ["employee", "trainee", "intern"] }, status: { $nin: EXITED_STATUSES } });
+  const count = await db().$count(User, and(eq(User._id, userId), inList(User.personType, ["employee", "trainee", "intern"]), notInList(User.status, EXITED_STATUSES)));
   if (count !== 1) throw new ActionError("Choose an active staff member.", { [field]: "Choose an active staff member" });
 }
 
 /** Loads an issue the user may see, plus the project manager and the user's capabilities on it. */
 async function loadIssue(user: CurrentUser, id: string) {
   if (!isObjectId(id)) throw new ActionError("Issue not found.");
-  const issue = await Issue.findOne({ $and: [{ _id: id }, await issueFilter(user)] });
+  const [issue] = await db().select().from(Issue).where(and(eq(Issue._id, id), await issueFilter(user))).limit(1);
   if (!issue) throw new ActionError("Issue not found, or you don't have access to it.");
-  const project = await Project.findById(issue.project, { manager: 1, title: 1, projectNo: 1 }).lean();
+  const [project] = await db().select({ manager: Project.manager, title: Project.title, projectNo: Project.projectNo }).from(Project).where(eq(Project._id, issue.project)).limit(1);
   return { issue, project, caps: issueCaps(user, issue, project?.manager) };
 }
 
@@ -52,7 +59,11 @@ export async function createIssue(input: Record<string, unknown>): Promise<Actio
   return runAction(async () => {
     const user = await actionUser();
     const data = parse(createSchema, input);
-    const project = await Project.findById(data.project, { manager: 1, team: 1, title: 1, projectNo: 1 }).lean();
+    const [project] = await db()
+      .select({ _id: Project._id, manager: Project.manager, team: Project.team, title: Project.title, projectNo: Project.projectNo })
+      .from(Project)
+      .where(eq(Project._id, data.project))
+      .limit(1);
     if (!project) throw new ActionError("The project no longer exists.", { project: "Not found" });
     const pcaps = projectCaps(user, project);
     const qaManager = can(user, "qa.manage");
@@ -63,37 +74,44 @@ export async function createIssue(input: Record<string, unknown>): Promise<Actio
 
     if (data.task) {
       const unrestricted = qaManager || can(user, "tasks.view_all");
-      const task = await Task.findOne({ $and: [{ _id: data.task, project: project._id }, unrestricted ? {} : await taskFilter(user)] }, { _id: 1 }).lean();
+      const [task] = await db()
+        .select({ id: Task._id })
+        .from(Task)
+        .where(and(eq(Task._id, data.task), eq(Task.project, project._id), unrestricted ? undefined : await taskFilter(user)))
+        .limit(1);
       if (!task) throw new ActionError("Choose a task of this project.", { task: "Choose a task of this project" });
     }
 
     const attachments = await resolveFileRefs(user, data.attachments);
     const issueNo = await nextNumber("issue", ID_PREFIX.issue, 4);
-    const issue = await Issue.create({
-      issueNo,
-      project: project._id,
-      task: data.task,
-      title: data.title,
-      description: data.description,
-      severity: data.severity,
-      priority: data.priority,
-      stepsToReproduce: data.stepsToReproduce,
-      environment: data.environment,
-      attachments,
-      assignee: data.assignee,
-      reporter: user._id,
-      reportedDate: todayKey(),
-      targetDate: data.targetDate,
-      status: data.assignee ? "assigned" : "open",
-      history: [historyEntry(user, "Issue reported", { to: data.assignee ? "Assigned" : "Open" })],
-    });
+    const [issue] = await db()
+      .insert(Issue)
+      .values({
+        issueNo,
+        project: project._id,
+        task: data.task,
+        title: data.title,
+        description: data.description,
+        severity: data.severity,
+        priority: data.priority,
+        stepsToReproduce: data.stepsToReproduce,
+        environment: data.environment,
+        attachments: withIds(attachments),
+        assignee: data.assignee,
+        reporter: user._id,
+        reportedDate: todayKey(),
+        targetDate: data.targetDate,
+        status: data.assignee ? "assigned" : "open",
+        history: [historyEntry(user, "Issue reported", { to: data.assignee ? "Assigned" : "Open" })],
+      })
+      .returning();
 
     // Files were uploaded before the issue existed; bind them to it so the team can download them.
     if (attachments.length > 0) {
-      await StoredFile.updateMany(
-        { _id: { $in: attachments.map((a) => a.file) }, entityType: "issue", $or: [{ entityId: null }, { entityId: { $exists: false } }] },
-        { $set: { entityId: issue._id.toString() } },
-      );
+      await db()
+        .update(StoredFile)
+        .set({ entityId: issue._id })
+        .where(and(inList(StoredFile._id, attachments.map((a) => a.file)), eq(StoredFile.entityType, "issue"), isNull(StoredFile.entityId)));
     }
     await audit(user, { action: "create", entity: "issue", entityId: issue._id, ref: issueNo, summary: `Reported ${issueNo} (${data.severity}) on ${project.projectNo}: ${issue.title}` });
     const link = `/qa/${issue._id}`;
@@ -101,7 +119,7 @@ export async function createIssue(input: Record<string, unknown>): Promise<Actio
       await notify([data.assignee], { type: "qa", title: `Issue assigned to you: ${issue.title}`, body: `${issueNo} · ${data.severity} · ${project.title}`, link, actionable: true, priority: data.severity === "critical" ? "high" : "normal" }, [user._id]);
     }
     await notify([project.manager], { type: "qa", title: `New ${data.severity} issue: ${issue.title}`, body: `${issueNo} · ${project.title}`, link }, [user._id, data.assignee]);
-    return { id: issue._id.toString() };
+    return { id: issue._id };
   }, "Issue reported");
 }
 
@@ -125,22 +143,28 @@ export async function triageIssue(id: string, input: Record<string, unknown>): P
     if (issue.severity !== data.severity) notes.push(`Severity ${issue.severity} → ${data.severity}`);
     if (issue.priority !== data.priority) notes.push(`Priority ${issue.priority} → ${data.priority}`);
     if ((issue.targetDate ?? "") !== (data.targetDate ?? "")) notes.push(`Target ${issue.targetDate ?? "none"} → ${data.targetDate ?? "none"}`);
-    const previousAssignee = issue.assignee?.toString();
+    const previousAssignee = issue.assignee ?? undefined;
     const assigneeChanged = previousAssignee !== data.assignee;
 
-    issue.severity = data.severity;
-    issue.priority = data.priority;
-    issue.targetDate = data.targetDate;
-    issue.set("assignee", data.assignee);
+    let status = issue.status;
     if (assigneeChanged) {
       notes.push(data.assignee ? "Reassigned" : "Unassigned");
       // Assignment moves a fresh issue from open → assigned; clearing it returns an untouched one to open.
-      if (data.assignee && issue.status === "open") issue.status = "assigned";
-      if (!data.assignee && issue.status === "assigned") issue.status = "open";
+      if (data.assignee && status === "open") status = "assigned";
+      if (!data.assignee && status === "assigned") status = "open";
     }
     if (notes.length === 0) return null;
-    issue.history.push(historyEntry(user, assigneeChanged && data.assignee ? "Assigned" : "Issue updated", { note: notes.join(" · ") }));
-    await issue.save();
+    await db()
+      .update(Issue)
+      .set({
+        severity: data.severity,
+        priority: data.priority,
+        targetDate: data.targetDate ?? null,
+        assignee: data.assignee ?? null,
+        status,
+        history: jsonPush(Issue.history, historyEntry(user, assigneeChanged && data.assignee ? "Assigned" : "Issue updated", { note: notes.join(" · ") })),
+      })
+      .where(eq(Issue._id, issue._id));
 
     await audit(user, { action: assigneeChanged ? "assign" : "update", entity: "issue", entityId: issue._id, ref: issue.issueNo, summary: `Triaged ${issue.issueNo}: ${notes.join("; ")}` });
     if (assigneeChanged && data.assignee) {
@@ -175,21 +199,21 @@ async function transition(id: string, step: IssueStep, extra: { resolution?: str
   }
 
   const previous = issue.status;
-  issue.status = rule.to;
+  const patch: SQLiteUpdateSetSource<typeof Issue> = { status: rule.to };
   if (step === "fix") {
-    issue.resolution = extra.resolution;
-    issue.resolvedAt = new Date();
+    patch.resolution = extra.resolution ?? null;
+    patch.resolvedAt = new Date();
   }
-  if (step === "verify") issue.verifiedBy = user._id;
-  if (step === "close") issue.closedAt = new Date();
+  if (step === "verify") patch.verifiedBy = user._id;
+  if (step === "close") patch.closedAt = new Date();
   if (step === "reopen") {
-    issue.reopenCount += 1;
-    issue.resolvedAt = undefined;
-    issue.closedAt = undefined;
-    issue.verifiedBy = undefined;
+    patch.reopenCount = increment(Issue.reopenCount, 1);
+    patch.resolvedAt = null;
+    patch.closedAt = null;
+    patch.verifiedBy = null;
   }
-  issue.history.push(historyEntry(user, rule.label, { from: statusLabel("issue", previous), to: statusLabel("issue", rule.to), note: extra.resolution ?? extra.note }));
-  await issue.save();
+  patch.history = jsonPush(Issue.history, historyEntry(user, rule.label, { from: statusLabel("issue", previous), to: statusLabel("issue", rule.to), note: extra.resolution ?? extra.note }));
+  await db().update(Issue).set(patch).where(eq(Issue._id, issue._id));
 
   await audit(user, { action: "status", entity: "issue", entityId: issue._id, ref: issue.issueNo, summary: `${issue.issueNo}: ${statusLabel("issue", previous)} → ${statusLabel("issue", rule.to)}` });
   const title = `${issue.issueNo} ${rule.label.toLowerCase()}: ${issue.title}`;
@@ -257,8 +281,10 @@ export async function addIssueComment(id: string, input: Record<string, unknown>
     const data = parse(z.object({ text: zs.text("Comment", 5000), attachments: zs.ids() }), input);
     const { issue, project } = await loadIssue(user, id);
     const attachments = await resolveFileRefs(user, data.attachments);
-    issue.comments.push({ user: user._id, userName: user.name, text: data.text, attachments, at: new Date() });
-    await issue.save();
+    await db()
+      .update(Issue)
+      .set({ comments: jsonPush(Issue.comments, { _id: newId(), user: user._id, userName: user.name, text: data.text, attachments: withIds(attachments), at: new Date() }) })
+      .where(eq(Issue._id, issue._id));
     await notify([issue.assignee, issue.reporter, project?.manager], { type: "qa", title: `${user.name} commented on ${issue.issueNo}`, body: data.text.slice(0, 200), link: `/qa/${issue._id}` }, [user._id]);
     return null;
   }, "Comment added");
@@ -272,9 +298,13 @@ export async function addIssueAttachments(id: string, input: Record<string, unkn
     if (!caps.manage && !caps.isReporter && !caps.isAssignee) throw new ActionError("You can't attach files to this issue.");
     const files = await resolveFileRefs(user, data.attachments);
     if (files.length === 0) throw new ActionError("Choose at least one file to attach.");
-    issue.attachments.push(...files);
-    issue.history.push(historyEntry(user, "Files attached", { note: files.map((f) => f.name).join(", ") }));
-    await issue.save();
+    await db()
+      .update(Issue)
+      .set({
+        attachments: jsonPush(Issue.attachments, ...withIds(files)),
+        history: jsonPush(Issue.history, historyEntry(user, "Files attached", { note: files.map((f) => f.name).join(", ") })),
+      })
+      .where(eq(Issue._id, issue._id));
     return null;
   }, "Files attached");
 }

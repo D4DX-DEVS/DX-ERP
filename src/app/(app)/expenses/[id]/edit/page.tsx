@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
+import { eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Expense } from "@/lib/models";
 import { PageBody, PageHeader } from "@/components/ui/page";
 import { todayKey } from "@/lib/time";
@@ -14,10 +15,9 @@ export default async function EditExpensePage({ params }: { params: Promise<{ id
   const user = await requireUser();
   const { id } = await params;
   if (!isObjectId(id)) notFound();
-  await connectDB();
-  const e = await Expense.findById(id).lean();
+  const [e] = await db().select().from(Expense).where(eq(Expense._id, id)).limit(1);
   // Another person's expense looks the same as a missing one.
-  if (!e || e.user.toString() !== user.id) notFound();
+  if (!e || e.user !== user.id) notFound();
   if (e.status !== "draft" && e.status !== "rejected") redirect(`/expenses/${id}`);
   const options = await loadExpenseFormOptions(user);
   return (
@@ -37,12 +37,12 @@ export default async function EditExpensePage({ params }: { params: Promise<{ id
           taxAmount: e.taxAmount ? String(e.taxAmount) : "",
           vendor: e.vendor ?? "",
           description: e.description,
-          project: e.project?.toString() ?? "",
-          client: e.client?.toString() ?? "",
-          department: e.department?.toString() ?? "",
+          project: e.project ?? "",
+          client: e.client ?? "",
+          department: e.department ?? "",
           type: e.type,
           paymentMode: e.paymentMode ?? "",
-          receipts: e.receipts.map((r) => ({ id: r.file.toString(), name: r.name, size: r.size ?? 0, mime: r.mime ?? "application/octet-stream" })),
+          receipts: e.receipts.map((r) => ({ id: r.file, name: r.name, size: r.size ?? 0, mime: r.mime ?? "application/octet-stream" })),
         }}
       />
     </PageBody>

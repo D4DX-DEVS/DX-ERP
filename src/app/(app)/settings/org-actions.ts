@@ -1,10 +1,12 @@
 "use server";
 
+import { and, desc, eq, gt, isNotNull, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { actionPermission, ActionError, parse, runAction, type ActionResult } from "@/lib/actions";
 import { audit, diff } from "@/lib/audit";
-import { escapeRegex } from "@/lib/format";
+import { db } from "@/lib/db";
 import { Asset, Department, Designation, Holiday, LeaveBalance, LeaveRequest, LeaveType, User } from "@/lib/models";
+import { eqIgnoreCase, inList, insertChunked, jsonLength } from "@/lib/sql";
 import { fmtDate } from "@/lib/time";
 import { isObjectId, zs } from "@/lib/validation";
 
@@ -14,8 +16,23 @@ function fieldError(field: string, message: string): never {
   throw new ActionError(message, { [field]: message });
 }
 
-function nameClash(name: string, id?: string) {
-  return { name: new RegExp(`^${escapeRegex(name)}$`, "i"), ...(id ? { _id: { $ne: id } } : {}) };
+/** Another department / designation already uses this name (case-insensitive, exact). */
+async function departmentNameTaken(name: string, id?: string): Promise<boolean> {
+  const [hit] = await db()
+    .select({ id: Department._id })
+    .from(Department)
+    .where(and(eqIgnoreCase(Department.name, name), id ? ne(Department._id, id) : undefined))
+    .limit(1);
+  return Boolean(hit);
+}
+
+async function designationNameTaken(name: string, id?: string): Promise<boolean> {
+  const [hit] = await db()
+    .select({ id: Designation._id })
+    .from(Designation)
+    .where(and(eqIgnoreCase(Designation.name, name), id ? ne(Designation._id, id) : undefined))
+    .limit(1);
+  return Boolean(hit);
 }
 
 /* ───────────────────────────── Departments ───────────────────────────── */
@@ -33,20 +50,31 @@ export async function saveDepartment(input: Record<string, unknown>): Promise<Ac
   return runAction(async () => {
     const user = await actionPermission("settings.manage");
     const data = parse(departmentSchema, input);
-    if (await Department.exists(nameClash(data.name, data.id))) fieldError("name", "A department with this name already exists");
-    if (data.head && !(await User.exists({ _id: data.head, personType: { $in: ["employee", "trainee", "intern"] } }))) fieldError("head", "Choose a person from the staff list");
+    if (await departmentNameTaken(data.name, data.id)) fieldError("name", "A department with this name already exists");
+    if (data.head) {
+      const [head] = await db()
+        .select({ id: User._id })
+        .from(User)
+        .where(and(eq(User._id, data.head), inList(User.personType, ["employee", "trainee", "intern"])))
+        .limit(1);
+      if (!head) fieldError("head", "Choose a person from the staff list");
+    }
 
     const fields = { name: data.name, code: data.code, head: data.head, description: data.description, active: data.active };
     if (!data.id) {
-      const doc = await Department.create(fields);
+      const [doc] = await db().insert(Department).values(fields).returning({ _id: Department._id, name: Department.name });
       await audit(user, { action: "config", entity: "department", entityId: doc._id, ref: doc.name, summary: `Created department ${doc.name}` });
-      return { id: doc._id.toString() };
+      return { id: doc._id };
     }
-    const before = await Department.findById(data.id).lean();
+    const [before] = await db().select().from(Department).where(eq(Department._id, data.id)).limit(1);
     if (!before) throw new ActionError("Department not found");
-    await Department.updateOne({ _id: data.id }, unsetOptional(fields));
+    // Cleared optional fields are set to null, so edits can clear them.
+    await db()
+      .update(Department)
+      .set({ name: data.name, code: data.code || null, head: data.head || null, description: data.description || null, active: data.active })
+      .where(eq(Department._id, data.id));
     const changes = diff(
-      { name: before.name, code: before.code, head: before.head?.toString(), description: before.description, active: before.active },
+      { name: before.name, code: before.code, head: before.head, description: before.description, active: before.active },
       { name: data.name, code: data.code, head: data.head, description: data.description, active: data.active },
       ["name", "code", "head", "description", "active"],
     );
@@ -55,32 +83,21 @@ export async function saveDepartment(input: Record<string, unknown>): Promise<Ac
   }, "Department saved");
 }
 
-/** `$set` for present optional values and `$unset` for cleared ones, so edits can clear fields. */
-function unsetOptional(fields: Record<string, unknown>): { $set?: Record<string, unknown>; $unset?: Record<string, ""> } {
-  const set: Record<string, unknown> = {};
-  const unset: Record<string, ""> = {};
-  for (const [k, v] of Object.entries(fields)) {
-    if (v === undefined || v === "") unset[k] = "";
-    else set[k] = v;
-  }
-  return { $set: set, ...(Object.keys(unset).length ? { $unset: unset } : {}) };
-}
-
 export async function deleteDepartment(id: string): Promise<ActionResult<null>> {
   return runAction(async () => {
     const user = await actionPermission("settings.manage");
     if (!isObjectId(id)) throw new ActionError("Department not found");
-    const dept = await Department.findById(id).lean();
+    const [dept] = await db().select().from(Department).where(eq(Department._id, id)).limit(1);
     if (!dept) throw new ActionError("Department not found");
     const [people, designations, assets] = await Promise.all([
-      User.countDocuments({ department: id }),
-      Designation.countDocuments({ department: id }),
-      Asset.countDocuments({ department: id }),
+      db().$count(User, eq(User.department, id)),
+      db().$count(Designation, eq(Designation.department, id)),
+      db().$count(Asset, eq(Asset.department, id)),
     ]);
     if (people > 0) throw new ActionError(`${people} ${people === 1 ? "person is" : "people are"} assigned to ${dept.name}. Reassign them first, or mark the department inactive.`);
     if (designations > 0) throw new ActionError(`${designations} designation(s) belong to ${dept.name}. Move or remove them first.`);
     if (assets > 0) throw new ActionError(`${assets} asset(s) are assigned to ${dept.name}. Transfer them first, or mark the department inactive.`);
-    await Department.deleteOne({ _id: id });
+    await db().delete(Department).where(eq(Department._id, id));
     await audit(user, { action: "config", entity: "department", entityId: id, ref: dept.name, summary: `Deleted department ${dept.name}` });
     return null;
   }, "Department deleted");
@@ -100,20 +117,29 @@ export async function saveDesignation(input: Record<string, unknown>): Promise<A
   return runAction(async () => {
     const user = await actionPermission("settings.manage");
     const data = parse(designationSchema, input);
-    if (await Designation.exists(nameClash(data.name, data.id))) fieldError("name", "A designation with this name already exists");
-    if (data.department && !(await Department.exists({ _id: data.department }))) fieldError("department", "Department not found");
+    if (await designationNameTaken(data.name, data.id)) fieldError("name", "A designation with this name already exists");
+    if (data.department) {
+      const [dept] = await db().select({ id: Department._id }).from(Department).where(eq(Department._id, data.department)).limit(1);
+      if (!dept) fieldError("department", "Department not found");
+    }
     const level = data.level === undefined ? undefined : Math.round(data.level);
 
     if (!data.id) {
-      const doc = await Designation.create({ name: data.name, department: data.department, level, active: data.active });
+      const [doc] = await db()
+        .insert(Designation)
+        .values({ name: data.name, department: data.department, level, active: data.active })
+        .returning({ _id: Designation._id, name: Designation.name });
       await audit(user, { action: "config", entity: "designation", entityId: doc._id, ref: doc.name, summary: `Created designation ${doc.name}` });
-      return { id: doc._id.toString() };
+      return { id: doc._id };
     }
-    const before = await Designation.findById(data.id).lean();
+    const [before] = await db().select().from(Designation).where(eq(Designation._id, data.id)).limit(1);
     if (!before) throw new ActionError("Designation not found");
-    await Designation.updateOne({ _id: data.id }, unsetOptional({ name: data.name, department: data.department, level, active: data.active }));
+    await db()
+      .update(Designation)
+      .set({ name: data.name, department: data.department || null, level: level ?? null, active: data.active })
+      .where(eq(Designation._id, data.id));
     const changes = diff(
-      { name: before.name, department: before.department?.toString(), level: before.level, active: before.active },
+      { name: before.name, department: before.department, level: before.level, active: before.active },
       { name: data.name, department: data.department, level, active: data.active },
       ["name", "department", "level", "active"],
     );
@@ -126,11 +152,11 @@ export async function deleteDesignation(id: string): Promise<ActionResult<null>>
   return runAction(async () => {
     const user = await actionPermission("settings.manage");
     if (!isObjectId(id)) throw new ActionError("Designation not found");
-    const item = await Designation.findById(id).lean();
+    const [item] = await db().select().from(Designation).where(eq(Designation._id, id)).limit(1);
     if (!item) throw new ActionError("Designation not found");
-    const people = await User.countDocuments({ designation: id });
+    const people = await db().$count(User, eq(User.designation, id));
     if (people > 0) throw new ActionError(`${people} ${people === 1 ? "person holds" : "people hold"} the designation ${item.name}. Reassign them first, or mark it inactive.`);
-    await Designation.deleteOne({ _id: id });
+    await db().delete(Designation).where(eq(Designation._id, id));
     await audit(user, { action: "config", entity: "designation", entityId: id, ref: item.name, summary: `Deleted designation ${item.name}` });
     return null;
   }, "Designation deleted");
@@ -150,17 +176,21 @@ export async function saveHoliday(input: Record<string, unknown>): Promise<Actio
     const user = await actionPermission("settings.manage");
     const data = parse(holidaySchema, input);
     if (!isRealDate(data.date)) fieldError("date", "Enter a valid date");
-    const clash = await Holiday.findOne({ date: data.date, ...(data.id ? { _id: { $ne: data.id } } : {}) }, { name: 1 }).lean();
+    const [clash] = await db()
+      .select({ name: Holiday.name })
+      .from(Holiday)
+      .where(and(eq(Holiday.date, data.date), data.id ? ne(Holiday._id, data.id) : undefined))
+      .limit(1);
     if (clash) fieldError("date", `${fmtDate(data.date)} is already a holiday (${clash.name})`);
 
     if (!data.id) {
-      const doc = await Holiday.create({ date: data.date, name: data.name, optional: data.optional });
+      const [doc] = await db().insert(Holiday).values({ date: data.date, name: data.name, optional: data.optional }).returning({ _id: Holiday._id });
       await audit(user, { action: "config", entity: "holiday", entityId: doc._id, ref: data.date, summary: `Added ${data.optional ? "optional " : ""}holiday ${data.name} on ${fmtDate(data.date)}` });
-      return { id: doc._id.toString() };
+      return { id: doc._id };
     }
-    const before = await Holiday.findById(data.id).lean();
+    const [before] = await db().select().from(Holiday).where(eq(Holiday._id, data.id)).limit(1);
     if (!before) throw new ActionError("Holiday not found");
-    await Holiday.updateOne({ _id: data.id }, { $set: { date: data.date, name: data.name, optional: data.optional } });
+    await db().update(Holiday).set({ date: data.date, name: data.name, optional: data.optional }).where(eq(Holiday._id, data.id));
     const changes = diff({ date: before.date, name: before.name, optional: before.optional }, { date: data.date, name: data.name, optional: data.optional }, ["date", "name", "optional"]);
     if (changes.length) await audit(user, { action: "config", entity: "holiday", entityId: data.id, ref: data.date, summary: `Updated holiday ${data.name} · ${changes.map((c) => c.field).join(", ")}`, changes });
     return { id: data.id };
@@ -171,7 +201,7 @@ export async function deleteHoliday(id: string): Promise<ActionResult<null>> {
   return runAction(async () => {
     const user = await actionPermission("settings.manage");
     if (!isObjectId(id)) throw new ActionError("Holiday not found");
-    const doc = await Holiday.findByIdAndDelete(id).lean();
+    const [doc] = await db().delete(Holiday).where(eq(Holiday._id, id)).returning({ date: Holiday.date, name: Holiday.name });
     if (!doc) throw new ActionError("Holiday not found");
     await audit(user, { action: "config", entity: "holiday", entityId: id, ref: doc.date, summary: `Removed holiday ${doc.name} (${fmtDate(doc.date)})` });
     return null;
@@ -196,9 +226,9 @@ export async function bulkAddHolidays(input: Record<string, unknown>): Promise<A
     if (bad.length > 0) throw new ActionError(`Couldn't read ${bad.slice(0, 5).join(", ")}${bad.length > 5 ? ` and ${bad.length - 5} more` : ""}. Use "yyyy-mm-dd, Holiday name".`, { text: "Check the format of the highlighted lines" });
 
     const unique = [...new Map(parsed.map((p) => [p.date, p])).values()];
-    const existing = new Set((await Holiday.find({ date: { $in: unique.map((p) => p.date) } }, { date: 1 }).lean()).map((h) => h.date));
+    const existing = new Set((await db().select({ date: Holiday.date }).from(Holiday).where(inList(Holiday.date, unique.map((p) => p.date)))).map((h) => h.date));
     const fresh = unique.filter((p) => !existing.has(p.date));
-    if (fresh.length > 0) await Holiday.insertMany(fresh, { ordered: false });
+    if (fresh.length > 0) await insertChunked(db(), Holiday, fresh);
     const skipped = unique.filter((p) => existing.has(p.date)).map((p) => p.date);
     if (fresh.length > 0) {
       await audit(user, {
@@ -238,7 +268,12 @@ export async function saveLeaveType(input: Record<string, unknown>): Promise<Act
   return runAction(async () => {
     const user = await actionPermission("settings.manage");
     const data = parse(leaveTypeSchema, input);
-    if (await LeaveType.exists({ code: data.code, ...(data.id ? { _id: { $ne: data.id } } : {}) })) fieldError("code", "Another leave type already uses this code");
+    const [codeClash] = await db()
+      .select({ id: LeaveType._id })
+      .from(LeaveType)
+      .where(and(eq(LeaveType.code, data.code), data.id ? ne(LeaveType._id, data.id) : undefined))
+      .limit(1);
+    if (codeClash) fieldError("code", "Another leave type already uses this code");
     const carry = data.carryForward;
     const values = {
       name: data.name,
@@ -257,15 +292,21 @@ export async function saveLeaveType(input: Record<string, unknown>): Promise<Act
     };
 
     if (!data.id) {
-      const last = await LeaveType.findOne({}, { order: 1 }).sort({ order: -1 }).lean();
-      const doc = await LeaveType.create({ ...values, order: data.order ?? (last?.order ?? 0) + 1 });
+      const [last] = await db().select({ order: LeaveType.order }).from(LeaveType).orderBy(desc(LeaveType.order)).limit(1);
+      const [doc] = await db()
+        .insert(LeaveType)
+        .values({ ...values, order: data.order ?? (last?.order ?? 0) + 1 })
+        .returning({ _id: LeaveType._id, name: LeaveType.name, code: LeaveType.code, annualQuota: LeaveType.annualQuota });
       await audit(user, { action: "config", entity: "leave_type", entityId: doc._id, ref: doc.code, summary: `Created leave type ${doc.name} (${doc.code}) · ${doc.annualQuota} days/year` });
-      return { id: doc._id.toString() };
+      return { id: doc._id };
     }
-    const before = await LeaveType.findById(data.id).lean();
+    const [before] = await db().select().from(LeaveType).where(eq(LeaveType._id, data.id)).limit(1);
     if (!before) throw new ActionError("Leave type not found");
     const order = data.order ?? before.order;
-    await LeaveType.updateOne({ _id: data.id }, unsetOptional({ ...values, order }));
+    await db()
+      .update(LeaveType)
+      .set({ ...values, requiresAttachmentAfterDays: values.requiresAttachmentAfterDays ?? null, order })
+      .where(eq(LeaveType._id, data.id));
     const changes = diff(
       before as unknown as Record<string, unknown>,
       { ...values, order } as Record<string, unknown>,
@@ -281,14 +322,20 @@ export async function deleteLeaveType(id: string): Promise<ActionResult<{ deacti
   return runAction(async () => {
     const user = await actionPermission("settings.manage");
     if (!isObjectId(id)) throw new ActionError("Leave type not found");
-    const type = await LeaveType.findById(id).lean();
+    const [type] = await db().select().from(LeaveType).where(eq(LeaveType._id, id)).limit(1);
     if (!type) throw new ActionError("Leave type not found");
     const [requests, history] = await Promise.all([
-      LeaveRequest.countDocuments({ leaveType: id }),
-      LeaveBalance.countDocuments({ leaveType: id, $or: [{ carriedForward: { $ne: 0 } }, { adjustment: { $ne: 0 } }, { quotaOverride: { $exists: true } }, { "notes.0": { $exists: true } }] }),
+      db().$count(LeaveRequest, eq(LeaveRequest.leaveType, id)),
+      db().$count(
+        LeaveBalance,
+        and(
+          eq(LeaveBalance.leaveType, id),
+          or(ne(LeaveBalance.carriedForward, 0), ne(LeaveBalance.adjustment, 0), isNotNull(LeaveBalance.quotaOverride), gt(jsonLength(LeaveBalance.notes), 0)),
+        ),
+      ),
     ]);
     if (requests > 0 || history > 0) {
-      if (type.active) await LeaveType.updateOne({ _id: id }, { $set: { active: false } });
+      if (type.active) await db().update(LeaveType).set({ active: false }).where(eq(LeaveType._id, id));
       await audit(user, {
         action: "config",
         entity: "leave_type",
@@ -299,8 +346,7 @@ export async function deleteLeaveType(id: string): Promise<ActionResult<{ deacti
       });
       return { deactivated: true };
     }
-    await LeaveBalance.deleteMany({ leaveType: id });
-    await LeaveType.deleteOne({ _id: id });
+    await db().batch([db().delete(LeaveBalance).where(eq(LeaveBalance.leaveType, id)), db().delete(LeaveType).where(eq(LeaveType._id, id))]);
     await audit(user, { action: "config", entity: "leave_type", entityId: id, ref: type.code, summary: `Deleted leave type ${type.name} (${type.code})` });
     return { deactivated: false };
   });

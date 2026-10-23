@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { Check, Pencil, Plus } from "lucide-react";
+import { desc, eq } from "drizzle-orm";
 import { can, requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Activity, Client, Project, Proposal } from "@/lib/models";
 import { namesFor, peopleOptions } from "@/lib/people";
 import { getSettings } from "@/lib/settings";
@@ -30,34 +31,61 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
   const { id } = await params;
   const user = await requirePagePermission("crm.view");
   const lead = await pageLead(user, id);
-  await connectDB();
   const settings = await getSettings();
   const stages = settings.pipelineStages;
   const canManage = can(user, "crm.manage");
   const canCreateProposal = can(user, "proposals.manage");
 
   const [client, activities, proposals, project, people] = await Promise.all([
-    lead.client ? Client.findById(lead.client, { name: 1, clientNo: 1, confidential: 1 }).lean() : null,
-    Activity.find({ lead: lead._id }).sort({ at: -1 }).limit(200).lean(),
-    can(user, "proposals.view") ? Proposal.find({ lead: lead._id }, { proposalNo: 1, title: 1, status: 1, version: 1, total: 1, kind: 1 }).sort({ createdAt: -1 }).lean() : [],
-    lead.project ? Project.findById(lead.project, { projectNo: 1, title: 1, status: 1 }).lean() : null,
+    lead.client
+      ? db().select({ _id: Client._id, name: Client.name, clientNo: Client.clientNo, confidential: Client.confidential }).from(Client).where(eq(Client._id, lead.client)).limit(1).then((r) => r[0])
+      : undefined,
+    db()
+      .select({
+        _id: Activity._id,
+        type: Activity.type,
+        subject: Activity.subject,
+        notes: Activity.notes,
+        at: Activity.at,
+        dueAt: Activity.dueAt,
+        done: Activity.done,
+        doneAt: Activity.doneAt,
+        outcome: Activity.outcome,
+        byName: Activity.byName,
+        by: Activity.by,
+        assignedTo: Activity.assignedTo,
+      })
+      .from(Activity)
+      .where(eq(Activity.lead, lead._id))
+      .orderBy(desc(Activity.at))
+      .limit(200),
+    can(user, "proposals.view")
+      ? db()
+          .select({ _id: Proposal._id, proposalNo: Proposal.proposalNo, title: Proposal.title, status: Proposal.status, version: Proposal.version, total: Proposal.total })
+          .from(Proposal)
+          .where(eq(Proposal.lead, lead._id))
+          .orderBy(desc(Proposal.createdAt))
+      : [],
+    lead.project
+      ? db().select({ _id: Project._id, projectNo: Project.projectNo, title: Project.title, status: Project.status }).from(Project).where(eq(Project._id, lead.project)).limit(1).then((r) => r[0])
+      : undefined,
     canManage ? peopleOptions() : [],
   ]);
   const names = await namesFor([lead.assignedTo, lead.createdBy, ...activities.map((a) => a.assignedTo)]);
 
   const feed: FeedItem[] = activities.map((a) => ({
-    id: a._id.toString(),
+    id: a._id,
     type: a.type,
     subject: a.subject,
-    notes: a.notes,
+    notes: a.notes ?? undefined,
     at: a.at,
-    dueAt: a.dueAt,
+    dueAt: a.dueAt ?? undefined,
     done: a.done,
-    doneAt: a.doneAt,
-    outcome: a.outcome,
-    byName: a.byName,
-    assigneeName: a.assignedTo ? names.get(a.assignedTo.toString()) : undefined,
-    canComplete: canManage || [a.assignedTo, a.by].some((p) => p?.toString() === user.id),
+    doneAt: a.doneAt ?? undefined,
+    outcome: a.outcome ?? undefined,
+    byName: a.byName ?? undefined,
+    assigneeName: a.assignedTo ? names.get(a.assignedTo) : undefined,
+    canComplete: canManage || [a.assignedTo, a.by].some((p) => p === user.id),
   }));
 
   // Stage stepper
@@ -71,7 +99,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
     .sort((a, b) => b.at.getTime() - a.at.getTime())
     .map((h, i) => {
       const label = (k?: string) => (k ? optionLabel(stages, k) : "—");
-      const base = { id: h._id?.toString() ?? String(i), meta: h.byName, at: h.at };
+      const base = { id: h._id ?? String(i), meta: h.byName, at: h.at };
       switch (h.action) {
         case "created":
           return { ...base, title: "Lead created" };
@@ -172,7 +200,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
             <CardHeader title="Activity" subtitle="Calls, meetings, emails, WhatsApp, notes and follow-ups" />
             {canManage && (
               <div className="border-b border-line-soft px-5 pb-4">
-                <ActivityComposer lead={id} client={lead.client?.toString()} people={people} currentUserId={user.id} />
+                <ActivityComposer lead={id} client={lead.client ?? undefined} people={people} currentUserId={user.id} />
               </div>
             )}
             <ActivityFeed items={feed} />
@@ -202,7 +230,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
                   { label: "Email", value: lead.email ? <a href={`mailto:${lead.email}`} className="text-brand-600 hover:text-brand-800">{lead.email}</a> : undefined },
                   { label: "Phone", value: lead.phone ? <a href={`tel:${lead.phone}`} className="text-brand-600 hover:text-brand-800">{lead.phone}</a> : undefined },
                   { label: "Source", value: lead.source },
-                  { label: "Owner", value: lead.assignedTo ? names.get(lead.assignedTo.toString()) : "Unassigned" },
+                  { label: "Owner", value: lead.assignedTo ? names.get(lead.assignedTo) : "Unassigned" },
                   { label: "Expected value", value: lead.expectedValue ? inr(lead.expectedValue) : undefined },
                   { label: "Client budget", value: lead.budget ? inr(lead.budget) : undefined },
                   { label: "Expected close", value: lead.expectedCloseDate ? fmtDate(lead.expectedCloseDate) : undefined },
@@ -211,7 +239,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
                     : []),
                   ...(lead.status === "lost" ? [{ label: "Lost reason", value: lostNote ?? lead.lostReason }] : []),
                   ...(lead.closedAt ? [{ label: lead.status === "won" ? "Won on" : "Lost on", value: fmtDate(lead.closedAt) }] : []),
-                  { label: "Created", value: `${fmtDate(lead.createdAt)}${lead.createdBy ? ` · ${names.get(lead.createdBy.toString()) ?? ""}` : ""}` },
+                  { label: "Created", value: `${fmtDate(lead.createdAt)}${lead.createdBy ? ` · ${names.get(lead.createdBy) ?? ""}` : ""}` },
                 ]}
               />
               {lead.requirement && (
@@ -228,7 +256,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
               <CardHeader title="Linked work" />
               <CardBody className="flex flex-col gap-2">
                 {proposals.map((p) => (
-                  <Link key={p._id.toString()} href={`/proposals/${p._id}`} className="flex items-center justify-between gap-2 rounded-lg border border-line px-3 py-2 text-[13px] hover:border-brand-200 hover:bg-brand-50">
+                  <Link key={p._id} href={`/proposals/${p._id}`} className="flex items-center justify-between gap-2 rounded-lg border border-line px-3 py-2 text-[13px] hover:border-brand-200 hover:bg-brand-50">
                     <span className="min-w-0">
                       <span className="block truncate font-medium text-ink">
                         {p.proposalNo} · {p.title}
@@ -262,7 +290,7 @@ export default async function LeadPage({ params }: { params: Promise<{ id: strin
                 remove={removeAttachment.bind(null, "lead", id)}
                 canManage={canManage}
                 confidential={Boolean(client?.confidential)}
-                files={lead.attachments.map((a) => ({ refId: a._id?.toString() ?? a.file.toString(), file: a.file.toString(), name: a.name, size: a.size }))}
+                files={lead.attachments.map((a) => ({ refId: a._id ?? a.file, file: a.file, name: a.name, size: a.size }))}
               />
             </CardBody>
           </Card>

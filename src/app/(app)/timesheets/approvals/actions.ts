@@ -1,10 +1,13 @@
 "use server";
 
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { actionUser, ActionError, parse, runAction, type ActionResult } from "@/lib/actions";
 import { audit } from "@/lib/audit";
+import { db } from "@/lib/db";
 import { TimesheetEntry } from "@/lib/models";
 import { notify } from "@/lib/notify";
+import { inList, jsonPush } from "@/lib/sql";
 import { formatDuration } from "@/lib/time";
 import { isObjectId, zs } from "@/lib/validation";
 import { historyEntry, peopleMap, timesheetScope } from "@/lib/work-access";
@@ -18,20 +21,23 @@ async function loadReviewable(ids: string[]) {
   const entryIds = parse(idsSchema, ids);
   const scope = await timesheetScope(user, "approve");
   if (!scope.hasAccess) throw new ActionError("You don't have permission to review timesheets.");
-  const entries = await TimesheetEntry.find({ _id: { $in: entryIds }, status: "submitted" });
+  const entries = await db()
+    .select({ _id: TimesheetEntry._id, user: TimesheetEntry.user, project: TimesheetEntry.project, reviewer: TimesheetEntry.reviewer, weekStart: TimesheetEntry.weekStart, minutes: TimesheetEntry.minutes })
+    .from(TimesheetEntry)
+    .where(and(inList(TimesheetEntry._id, entryIds), eq(TimesheetEntry.status, "submitted")));
   if (entries.length === 0) throw new ActionError("These entries are no longer waiting for review.");
-  if (entries.some((e) => e.user.toString() === user._id.toString())) throw new ActionError("You can't review your own time.");
+  if (entries.some((e) => e.user === user._id)) throw new ActionError("You can't review your own time.");
   const blocked = entries.filter((e) => !scope.includes(e));
   if (blocked.length) throw new ActionError(`You can't review ${blocked.length} of these entries.`);
   return { user, entries };
 }
 
 /** Sends one notification per person and week to say how their entries were decided. */
-async function notifyOwners(entries: { user: { toString(): string }; weekStart: string; minutes: number }[], title: (week: string) => string, body: (minutes: number, count: number) => string, actorId: string) {
+async function notifyOwners(entries: { user: string; weekStart: string; minutes: number }[], title: (week: string) => string, body: (minutes: number, count: number) => string, actorId: string) {
   const groups = new Map<string, { owner: string; week: string; minutes: number; count: number }>();
   for (const e of entries) {
     const key = `${e.user}|${e.weekStart}`;
-    const g = groups.get(key) ?? { owner: e.user.toString(), week: e.weekStart, minutes: 0, count: 0 };
+    const g = groups.get(key) ?? { owner: e.user, week: e.weekStart, minutes: 0, count: 0 };
     g.minutes += e.minutes;
     g.count += 1;
     groups.set(key, g);
@@ -45,12 +51,12 @@ export async function approveEntries(ids: string[]): Promise<ActionResult<{ coun
   return runAction(async () => {
     const { user, entries } = await loadReviewable(ids);
     const now = new Date();
-    await TimesheetEntry.updateMany(
-      { _id: { $in: entries.map((e) => e._id) }, status: "submitted" },
-      { $set: { status: "approved", reviewedAt: now, reviewer: user._id, reviewerName: user.name, reviewNote: null }, $push: { history: historyEntry(user, "Approved") } },
-    );
+    await db()
+      .update(TimesheetEntry)
+      .set({ status: "approved", reviewedAt: now, reviewer: user._id, reviewerName: user.name, reviewNote: null, history: jsonPush(TimesheetEntry.history, historyEntry(user, "Approved")) })
+      .where(and(inList(TimesheetEntry._id, entries.map((e) => e._id)), eq(TimesheetEntry.status, "submitted")));
     const names = await peopleMap(entries.map((e) => e.user));
-    const owners = [...new Set(entries.map((e) => names.get(e.user.toString())?.name ?? "Unknown"))];
+    const owners = [...new Set(entries.map((e) => names.get(e.user)?.name ?? "Unknown"))];
     await audit(user, { action: "approve", entity: "timesheet", summary: `Approved ${entries.length} timesheet ${entries.length === 1 ? "entry" : "entries"} (${formatDuration(entries.reduce((s, e) => s + e.minutes, 0))}) for ${owners.join(", ")}` });
     await notifyOwners(entries, (w) => `Timesheet approved: ${weekRange(w)}`, (m, c) => `${c} ${c === 1 ? "entry" : "entries"} · ${formatDuration(m)} approved by ${user.name}`, user.id);
     return { count: entries.length };
@@ -62,12 +68,12 @@ export async function rejectEntries(ids: string[], reason: string): Promise<Acti
     const why = parse(zs.text("Reason", 1000), reason);
     const { user, entries } = await loadReviewable(ids);
     const now = new Date();
-    await TimesheetEntry.updateMany(
-      { _id: { $in: entries.map((e) => e._id) }, status: "submitted" },
-      { $set: { status: "rejected", reviewedAt: now, reviewer: user._id, reviewerName: user.name, reviewNote: why }, $push: { history: historyEntry(user, "Rejected", { note: why }) } },
-    );
+    await db()
+      .update(TimesheetEntry)
+      .set({ status: "rejected", reviewedAt: now, reviewer: user._id, reviewerName: user.name, reviewNote: why, history: jsonPush(TimesheetEntry.history, historyEntry(user, "Rejected", { note: why })) })
+      .where(and(inList(TimesheetEntry._id, entries.map((e) => e._id)), eq(TimesheetEntry.status, "submitted")));
     const names = await peopleMap(entries.map((e) => e.user));
-    const owners = [...new Set(entries.map((e) => names.get(e.user.toString())?.name ?? "Unknown"))];
+    const owners = [...new Set(entries.map((e) => names.get(e.user)?.name ?? "Unknown"))];
     await audit(user, { action: "reject", entity: "timesheet", summary: `Rejected ${entries.length} timesheet ${entries.length === 1 ? "entry" : "entries"} for ${owners.join(", ")}: ${why}` });
     await notifyOwners(entries, (w) => `Timesheet needs changes: ${weekRange(w)}`, () => why.slice(0, 200), user.id);
     return { count: entries.length };
@@ -81,15 +87,23 @@ export async function reopenEntry(id: string, reason: string): Promise<ActionRes
     if (!isObjectId(id)) throw new ActionError("Entry not found.");
     const why = parse(zs.text("Reason", 1000), reason);
     const scope = await timesheetScope(user, "approve");
-    const entry = await TimesheetEntry.findById(id);
+    const [entry] = await db()
+      .select({ _id: TimesheetEntry._id, user: TimesheetEntry.user, project: TimesheetEntry.project, reviewer: TimesheetEntry.reviewer, status: TimesheetEntry.status, minutes: TimesheetEntry.minutes, date: TimesheetEntry.date, weekStart: TimesheetEntry.weekStart })
+      .from(TimesheetEntry)
+      .where(eq(TimesheetEntry._id, id))
+      .limit(1);
     if (!entry) throw new ActionError("Entry not found.");
     if (entry.status !== "approved") throw new ActionError("Only approved entries can be reopened.");
     if (!scope.includes(entry)) throw new ActionError("You can't reopen this entry.");
-    entry.status = "draft";
-    entry.reviewedAt = undefined;
-    entry.submittedAt = undefined;
-    entry.history.push(historyEntry(user, "Reopened for correction", { from: "Approved", to: "Draft", note: why }));
-    await entry.save();
+    await db()
+      .update(TimesheetEntry)
+      .set({
+        status: "draft",
+        reviewedAt: null,
+        submittedAt: null,
+        history: jsonPush(TimesheetEntry.history, historyEntry(user, "Reopened for correction", { from: "Approved", to: "Draft", note: why })),
+      })
+      .where(eq(TimesheetEntry._id, entry._id));
     await audit(user, { action: "correct", entity: "timesheet", entityId: entry._id, summary: `Reopened an approved timesheet entry (${formatDuration(entry.minutes)} on ${entry.date}): ${why}` });
     await notify([entry.user], { type: "timesheet", title: "A timesheet entry was reopened", body: `${entry.date} · ${why}`, link: `/timesheets?week=${entry.weekStart}`, actionable: true }, [user._id]);
     return null;

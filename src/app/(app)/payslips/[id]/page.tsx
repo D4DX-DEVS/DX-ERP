@@ -22,7 +22,7 @@ export default async function PayslipPage({ params }: { params: Promise<{ id: st
         back={!ownPage && can(user, "payroll.view") ? { href: `/payroll/${data.slip.run}`, label: "Payroll run" } : undefined}
         overline={ownPage ? "Pay & claims · only you, HR and Finance can see this" : undefined}
         title={ownPage ? "My payslips" : `Payslip · ${data.slip.snapshot.name}`}
-        actions={<PayslipDownload id={data.slip._id.toString()} />}
+        actions={<PayslipDownload id={data.slip._id} />}
       />
       <PayslipView data={data} company={settings.company} footer={settings.documents.payslipFooter} />
     </PageBody>

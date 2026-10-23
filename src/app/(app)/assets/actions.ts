@@ -1,23 +1,25 @@
 "use server";
 
+import { and, eq, ne } from "drizzle-orm";
 import { z } from "zod";
-import type { Types, UpdateQuery } from "mongoose";
 import { actionPermission, ActionError, parse, runAction, type ActionResult } from "@/lib/actions";
 import { audit, diff, type AuditAction } from "@/lib/audit";
 import type { CurrentUser } from "@/lib/auth/session";
 import { ID_PREFIX, nextNumber } from "@/lib/counters";
+import { db } from "@/lib/db";
 import { resolveFileRefs } from "@/lib/files";
-import { escapeRegex } from "@/lib/format";
-import { Asset, Department, User, type AssetStatus, type IAsset } from "@/lib/models";
+import { Asset, Department, newId, User, type AssetStatus, type IAsset, type Id } from "@/lib/models";
 import { notify } from "@/lib/notify";
 import { EXITED_STATUSES } from "@/lib/people";
 import { getSettings } from "@/lib/settings";
 import { statusLabel } from "@/lib/status";
 import { fmtDate, todayKey, zonedDateTime } from "@/lib/time";
+import { eqIgnoreCase, inList, jsonPush, notInList } from "@/lib/sql";
 import { isObjectId, zs } from "@/lib/validation";
 import { ASSET_CONDITIONS } from "./meta";
 
 type Lean = IAsset;
+type NewAsset = typeof Asset.$inferInsert;
 
 function fieldError(field: string, message: string): never {
   throw new ActionError(message, { [field]: message });
@@ -51,10 +53,12 @@ const assetSchema = z.object({
 
 async function duplicateSerials(serial: string | undefined, excludeId?: string): Promise<{ id: string; assetNo: string; name: string }[]> {
   if (!serial) return [];
-  const rows = await Asset.find({ serialNo: new RegExp(`^${escapeRegex(serial)}$`, "i"), ...(excludeId ? { _id: { $ne: excludeId } } : {}) }, { assetNo: 1, name: 1 })
-    .limit(5)
-    .lean();
-  return rows.map((r) => ({ id: r._id.toString(), assetNo: r.assetNo, name: r.name }));
+  const rows = await db()
+    .select({ _id: Asset._id, assetNo: Asset.assetNo, name: Asset.name })
+    .from(Asset)
+    .where(and(eqIgnoreCase(Asset.serialNo, serial), excludeId ? ne(Asset._id, excludeId) : undefined))
+    .limit(5);
+  return rows.map((r) => ({ id: r._id, assetNo: r.assetNo, name: r.name }));
 }
 
 /** Inline duplicate-serial check used by the form (does not block saving). */
@@ -71,12 +75,15 @@ export async function saveAsset(input: Record<string, unknown>): Promise<ActionR
   return runAction(async () => {
     const user = await actionPermission("assets.manage");
     const data = parse(assetSchema, input);
-    const existing = data.id ? await Asset.findById(data.id).lean() : null;
+    const [existing] = data.id ? await db().select().from(Asset).where(eq(Asset._id, data.id)).limit(1) : [];
     if (data.id && !existing) throw new ActionError("Asset not found");
 
     const settings = await getSettings();
     if (!settings.assetCategories.includes(data.category) && existing?.category !== data.category) fieldError("category", "Choose a category from the list");
-    if (data.department && !(await Department.exists({ _id: data.department }))) fieldError("department", "Department not found");
+    if (data.department) {
+      const [dept] = await db().select({ id: Department._id }).from(Department).where(eq(Department._id, data.department)).limit(1);
+      if (!dept) fieldError("department", "Department not found");
+    }
     if (data.purchaseDate && data.warrantyUntil && data.warrantyUntil < data.purchaseDate) fieldError("warrantyUntil", "Warranty can't end before the purchase date");
 
     const duplicates = await duplicateSerials(data.serialNo, data.id);
@@ -103,44 +110,52 @@ export async function saveAsset(input: Record<string, unknown>): Promise<ActionR
     if (!existing) {
       const assetNo = await nextNumber("asset", ID_PREFIX.asset, 4);
       const documents = await resolveFileRefs(user, data.documents);
-      const doc = await Asset.create({
-        ...values,
-        assetNo,
-        status: "available",
-        documents,
-        history: [{ action: "created", by: user._id, byName: user.name, at: new Date(), note: "Added to inventory" }],
-      });
+      const [doc] = await db()
+        .insert(Asset)
+        .values({
+          ...values,
+          assetNo,
+          status: "available",
+          documents,
+          history: [{ _id: newId(), action: "created", by: user._id, byName: user.name, at: new Date(), note: "Added to inventory" }],
+        })
+        .returning({ _id: Asset._id, name: Asset.name, category: Asset.category });
       await audit(user, { action: "create", entity: "asset", entityId: doc._id, ref: assetNo, summary: `Added asset ${assetNo} · ${doc.name} (${doc.category})${dupNote}` });
-      return { id: doc._id.toString(), assetNo, duplicates: duplicates.map((d) => d.assetNo) };
+      return { id: doc._id, assetNo, duplicates: duplicates.map((d) => d.assetNo) };
     }
 
     // Keep documents already attached (the user may not be allowed to re-resolve them); resolve only new ids.
-    const keep = existing.documents.filter((d) => data.documents.includes(d.file.toString()));
+    const keep = existing.documents.filter((d) => data.documents.includes(d.file));
     const fresh = await resolveFileRefs(
       user,
-      data.documents.filter((id) => !existing.documents.some((d) => d.file.toString() === id)),
+      data.documents.filter((id) => !existing.documents.some((d) => d.file === id)),
     );
     const documents = [...keep, ...fresh];
 
-    const before = Object.fromEntries(FIELD_LABELS.map((f) => [f, f === "department" ? existing.department?.toString() : existing[f]])) as Record<string, unknown>;
+    const before = Object.fromEntries(FIELD_LABELS.map((f) => [f, existing[f]])) as Record<string, unknown>;
     const after = values as Record<string, unknown>;
     const changes = diff(before, after, [...FIELD_LABELS]);
     const docChange = documents.length !== existing.documents.length || keep.length !== existing.documents.length;
 
-    const set: Record<string, unknown> = {};
-    const unset: Record<string, ""> = {};
-    for (const [k, v] of Object.entries(values)) {
-      if (v === undefined || v === "") unset[k] = "";
-      else set[k] = v;
-    }
-    if (changes.length === 0 && !docChange) return { id: existing._id.toString(), assetNo: existing.assetNo, duplicates: duplicates.map((d) => d.assetNo) };
+    // Fields left empty are cleared (null), the rest are set.
+    const patch = Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v === undefined || v === "" ? null : v])) as Partial<NewAsset>;
+    if (changes.length === 0 && !docChange) return { id: existing._id, assetNo: existing.assetNo, duplicates: duplicates.map((d) => d.assetNo) };
 
-    const update: UpdateQuery<IAsset> = {
-      $set: { ...set, documents },
-      $push: { history: { action: "edited", by: user._id, byName: user.name, at: new Date(), note: [...changes.map((c) => c.field), ...(docChange ? ["documents"] : [])].join(", ") } },
-    };
-    if (Object.keys(unset).length) update.$unset = unset;
-    await Asset.updateOne({ _id: existing._id }, update);
+    await db()
+      .update(Asset)
+      .set({
+        ...patch,
+        documents,
+        history: jsonPush(Asset.history, {
+          _id: newId(),
+          action: "edited",
+          by: user._id,
+          byName: user.name,
+          at: new Date(),
+          note: [...changes.map((c) => c.field), ...(docChange ? ["documents"] : [])].join(", "),
+        }),
+      })
+      .where(eq(Asset._id, existing._id));
     await audit(user, {
       action: "update",
       entity: "asset",
@@ -149,7 +164,7 @@ export async function saveAsset(input: Record<string, unknown>): Promise<ActionR
       summary: `Updated asset ${existing.assetNo} · ${[...changes.map((c) => c.field), ...(docChange ? ["documents"] : [])].join(", ")}${dupNote}`,
       changes,
     });
-    return { id: existing._id.toString(), assetNo: existing.assetNo, duplicates: duplicates.map((d) => d.assetNo) };
+    return { id: existing._id, assetNo: existing.assetNo, duplicates: duplicates.map((d) => d.assetNo) };
   }, "Asset saved");
 }
 
@@ -157,7 +172,7 @@ export async function saveAsset(input: Record<string, unknown>): Promise<ActionR
 
 async function loadAsset(id: string): Promise<Lean> {
   if (!isObjectId(id)) throw new ActionError("Asset not found");
-  const asset = await Asset.findById(id).lean();
+  const [asset] = await db().select().from(Asset).where(eq(Asset._id, id)).limit(1);
   if (!asset) throw new ActionError("Asset not found");
   return asset;
 }
@@ -168,22 +183,28 @@ function effectiveAt(date: string): Date {
 }
 
 async function staffMember(id: string) {
-  const person = await User.findOne({ _id: id, personType: { $in: ["employee", "trainee", "intern"] }, status: { $nin: EXITED_STATUSES } }, { name: 1, department: 1 }).lean();
+  const [person] = await db()
+    .select({ _id: User._id, name: User.name, department: User.department })
+    .from(User)
+    .where(and(eq(User._id, id), inList(User.personType, ["employee", "trainee", "intern"]), notInList(User.status, EXITED_STATUSES)))
+    .limit(1);
   if (!person) throw new ActionError("Choose a current staff member.", { person: "Choose a current staff member" });
   return person;
 }
 
-async function nameOf(id: Types.ObjectId | undefined): Promise<string | undefined> {
+async function nameOf(id: Id | null | undefined): Promise<string | undefined> {
   if (!id) return undefined;
-  return (await User.findById(id, { name: 1 }).lean())?.name;
+  const [row] = await db().select({ name: User.name }).from(User).where(eq(User._id, id)).limit(1);
+  return row?.name;
 }
 
 interface Mutation {
   allowed: AssetStatus[];
   verb: string;
-  set: Record<string, unknown>;
-  unset?: string[];
-  entry: { action: string; note?: string; from?: string; to?: string; user?: Types.ObjectId; userName?: string; at: Date };
+  set: Partial<NewAsset>;
+  /** Columns to clear (set to null). */
+  unset?: ("assignedTo" | "nextServiceDate")[];
+  entry: { action: string; note?: string; from?: string; to?: string; user?: Id; userName?: string; at: Date };
 }
 
 /** Applies a status change guarded by the asset's current status and appends the history entry. */
@@ -191,13 +212,13 @@ async function mutate(actor: CurrentUser, asset: Lean, m: Mutation): Promise<voi
   if (!m.allowed.includes(asset.status)) {
     throw new ActionError(`${asset.assetNo} is ${statusLabel("asset", asset.status).toLowerCase()} and can't be ${m.verb}.`);
   }
-  const update: UpdateQuery<IAsset> = {
-    $set: m.set,
-    $push: { history: { ...m.entry, by: actor._id, byName: actor.name } },
-  };
-  if (m.unset?.length) update.$unset = Object.fromEntries(m.unset.map((k) => [k, ""]));
-  const res = await Asset.updateOne({ _id: asset._id, status: asset.status }, update);
-  if (res.matchedCount === 0) throw new ActionError("This asset was just changed by someone else. Reload the page and try again.");
+  const cleared = Object.fromEntries((m.unset ?? []).map((k) => [k, null])) as Partial<NewAsset>;
+  const done = await db()
+    .update(Asset)
+    .set({ ...m.set, ...cleared, history: jsonPush(Asset.history, { _id: newId(), ...m.entry, by: actor._id, byName: actor.name }) })
+    .where(and(eq(Asset._id, asset._id), eq(Asset.status, asset.status)))
+    .returning({ id: Asset._id });
+  if (done.length === 0) throw new ActionError("This asset was just changed by someone else. Reload the page and try again.");
 }
 
 function record(
@@ -212,7 +233,7 @@ function record(
 
 const note = zs.optText(500);
 const requiredNote = (label: string) => zs.text(label, 500);
-const assetLink = (asset: Lean) => `/assets/${asset._id.toString()}`;
+const assetLink = (asset: Lean) => `/assets/${asset._id}`;
 
 const issueSchema = z.object({ person: zs.id("Person"), date: zs.date("Issue date"), condition, note });
 
@@ -254,7 +275,7 @@ export async function returnAsset(id: string, input: Record<string, unknown>): P
       verb: "returned",
       set: { status, condition: data.condition },
       unset: ["assignedTo"],
-      entry: { action: "returned", from: holder, to: status === "damaged" ? "Damaged" : "In stock", user: asset.assignedTo, userName: holder, note: [`Condition on return: ${data.condition}`, data.note].filter(Boolean).join(" · "), at },
+      entry: { action: "returned", from: holder, to: status === "damaged" ? "Damaged" : "In stock", user: asset.assignedTo ?? undefined, userName: holder, note: [`Condition on return: ${data.condition}`, data.note].filter(Boolean).join(" · "), at },
     });
     await record(user, asset, "assign", `Recorded return of ${asset.assetNo} (${asset.name}) from ${holder ?? "holder"} on ${fmtDate(data.date)} · condition ${data.condition}`, [
       { field: "status", from: asset.status, to: status },
@@ -275,17 +296,18 @@ export async function transferAsset(id: string, input: Record<string, unknown>):
     const asset = await loadAsset(id);
     if (!data.toPerson && !data.toDepartment) throw new ActionError("Choose a person, a department, or both.", { toPerson: "Choose a person or a department" });
     if (data.toPerson && asset.status !== "assigned") throw new ActionError("Only an issued asset can be transferred to another person. Issue it instead.", { toPerson: "Issue the asset instead" });
-    if (data.toPerson && asset.assignedTo?.toString() === data.toPerson) throw new ActionError("The asset is already with this person.", { toPerson: "Already with this person" });
-    if (!data.toPerson && data.toDepartment && asset.department?.toString() === data.toDepartment) throw new ActionError("The asset is already in this department.", { toDepartment: "Already in this department" });
+    if (data.toPerson && asset.assignedTo === data.toPerson) throw new ActionError("The asset is already with this person.", { toPerson: "Already with this person" });
+    if (!data.toPerson && data.toDepartment && asset.department === data.toDepartment) throw new ActionError("The asset is already in this department.", { toDepartment: "Already in this department" });
 
     const person = data.toPerson ? await staffMember(data.toPerson) : null;
-    const dept = data.toDepartment ? await Department.findById(data.toDepartment, { name: 1 }).lean() : null;
+    const [dept] = data.toDepartment ? await db().select({ _id: Department._id, name: Department.name }).from(Department).where(eq(Department._id, data.toDepartment)).limit(1) : [];
     if (data.toDepartment && !dept) fieldError("toDepartment", "Department not found");
-    const oldDept = asset.department ? (await Department.findById(asset.department, { name: 1 }).lean())?.name : undefined;
+    const [oldDeptRow] = asset.department ? await db().select({ name: Department.name }).from(Department).where(eq(Department._id, asset.department)).limit(1) : [];
+    const oldDept = oldDeptRow?.name;
     const oldHolder = await nameOf(asset.assignedTo);
     const at = effectiveAt(data.date);
 
-    const set: Record<string, unknown> = {};
+    const set: Partial<NewAsset> = {};
     if (person) set.assignedTo = person._id;
     if (dept) set.department = dept._id;
     await mutate(user, asset, {
@@ -329,7 +351,7 @@ export async function sendToRepair(id: string, input: Record<string, unknown>): 
       verb: "sent for repair",
       set: { status: "in_repair", ...(data.provider ? { serviceProvider: data.provider } : {}) },
       unset: ["assignedTo"],
-      entry: { action: "sent_to_repair", from: holder ? `With ${holder}` : statusLabel("asset", asset.status), to: data.provider ?? "Repair", note: data.note, user: asset.assignedTo, userName: holder, at },
+      entry: { action: "sent_to_repair", from: holder ? `With ${holder}` : statusLabel("asset", asset.status), to: data.provider ?? "Repair", note: data.note, user: asset.assignedTo ?? undefined, userName: holder, at },
     });
     await record(user, asset, "status", `Sent ${asset.assetNo} (${asset.name}) for repair${data.provider ? ` to ${data.provider}` : ""} · ${data.note}`, [
       { field: "status", from: asset.status, to: "in_repair" },
@@ -376,7 +398,7 @@ export async function markDamaged(id: string, input: Record<string, unknown>): P
       verb: "marked damaged",
       set: { status: "damaged", condition: "damaged" },
       unset: ["assignedTo"],
-      entry: { action: "damaged", from: holder ? `With ${holder}` : statusLabel("asset", asset.status), to: "Damaged", note: data.note, user: asset.assignedTo, userName: holder, at: new Date() },
+      entry: { action: "damaged", from: holder ? `With ${holder}` : statusLabel("asset", asset.status), to: "Damaged", note: data.note, user: asset.assignedTo ?? undefined, userName: holder, at: new Date() },
     });
     await record(user, asset, "status", `Marked ${asset.assetNo} (${asset.name}) as damaged · ${data.note}`, [
       { field: "status", from: asset.status, to: "damaged" },
@@ -401,7 +423,7 @@ export async function markLost(id: string, input: Record<string, unknown>): Prom
       verb: "marked lost",
       set: { status: "lost" },
       unset: ["assignedTo"],
-      entry: { action: "lost", from: holder ? `With ${holder}` : statusLabel("asset", asset.status), to: "Lost", note: data.note, user: asset.assignedTo, userName: holder, at: new Date() },
+      entry: { action: "lost", from: holder ? `With ${holder}` : statusLabel("asset", asset.status), to: "Lost", note: data.note, user: asset.assignedTo ?? undefined, userName: holder, at: new Date() },
     });
     await record(user, asset, "status", `Marked ${asset.assetNo} (${asset.name}) as lost · ${data.note}`, [
       { field: "status", from: asset.status, to: "lost" },

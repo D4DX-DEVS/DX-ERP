@@ -1,5 +1,6 @@
+import { and, desc, eq } from "drizzle-orm";
 import { can, requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { SalaryAdvance } from "@/lib/models";
 import { namesFor, peopleOptions } from "@/lib/people";
 import { idParam, pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
@@ -19,20 +20,17 @@ export const metadata = { title: "Salary advances" };
 export default async function AdvancesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePagePermission("payroll.view");
   const sp = await searchParams;
-  await connectDB();
   const page = pageParam(sp);
   const record = can(user, "payroll.prepare") || can(user, "payroll.pay");
 
-  const filter: Record<string, unknown> = {};
   const status = param(sp, "status");
-  if (status === "open" || status === "closed") filter.status = status;
   const person = idParam(sp, "person");
-  if (person) filter.user = person;
+  const filter = and(status === "open" || status === "closed" ? eq(SalaryAdvance.status, status) : undefined, person ? eq(SalaryAdvance.user, person) : undefined);
 
   const [rows, total, open, people] = await Promise.all([
-    SalaryAdvance.find(filter).sort({ date: -1, createdAt: -1 }).skip((page - 1) * PAGE_SIZE).limit(PAGE_SIZE).lean(),
-    SalaryAdvance.countDocuments(filter),
-    SalaryAdvance.find({ status: "open" }, { amount: 1, recovered: 1, monthlyRecovery: 1 }).lean(),
+    db().select().from(SalaryAdvance).where(filter).orderBy(desc(SalaryAdvance.date), desc(SalaryAdvance.createdAt)).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
+    db().$count(SalaryAdvance, filter),
+    db().select({ amount: SalaryAdvance.amount, recovered: SalaryAdvance.recovered, monthlyRecovery: SalaryAdvance.monthlyRecovery }).from(SalaryAdvance).where(eq(SalaryAdvance.status, "open")),
     peopleOptions({ includeExited: true }),
   ]);
   const names = await namesFor(rows.map((r) => r.user));
@@ -81,9 +79,9 @@ export default async function AdvancesPage({ searchParams }: { searchParams: Pro
           <tbody>
             {rows.length === 0 && <EmptyRow colSpan={8}>{hasFilters ? "No advances match these filters." : "No salary advances recorded."}</EmptyRow>}
             {rows.map((a) => (
-              <Tr key={a._id.toString()} className="align-top">
+              <Tr key={a._id} className="align-top">
                 <Td>
-                  <div className="font-semibold">{names.get(a.user.toString()) ?? "—"}</div>
+                  <div className="font-semibold">{names.get(a.user) ?? "—"}</div>
                   <div className="text-xs text-muted">{a.recordedByName ? `Recorded by ${a.recordedByName}` : ""}</div>
                 </Td>
                 <Td className="whitespace-nowrap">{fmtDate(a.date)}</Td>

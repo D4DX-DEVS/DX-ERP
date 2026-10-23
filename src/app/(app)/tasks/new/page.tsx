@@ -1,6 +1,7 @@
 import { forbidden } from "next/navigation";
+import { and, eq } from "drizzle-orm";
 import { can, requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Project, Task } from "@/lib/models";
 import { idParam, type SearchParams } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
@@ -15,20 +16,33 @@ export const metadata = { title: "New task" };
 export default async function NewTaskPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
   const sp = await searchParams;
-  await connectDB();
   const settings = await getSettings();
-  const managesAny = can(user, "tasks.manage") || Boolean(await Project.exists({ manager: user._id }));
+  const managesAny =
+    can(user, "tasks.manage") ||
+    Boolean((await db().select({ id: Project._id }).from(Project).where(eq(Project.manager, user._id)).limit(1))[0]);
   if (!managesAny) forbidden();
 
   const parentId = idParam(sp, "parent");
-  const parent = parentId ? await Task.findOne({ $and: [{ _id: parentId }, await taskFilter(user)] }, { taskNo: 1, title: 1, project: 1, parent: 1, milestone: 1 }).lean() : null;
-  const projectId = parent ? parent.project?.toString() : idParam(sp, "project");
-  const project = projectId ? await Project.findOne({ $and: [{ _id: projectId }, projectFilter(user)] }, { manager: 1, milestones: 1 }).lean() : null;
+  const [parent] = parentId
+    ? await db()
+        .select({ _id: Task._id, taskNo: Task.taskNo, title: Task.title, project: Task.project, parent: Task.parent, milestone: Task.milestone })
+        .from(Task)
+        .where(and(eq(Task._id, parentId), await taskFilter(user)))
+        .limit(1)
+    : [];
+  const projectId = parent ? (parent.project ?? undefined) : idParam(sp, "project");
+  const [project] = projectId
+    ? await db()
+        .select({ _id: Project._id, manager: Project.manager, milestones: Project.milestones })
+        .from(Project)
+        .where(and(eq(Project._id, projectId), projectFilter(user)))
+        .limit(1)
+    : [];
   if (projectId && !project) forbidden();
   if (!canCreateTask(user, project)) forbidden();
 
   const options = await loadTaskFormOptions(user, settings, project ? [project._id] : []);
-  const milestone = parent?.milestone?.toString() ?? idParam(sp, "milestone");
+  const milestone = parent?.milestone ?? idParam(sp, "milestone");
   const subtask = Boolean(parent);
 
   return (
@@ -44,8 +58,8 @@ export default async function NewTaskPage({ searchParams }: { searchParams: Prom
             lockProject={subtask}
             initial={{
               project: projectId,
-              milestone: milestone && project?.milestones.some((m) => m._id.toString() === milestone) ? milestone : undefined,
-              parent: parent?._id.toString(),
+              milestone: milestone && project?.milestones.some((m) => m._id === milestone) ? milestone : undefined,
+              parent: parent?._id,
               parentLabel: parent ? `${parent.taskNo} · ${parent.title}` : undefined,
               title: "",
               description: "",

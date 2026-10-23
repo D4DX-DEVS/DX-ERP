@@ -1,9 +1,10 @@
 import "server-only";
+import { count } from "drizzle-orm";
 import { ActionError } from "@/lib/action-result";
 import { audit } from "@/lib/audit";
 import type { CurrentUser } from "@/lib/auth/session";
 import type { AppSettings } from "@/lib/config-defaults";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Lead, Project, Task, User } from "@/lib/models";
 import { getSettings, saveSettingsSection } from "@/lib/settings";
 
@@ -152,18 +153,15 @@ export type StatusKind = "project" | "task" | "pipeline" | "employment";
 
 /** How many records use each status key (used to block removal of statuses that are in use). */
 export async function statusUsage(kind: StatusKind): Promise<Record<string, number>> {
-  await connectDB();
-  type Row = { _id: string; n: number };
-  const group = (field: string) => [{ $group: { _id: `$${field}`, n: { $sum: 1 } } }];
-  const rows: Row[] =
+  const rows =
     kind === "project"
-      ? await Project.aggregate<Row>(group("status"))
+      ? await db().select({ key: Project.status, n: count() }).from(Project).groupBy(Project.status)
       : kind === "task"
-        ? await Task.aggregate<Row>(group("status"))
+        ? await db().select({ key: Task.status, n: count() }).from(Task).groupBy(Task.status)
         : kind === "pipeline"
-          ? await Lead.aggregate<Row>(group("stage"))
-          : await User.aggregate<Row>(group("status"));
-  return Object.fromEntries(rows.filter((r) => r._id).map((r) => [r._id, r.n]));
+          ? await db().select({ key: Lead.stage, n: count() }).from(Lead).groupBy(Lead.stage)
+          : await db().select({ key: User.status, n: count() }).from(User).groupBy(User.status);
+  return Object.fromEntries(rows.filter((r) => r.key).map((r) => [r.key, r.n]));
 }
 
 export const USAGE_NOUN: Record<StatusKind, string> = {

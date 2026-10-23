@@ -1,7 +1,9 @@
 import "server-only";
 import { can, type CurrentUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
-import { Movement, type IMovement } from "@/lib/models";
+import { and, asc, desc, eq, gt, gte, isNotNull, lte, ne, or, type SQL } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { Movement, type IMovement, type MovementApproval } from "@/lib/models";
+import { inList, jsonLength } from "@/lib/sql";
 import type { ExportColumn } from "@/lib/export";
 import type { AppSettings } from "@/lib/config-defaults";
 import { getSettings } from "@/lib/settings";
@@ -83,26 +85,57 @@ function lateBy(m: Pick<IMovement, "status" | "expectedReturn" | "inTime">, sett
 interface MovementQuery {
   /** Single `date` filter (daily register) instead of a from / to range. */
   singleDate?: boolean;
-  extra?: Record<string, unknown>;
+  /** Extra condition combined (AND) with the filters. */
+  extra?: SQL;
 }
 
 /** Loads movements for the filters, resolves names and masks personal details the viewer may not read. */
 async function loadMovements(f: ReportFilters, user: CurrentUser, query: MovementQuery = {}): Promise<{ rows: MoveRow[]; settings: AppSettings; showPersonal: boolean }> {
-  await connectDB();
   const settings = await getSettings();
   const showPersonal = can(user, "movement.view_personal");
   const today = todayKey();
-  const filter: Record<string, unknown> = { status: { $ne: "draft" }, ...(await userScope(f)), ...query.extra };
-  if (query.singleDate) filter.date = f.date || today;
+  let dateCond: SQL | undefined;
+  if (query.singleDate) dateCond = eq(Movement.date, f.date || today);
   else {
     const { from, to } = rangeOf(f);
-    filter.date = { $gte: from, $lte: to };
+    dateCond = and(gte(Movement.date, from), lte(Movement.date, to));
   }
   // Without `movement.view_personal` a personal category can't be used as a filter (it would reveal who had one).
-  if (f.category && (showPersonal || settings.movement.categories.find((c) => c.key === f.category)?.official)) filter.category = f.category;
-  if (f.approval) filter.approvalStatus = f.approval;
+  const categoryCond = f.category && (showPersonal || settings.movement.categories.find((c) => c.key === f.category)?.official) ? eq(Movement.category, f.category) : undefined;
+  const approvalCond = f.approval ? eq(Movement.approvalStatus, f.approval as MovementApproval) : undefined;
 
-  const docs = await Movement.find(filter, { history: 0 }).sort({ date: 1, outTime: 1 }).limit(20_000).lean();
+  const docs = await db()
+    .select({
+      id: Movement._id,
+      user: Movement.user,
+      movementNo: Movement.movementNo,
+      date: Movement.date,
+      outTime: Movement.outTime,
+      expectedReturn: Movement.expectedReturn,
+      inTime: Movement.inTime,
+      durationMinutes: Movement.durationMinutes,
+      categoryLabel: Movement.categoryLabel,
+      official: Movement.official,
+      purpose: Movement.purpose,
+      destination: Movement.destination,
+      project: Movement.project,
+      client: Movement.client,
+      remarks: Movement.remarks,
+      status: Movement.status,
+      approvalStatus: Movement.approvalStatus,
+      approver: Movement.approver,
+      approvedBy: Movement.approvedBy,
+      approvedByName: Movement.approvedByName,
+      approvedAt: Movement.approvedAt,
+      approvalNote: Movement.approvalNote,
+      entryMode: Movement.entryMode,
+      enteredByName: Movement.enteredByName,
+      alternativeReason: Movement.alternativeReason,
+    })
+    .from(Movement)
+    .where(and(ne(Movement.status, "draft"), userScope(f, Movement.user), query.extra, dateCond, categoryCond, approvalCond))
+    .orderBy(asc(Movement.date), asc(Movement.outTime))
+    .limit(20_000);
   const [people, projects, clients] = await Promise.all([
     peopleMap([...docs.map((d) => d.user), ...docs.map((d) => d.approver), ...docs.map((d) => d.approvedBy)]),
     projectMap(docs.map((d) => d.project)),
@@ -110,14 +143,14 @@ async function loadMovements(f: ReportFilters, user: CurrentUser, query: Movemen
   ]);
 
   const rows: MoveRow[] = docs.flatMap((d) => {
-    const person = people.get(d.user.toString());
+    const person = people.get(d.user);
     if (!person) return [];
     const hide = !d.official && !showPersonal;
-    const project = d.project ? projects.get(d.project.toString()) : undefined;
+    const project = d.project ? projects.get(d.project) : undefined;
     return [
       {
         person,
-        id: d._id.toString(),
+        id: d.id,
         movementNo: d.movementNo,
         date: d.date,
         category: d.official ? d.categoryLabel : hide ? "Personal" : d.categoryLabel,
@@ -126,15 +159,15 @@ async function loadMovements(f: ReportFilters, user: CurrentUser, query: Movemen
         destination: hide ? "" : (d.destination ?? ""),
         remarks: hide ? "" : (d.remarks ?? ""),
         project: project ? `${project.projectNo} · ${project.title}` : "",
-        client: d.client ? (clients.get(d.client.toString()) ?? "") : "",
-        outTime: d.outTime,
-        expectedReturn: d.expectedReturn,
-        inTime: d.inTime,
-        minutes: d.durationMinutes,
+        client: d.client ? (clients.get(d.client) ?? "") : "",
+        outTime: d.outTime ?? undefined,
+        expectedReturn: d.expectedReturn ?? undefined,
+        inTime: d.inTime ?? undefined,
+        minutes: d.durationMinutes ?? undefined,
         status: displayStatus(d, settings, today),
         approval: statusLabel("movementApproval", d.approvalStatus),
-        approver: (d.approvedBy ? people.get(d.approvedBy.toString())?.name : undefined) ?? d.approvedByName ?? (d.approver ? (people.get(d.approver.toString())?.name ?? "") : ""),
-        approvedAt: d.approvedAt,
+        approver: (d.approvedBy ? people.get(d.approvedBy)?.name : undefined) ?? d.approvedByName ?? (d.approver ? (people.get(d.approver)?.name ?? "") : ""),
+        approvedAt: d.approvedAt ?? undefined,
         approvalNote: hide ? "" : (d.approvalNote ?? ""),
         entryMode: d.entryMode === "alternative" ? "Alternative entry" : "Live",
         enteredBy: d.enteredByName ?? "",
@@ -271,7 +304,7 @@ const movementDuration = defineReport<DurationRow>({
   permissions: [...MOVEMENT],
   filters: [...RANGE_FILTERS, DEPARTMENT_FILTER, PERSON_FILTER, CATEGORY_FILTER],
   async run(f, user) {
-    const { rows, showPersonal } = await loadMovements(f, user, { extra: { status: { $in: ["out", "returned"] } } });
+    const { rows, showPersonal } = await loadMovements(f, user, { extra: inList(Movement.status, ["out", "returned"]) });
     const byPerson = new Map<string, DurationRow>();
     for (const r of rows) {
       const row = byPerson.get(r.person.id) ?? { person: r.person, movements: 0, open: 0, officialMinutes: 0, personalMinutes: 0, totalMinutes: 0, longestMinutes: 0 };
@@ -321,7 +354,7 @@ const movementOverdue = defineReport<MoveRow>({
   permissions: [...MOVEMENT],
   filters: [...RANGE_FILTERS, DEPARTMENT_FILTER, PERSON_FILTER, CATEGORY_FILTER],
   async run(f, user) {
-    const { rows: all, showPersonal } = await loadMovements(f, user, { extra: { status: { $in: ["out", "returned"] }, expectedReturn: { $exists: true } } });
+    const { rows: all, showPersonal } = await loadMovements(f, user, { extra: and(inList(Movement.status, ["out", "returned"]), isNotNull(Movement.expectedReturn)) });
     const rows = all.filter((r) => r.lateByMinutes > 0).sort((a, b) => b.lateByMinutes - a.lateByMinutes);
     return {
       columns: [
@@ -359,9 +392,7 @@ const movementOfficial = defineReport<MoveRow>({
   permissions: [...MOVEMENT],
   filters: [...MOVE_FILTERS, { key: "project", label: "Project", type: "project" }, { key: "client", label: "Client", type: "client" }],
   async run(f, user) {
-    const extra: Record<string, unknown> = { official: true };
-    if (f.project) extra.project = f.project;
-    if (f.client) extra.client = f.client;
+    const extra = and(eq(Movement.official, true), f.project ? eq(Movement.project, f.project) : undefined, f.client ? eq(Movement.client, f.client) : undefined);
     const { rows, showPersonal } = await loadMovements(f, user, { extra });
     return {
       columns: [
@@ -394,7 +425,7 @@ const movementPersonal = defineReport<MoveRow>({
   permissions: [...MOVEMENT, "movement.view_personal"],
   filters: [...MOVE_FILTERS],
   async run(f, user) {
-    const { rows } = await loadMovements(f, user, { extra: { official: false } });
+    const { rows } = await loadMovements(f, user, { extra: eq(Movement.official, false) });
     return {
       columns: [C.date, C.no, C.empId, C.employee, C.department, C.category, C.purpose, C.destination, { header: "Remarks", value: (r) => r.remarks, width: 28 }, C.out, C.in, C.duration, C.status, C.approval],
       rows,
@@ -416,7 +447,7 @@ const movementPending = defineReport<MoveRow>({
   permissions: [...MOVEMENT],
   filters: [...MOVE_FILTERS],
   async run(f, user) {
-    const approval = f.approval ? {} : { approvalStatus: { $in: ["pending", "rejected", "correction_requested"] } };
+    const approval = f.approval ? undefined : inList(Movement.approvalStatus, ["pending", "rejected", "correction_requested"]);
     const { rows, showPersonal } = await loadMovements(f, user, { extra: approval });
     return {
       columns: [
@@ -467,28 +498,50 @@ const movementAudit = defineReport<AuditRow>({
   permissions: [...MOVEMENT],
   filters: [...RANGE_FILTERS, DEPARTMENT_FILTER, PERSON_FILTER],
   async run(f, user) {
-    await connectDB();
     const showPersonal = can(user, "movement.view_personal");
     const { from, to } = rangeOf(f);
-    const docs = await Movement.find(
-      {
-        date: { $gte: from, $lte: to },
-        ...(await userScope(f)),
-        $or: [{ "corrections.0": { $exists: true } }, { approvedBy: { $exists: true } }, { entryMode: "alternative" }, { resolvedBy: { $exists: true } }],
-      },
-      { history: 0 },
-    )
-      .sort({ date: -1 })
-      .limit(5000)
-      .lean();
+    const docs = await db()
+      .select({
+        user: Movement.user,
+        movementNo: Movement.movementNo,
+        date: Movement.date,
+        official: Movement.official,
+        entryMode: Movement.entryMode,
+        enteredByName: Movement.enteredByName,
+        createdAt: Movement.createdAt,
+        updatedAt: Movement.updatedAt,
+        outTime: Movement.outTime,
+        inTime: Movement.inTime,
+        alternativeReason: Movement.alternativeReason,
+        corrections: Movement.corrections,
+        approvedBy: Movement.approvedBy,
+        approvedByName: Movement.approvedByName,
+        approvedAt: Movement.approvedAt,
+        approvalStatus: Movement.approvalStatus,
+        approvalNote: Movement.approvalNote,
+        resolvedBy: Movement.resolvedBy,
+        resolvedByName: Movement.resolvedByName,
+        resolutionNote: Movement.resolutionNote,
+      })
+      .from(Movement)
+      .where(
+        and(
+          gte(Movement.date, from),
+          lte(Movement.date, to),
+          userScope(f, Movement.user),
+          or(gt(jsonLength(Movement.corrections), 0), isNotNull(Movement.approvedBy), eq(Movement.entryMode, "alternative"), isNotNull(Movement.resolvedBy)),
+        ),
+      )
+      .orderBy(desc(Movement.date))
+      .limit(5000);
     const people = await peopleMap(docs.map((d) => d.user));
-    const range = (a?: Date, b?: Date) => `${a ? fmtDateTime(a) : "—"} → ${b ? fmtDateTime(b) : "—"}`;
+    const range = (a?: Date | null, b?: Date | null) => `${a ? fmtDateTime(a) : "—"} → ${b ? fmtDateTime(b) : "—"}`;
     const rows: AuditRow[] = [];
     for (const d of docs) {
-      const person = people.get(d.user.toString());
+      const person = people.get(d.user);
       if (!person) continue;
       const hide = !d.official && !showPersonal;
-      const text = (v?: string) => (hide ? "" : (v ?? ""));
+      const text = (v?: string | null) => (hide ? "" : (v ?? ""));
       const base = { person, movementNo: d.movementNo, date: d.date };
       if (d.entryMode === "alternative") {
         rows.push({ ...base, event: "Alternative entry", by: d.enteredByName ?? "", at: d.createdAt, original: "", proposed: range(d.outTime, d.inTime), outcome: "Recorded after the fact", note: text(d.alternativeReason) });
@@ -506,7 +559,7 @@ const movementAudit = defineReport<AuditRow>({
         });
       }
       if (d.approvedBy || d.approvedByName) {
-        rows.push({ ...base, event: "Approval decision", by: d.approvedByName ?? "", at: d.approvedAt, original: "", proposed: "", outcome: statusLabel("movementApproval", d.approvalStatus), note: text(d.approvalNote) });
+        rows.push({ ...base, event: "Approval decision", by: d.approvedByName ?? "", at: d.approvedAt ?? undefined, original: "", proposed: "", outcome: statusLabel("movementApproval", d.approvalStatus), note: text(d.approvalNote) });
       }
       if (d.resolvedBy || d.resolvedByName) {
         rows.push({ ...base, event: "Resolved by authorised user", by: d.resolvedByName ?? "", at: d.updatedAt, original: "", proposed: range(d.outTime, d.inTime), outcome: "Closed without a live In-Time", note: text(d.resolutionNote) });
@@ -564,14 +617,16 @@ export interface DepartmentMovementTotals {
 }
 
 export async function movementMinutesByDepartment(from: string, to: string): Promise<{ rows: DepartmentMovementTotals[]; movements: number; overdue: number }> {
-  await connectDB();
   const settings = await getSettings();
-  const docs = await Movement.find({ date: { $gte: from, $lte: to }, status: { $in: ["out", "returned"] } }, { user: 1, official: 1, durationMinutes: 1, status: 1, expectedReturn: 1, inTime: 1 }).lean();
+  const docs = await db()
+    .select({ user: Movement.user, official: Movement.official, durationMinutes: Movement.durationMinutes, status: Movement.status, expectedReturn: Movement.expectedReturn, inTime: Movement.inTime })
+    .from(Movement)
+    .where(and(gte(Movement.date, from), lte(Movement.date, to), inList(Movement.status, ["out", "returned"])));
   const people = await peopleMap(docs.map((d) => d.user));
   const map = new Map<string, DepartmentMovementTotals>();
   let overdue = 0;
   for (const d of docs) {
-    const dept = people.get(d.user.toString())?.department || "No department";
+    const dept = people.get(d.user)?.department || "No department";
     const row = map.get(dept) ?? { department: dept, officialMinutes: 0, personalMinutes: 0 };
     if (d.official) row.officialMinutes += d.durationMinutes ?? 0;
     else row.personalMinutes += d.durationMinutes ?? 0;

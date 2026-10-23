@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { and, asc, desc, eq, gte, lte, ne } from "drizzle-orm";
 import { ReasonAction } from "@/components/ui/actions";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -7,12 +8,13 @@ import { EmptyState, PageBody, PageHeader, Progress } from "@/components/ui/page
 import { Timeline, type TimelineItem } from "@/components/ui/timeline";
 import { AttachmentList } from "@/components/ui/file-upload";
 import { isStaff, requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { leaveBalances, leaveYearOf, leaveYearRange } from "@/lib/domain/leave-balance";
 import { Holiday, LeaveRequest, LeaveType } from "@/lib/models";
 import { namesFor } from "@/lib/people";
 import { plain } from "@/lib/serialize";
 import { getSettings } from "@/lib/settings";
+import { inList, jsonHas } from "@/lib/sql";
 import { addDays, fmtDate, timeAgo, todayKey } from "@/lib/time";
 import { cancelLeave } from "./actions";
 import { ApplyLeaveForm } from "./apply-form";
@@ -25,7 +27,6 @@ export const metadata = { title: "My leave" };
 export default async function MyLeavePage() {
   const user = await requireUser();
   if (!isStaff(user)) redirect("/leave/approvals");
-  await connectDB();
   const settings = await getSettings();
   const access = await leaveAccess(user);
   const today = todayKey();
@@ -34,21 +35,33 @@ export default async function MyLeavePage() {
 
   const [balances, types, requests, holidays, pendingForMe] = await Promise.all([
     leaveBalances(user._id, user.personType, year, settings, today),
-    LeaveType.find({ active: true, applicableTo: user.personType }).lean(),
-    LeaveRequest.find({ user: user._id }).sort({ createdAt: -1 }).limit(25).lean(),
-    Holiday.find({ date: { $gte: addDays(today, -60), $lte: addDays(today, 430) } }, { date: 1, name: 1, optional: 1 }).sort({ date: 1 }).lean(),
+    db()
+      .select()
+      .from(LeaveType)
+      .where(and(eq(LeaveType.active, true), jsonHas(LeaveType.applicableTo, user.personType))),
+    db().select().from(LeaveRequest).where(eq(LeaveRequest.user, user._id)).orderBy(desc(LeaveRequest.createdAt)).limit(25),
+    db()
+      .select({ date: Holiday.date, name: Holiday.name, optional: Holiday.optional })
+      .from(Holiday)
+      .where(and(gte(Holiday.date, addDays(today, -60)), lte(Holiday.date, addDays(today, 430))))
+      .orderBy(asc(Holiday.date)),
     access.canOpenApprovals
-      ? LeaveRequest.countDocuments(access.approve ? { status: { $in: ["pending_manager", "pending_hr"] }, user: { $ne: user._id } } : { status: "pending_manager", manager: user._id })
+      ? db().$count(
+          LeaveRequest,
+          access.approve
+            ? and(inList(LeaveRequest.status, ["pending_manager", "pending_hr"]), ne(LeaveRequest.user, user._id))
+            : and(eq(LeaveRequest.status, "pending_manager"), eq(LeaveRequest.manager, user._id)),
+        )
       : Promise.resolve(0),
   ]);
-  const typeById = new Map(types.map((t) => [t._id.toString(), t]));
+  const typeById = new Map(types.map((t) => [t._id, t]));
   const names = await namesFor([user.reportingManagerId, ...requests.map((r) => r.manager)]);
   const managerName = user.reportingManagerId ? names.get(user.reportingManagerId) : undefined;
 
   const busy = requests.filter((r) => r.status === "pending_manager" || r.status === "pending_hr" || r.status === "approved").map((r) => ({ start: r.startDate, end: r.endDate, status: r.status }));
   const options = balances.map((b) => {
     const t = typeById.get(b.leaveTypeId);
-    return { id: b.leaveTypeId, name: b.name, allowHalfDay: t?.allowHalfDay ?? false, unlimited: b.unlimited, available: b.available, requiresAttachmentAfterDays: t?.requiresAttachmentAfterDays };
+    return { id: b.leaveTypeId, name: b.name, allowHalfDay: t?.allowHalfDay ?? false, unlimited: b.unlimited, available: b.available, requiresAttachmentAfterDays: t?.requiresAttachmentAfterDays ?? undefined };
   });
   const upcoming = holidays.filter((h) => h.date >= today).slice(0, 6);
   const approvalNote = managerName ? `Approval: ${managerName} → HR only when the leave type requires it` : "Your request goes to HR for approval.";
@@ -148,7 +161,7 @@ export default async function MyLeavePage() {
         ) : (
           <ul className="px-5 pb-3">
             {requests.map((r) => {
-              const id = r._id.toString();
+              const id = r._id;
               const trail: TimelineItem[] = [
                 { title: "Submitted", meta: r.requestNo, at: r.createdAt },
                 ...r.approvals.map((a): TimelineItem => ({
@@ -161,7 +174,7 @@ export default async function MyLeavePage() {
                 ...(r.status === "cancelled" ? [{ title: "Cancelled", at: r.cancelledAt, body: r.cancelReason } satisfies TimelineItem] : []),
               ];
               const waiting =
-                r.status === "pending_manager" ? `waiting for ${(r.manager && names.get(r.manager.toString())) ?? "your manager"}` : r.status === "pending_hr" ? "waiting for HR" : null;
+                r.status === "pending_manager" ? `waiting for ${(r.manager && names.get(r.manager)) ?? "your manager"}` : r.status === "pending_hr" ? "waiting for HR" : null;
               const canCancel = r.status === "pending_manager" || r.status === "pending_hr" || (r.status === "approved" && r.startDate > today);
               return (
                 <li key={id} className="border-t border-line-soft py-3 first:border-t-0">

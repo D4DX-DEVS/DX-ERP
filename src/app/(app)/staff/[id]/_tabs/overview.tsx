@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { Laptop, Users } from "lucide-react";
+import { and, asc, eq } from "drizzle-orm";
 import { can } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Asset, User } from "@/lib/models";
+import { inList } from "@/lib/sql";
 import { fmtDate } from "@/lib/time";
 import { PersonCell } from "@/components/ui/avatar";
 import { Card, CardBody, CardHeader, DetailList } from "@/components/ui/card";
@@ -32,15 +34,24 @@ export async function OverviewTab({
   mentor,
   people,
 }: TabProps & { department?: string; designation?: string; manager?: PersonRef; mentor?: PersonRef; people?: PickerOption[] }) {
-  await connectDB();
   const id = person._id;
   const showAssets = access.canSeePersonal || can(user, "assets.view");
+  const loadAssets = async () =>
+    showAssets
+      ? db()
+          .select({ _id: Asset._id, assetNo: Asset.assetNo, name: Asset.name, category: Asset.category, condition: Asset.condition, history: Asset.history })
+          .from(Asset)
+          .where(and(eq(Asset.assignedTo, id), eq(Asset.status, "assigned")))
+          .orderBy(asc(Asset.name))
+      : [];
   const [reports, assets] = await Promise.all([
-    User.find({ reportingManager: id, personType: { $in: ["employee", "trainee", "intern"] } }, { name: 1, photo: 1, designation: 1, status: 1, employeeId: 1 })
-      .sort({ name: 1 })
-      .limit(9)
-      .lean(),
-    showAssets ? Asset.find({ assignedTo: id, status: "assigned" }, { assetNo: 1, name: 1, category: 1, condition: 1, history: 1 }).sort({ name: 1 }).lean() : Promise.resolve([]),
+    db()
+      .select({ _id: User._id, name: User.name, photo: User.photo, employeeId: User.employeeId })
+      .from(User)
+      .where(and(eq(User.reportingManager, id), inList(User.personType, ["employee", "trainee", "intern"])))
+      .orderBy(asc(User.name))
+      .limit(9),
+    loadAssets(),
   ]);
 
   const steps = ONBOARDING_STEPS.map((s) => {
@@ -89,14 +100,14 @@ export async function OverviewTab({
   ];
 
   const sectionPerson: SectionPerson = {
-    id: id.toString(),
+    id,
     name: person.name,
     email: person.email,
-    phone: person.phone,
-    personalEmail: person.personalEmail,
-    dob: person.dob,
-    gender: person.gender,
-    bloodGroup: person.bloodGroup,
+    phone: person.phone ?? undefined,
+    personalEmail: person.personalEmail ?? undefined,
+    dob: person.dob ?? undefined,
+    gender: person.gender ?? undefined,
+    bloodGroup: person.bloodGroup ?? undefined,
     addrLine1: person.address?.line1,
     addrLine2: person.address?.line2,
     city: person.address?.city,
@@ -107,10 +118,10 @@ export async function OverviewTab({
     emergencyRelation: ec?.relation,
     emergencyPhone: ec?.phone,
     employmentType: person.employmentType,
-    team: person.team,
-    joiningDate: person.joiningDate,
+    team: person.team ?? undefined,
+    joiningDate: person.joiningDate ?? undefined,
     internship: internship
-      ? { startDate: internship.startDate, endDate: internship.endDate, college: internship.college, course: internship.course, assignedRole: internship.assignedRole, mentor: internship.mentor?.toString() }
+      ? { startDate: internship.startDate, endDate: internship.endDate, college: internship.college, course: internship.course, assignedRole: internship.assignedRole, mentor: internship.mentor }
       : undefined,
   };
   const canEmail = can(user, "users.manage");
@@ -142,7 +153,7 @@ export async function OverviewTab({
           <Card>
             <CardHeader title="Onboarding checklist" subtitle={access.canEdit ? "Tick steps as they are completed. Some steps complete automatically." : undefined} />
             <CardBody>
-              <OnboardingChecklist userId={id.toString()} steps={steps} canEdit={access.canEdit} />
+              <OnboardingChecklist userId={id} steps={steps} canEdit={access.canEdit} />
             </CardBody>
           </Card>
         )}
@@ -191,7 +202,7 @@ export async function OverviewTab({
               ) : (
                 <ul className="flex flex-col gap-2.5">
                   {reports.slice(0, 8).map((r) => (
-                    <li key={r._id.toString()}>
+                    <li key={r._id}>
                       <PersonCell name={r.name} sub={r.employeeId} photo={r.photo} href={`/staff/${r._id}`} />
                     </li>
                   ))}
@@ -217,9 +228,9 @@ export async function OverviewTab({
               ) : (
                 <ul className="flex flex-col">
                   {assets.map((a) => {
-                    const issued = [...(a.history ?? [])].reverse().find((h) => h.user?.toString() === id.toString());
+                    const issued = [...(a.history ?? [])].reverse().find((h) => h.user === id);
                     return (
-                      <li key={a._id.toString()} className="flex items-start gap-3 border-t border-line-soft py-2.5 first:border-t-0 first:pt-0">
+                      <li key={a._id} className="flex items-start gap-3 border-t border-line-soft py-2.5 first:border-t-0 first:pt-0">
                         <Laptop className="mt-0.5 size-[18px] shrink-0 text-muted" aria-hidden />
                         <div className="min-w-0 flex-1">
                           {can(user, "assets.view") ? (

@@ -11,7 +11,7 @@ import type { InternTabProps } from "./types";
 export async function EvaluationsTab({ user, target, access, today }: InternTabProps) {
   const canSee = access.canEvaluate || access.isSelf || access.isManager;
   const reviews = canSee ? await loadReviews(target._id, !access.canEvaluate) : [];
-  const id = target._id.toString();
+  const id = target._id;
   const first = firstName(target.name);
   const shared = reviews.filter((r) => r.status === "shared");
   const average = shared.length ? Math.round((shared.reduce((s, r) => s + r.overall, 0) / shared.length) * 10) / 10 : null;

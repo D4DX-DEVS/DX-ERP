@@ -1,11 +1,14 @@
 "use server";
 
+import { and, count, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { actionPermission, ActionError, parse, runAction, type ActionResult } from "@/lib/actions";
 import { can } from "@/lib/auth/session";
 import { NOTIFICATION_EVENTS, type AppSettings, type PayrollComponent } from "@/lib/config-defaults";
+import { db } from "@/lib/db";
 import { Movement, StoredFile } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
+import { inList } from "@/lib/sql";
 import { hmToMinutes } from "@/lib/time";
 import { zs } from "@/lib/validation";
 import { EMPLOYMENT_CATEGORIES, PIPELINE_CATEGORIES, PROJECT_CATEGORIES, TASK_CATEGORIES, TONES } from "./constants";
@@ -47,7 +50,11 @@ export async function saveCompany(input: Record<string, unknown>): Promise<Saved
 
     let logo = before.logo;
     if (data.logoFile.length > 0) {
-      const file = await StoredFile.findOne({ _id: data.logoFile[data.logoFile.length - 1], entityType: "company", isPublic: true, deletedAt: null }, { url: 1 }).lean();
+      const [file] = await db()
+        .select({ url: StoredFile.url })
+        .from(StoredFile)
+        .where(and(eq(StoredFile._id, data.logoFile[data.logoFile.length - 1]), eq(StoredFile.entityType, "company"), eq(StoredFile.isPublic, true), isNull(StoredFile.deletedAt)))
+        .limit(1);
       if (!file?.url) fieldError("logoFile", "The uploaded logo could not be found. Upload it again.");
       logo = file.url;
     }
@@ -189,9 +196,13 @@ export async function saveMovement(input: Record<string, unknown>): Promise<Save
     const nextKeys = new Set(categories.map((c) => c.key));
     const removed = before.categories.filter((c) => !nextKeys.has(c.key));
     if (removed.length > 0) {
-      const used = await Movement.aggregate<{ _id: string; n: number }>([{ $match: { category: { $in: removed.map((r) => r.key) } } }, { $group: { _id: "$category", n: { $sum: 1 } } }]);
+      const used = await db()
+        .select({ key: Movement.category, n: count() })
+        .from(Movement)
+        .where(inList(Movement.category, removed.map((r) => r.key)))
+        .groupBy(Movement.category);
       if (used.length > 0) {
-        const names = used.map((u) => `"${before.categories.find((c) => c.key === u._id)?.label ?? u._id}" (${u.n} movements)`).join(", ");
+        const names = used.map((u) => `"${before.categories.find((c) => c.key === u.key)?.label ?? u.key}" (${u.n} movements)`).join(", ");
         throw new ActionError(`Can't remove ${names} because movements use it. Switch it to inactive instead.`);
       }
     }
@@ -317,12 +328,13 @@ export async function saveDocumentCategories(input: Record<string, unknown>): Pr
     const nextKeys = new Set(keyed.map((k) => k.key));
     const removed = before.filter((c) => !nextKeys.has(c.key));
     if (removed.length > 0) {
-      const used = await StoredFile.aggregate<{ _id: string; n: number }>([
-        { $match: { category: { $in: removed.map((r) => r.key) }, deletedAt: null } },
-        { $group: { _id: "$category", n: { $sum: 1 } } },
-      ]);
+      const used = await db()
+        .select({ key: StoredFile.category, n: count() })
+        .from(StoredFile)
+        .where(and(inList(StoredFile.category, removed.map((r) => r.key)), isNull(StoredFile.deletedAt)))
+        .groupBy(StoredFile.category);
       if (used.length > 0) {
-        const names = used.map((u) => `"${before.find((c) => c.key === u._id)?.label ?? u._id}" (${u.n} files)`).join(", ");
+        const names = used.map((u) => `"${before.find((c) => c.key === u.key)?.label ?? u.key}" (${u.n} files)`).join(", ");
         throw new ActionError(`Can't remove ${names} because documents are filed under it. Rename it instead.`);
       }
     }

@@ -1,5 +1,6 @@
+import { eq } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { PayrollRun, Payslip } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
 import { isObjectId } from "@/lib/validation";
@@ -18,14 +19,13 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
   const { id } = await ctx.params;
   if (!isObjectId(id)) return new Response("Not found", { status: 404 });
 
-  await connectDB();
-  const slip = await Payslip.findById(id).lean();
+  const [slip] = await db().select().from(Payslip).where(eq(Payslip._id, id)).limit(1);
   if (!slip) return new Response("Not found", { status: 404 });
   const access = payslipAccess(user, slip);
   if (access === "hidden") return new Response("Not found", { status: 404 });
   if (access === "forbidden") return new Response("You don't have access to this payslip.", { status: 403 });
 
-  const [settings, run] = await Promise.all([getSettings(), PayrollRun.findById(slip.run, { runNo: 1 }).lean()]);
+  const [settings, [run]] = await Promise.all([getSettings(), db().select({ runNo: PayrollRun.runNo }).from(PayrollRun).where(eq(PayrollRun._id, slip.run)).limit(1)]);
   const stipend = slip.kind === "stipend";
   const paid = slip.status === "paid";
   const footer = settings.documents.payslipFooter;
@@ -137,7 +137,7 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
   }
 
   finalize(b, footer || "This is a system-generated payslip and does not require a signature.");
-  if (slip.user.toString() !== user.id) {
+  if (slip.user !== user.id) {
     await audit(user, { action: "access", entity: "payslip", entityId: slip._id, ref: slip.snapshot.name, summary: `Downloaded the ${periodLabel(slip.period)} payslip of ${slip.snapshot.name}` });
   }
   return pdfResponse(doc, `Payslip-${slip.period}-${slip.snapshot.employeeId}.pdf`);

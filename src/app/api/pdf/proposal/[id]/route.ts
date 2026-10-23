@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
 import { can, getCurrentUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { Client } from "@/lib/models";
 import type { ProposalContent } from "@/lib/models/sales";
@@ -52,7 +53,6 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
   if (!can(user, "proposals.view")) return new NextResponse("You don't have access to proposals.", { status: 403 });
 
   const { id } = await ctx.params;
-  await connectDB();
   const found = await lookupProposal(user, id);
   if (found.status === "missing") return new NextResponse("Not found", { status: 404 });
   if (found.status === "forbidden") return new NextResponse("You don't have access to this proposal.", { status: 403 });
@@ -60,7 +60,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
 
   const rev = Number.parseInt(new URL(request.url).searchParams.get("rev") ?? "", 10);
   const { content, version } = contentForVersion(p, Number.isFinite(rev) ? rev : undefined);
-  const [settings, client] = await Promise.all([getSettings(), Client.findById(p.client).lean()]);
+  const [settings, [client]] = await Promise.all([getSettings(), db().select().from(Client).where(eq(Client._id, p.client)).limit(1)]);
 
   const quotation = p.kind === "quotation";
   const b = createDoc({

@@ -1,6 +1,8 @@
+import { asc, desc } from "drizzle-orm";
 import { getCurrentUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Department, Expense, Project } from "@/lib/models";
+import { inList } from "@/lib/sql";
 import { audit } from "@/lib/audit";
 import { exportResponse, isExportFormat } from "@/lib/export";
 import { namesFor } from "@/lib/people";
@@ -21,16 +23,39 @@ export async function GET(request: Request) {
   // A view the person may not open is refused rather than silently swapped for another one.
   if (!view || (requested && requested !== view)) return new Response("You don't have access to these expenses.", { status: 403 });
 
-  await connectDB();
   const { filter } = expenseFilters(user, view, Object.fromEntries(url.searchParams.entries()));
-  const rows = await Expense.find(filter).sort({ date: -1, createdAt: -1 }).limit(5000).lean();
+  const rows = await db()
+    .select({
+      expenseNo: Expense.expenseNo,
+      date: Expense.date,
+      user: Expense.user,
+      category: Expense.category,
+      description: Expense.description,
+      vendor: Expense.vendor,
+      project: Expense.project,
+      department: Expense.department,
+      type: Expense.type,
+      amount: Expense.amount,
+      taxAmount: Expense.taxAmount,
+      status: Expense.status,
+      approverName: Expense.approverName,
+      decidedAt: Expense.decidedAt,
+      payment: Expense.payment,
+    })
+    .from(Expense)
+    .where(filter)
+    .orderBy(desc(Expense.date), desc(Expense.createdAt))
+    .limit(5000);
   const [names, projects, departments] = await Promise.all([
     namesFor(rows.map((r) => r.user)),
-    Project.find({ _id: { $in: rows.flatMap((r) => (r.project ? [r.project] : [])) } }, { projectNo: 1 }).lean(),
-    Department.find({}, { name: 1 }).lean(),
+    db()
+      .select({ _id: Project._id, projectNo: Project.projectNo })
+      .from(Project)
+      .where(inList(Project._id, [...new Set(rows.flatMap((r) => (r.project ? [r.project] : [])))])),
+    db().select({ _id: Department._id, name: Department.name }).from(Department).orderBy(asc(Department.name)),
   ]);
-  const projectNo = new Map(projects.map((p) => [p._id.toString(), p.projectNo]));
-  const departmentName = new Map(departments.map((d) => [d._id.toString(), d.name]));
+  const projectNo = new Map(projects.map((p) => [p._id, p.projectNo]));
+  const departmentName = new Map(departments.map((d) => [d._id, d.name]));
 
   await audit(user, { action: "export", entity: "expense", summary: `Exported expenses (${format.toUpperCase()}, ${rows.length} records, ${view})` });
   return exportResponse({
@@ -41,12 +66,12 @@ export async function GET(request: Request) {
     columns: [
       { header: "Expense no.", value: (r) => r.expenseNo, width: 14 },
       { header: "Date", value: (r) => r.date },
-      { header: "Person", value: (r) => names.get(r.user.toString()) ?? "", width: 24 },
+      { header: "Person", value: (r) => names.get(r.user) ?? "", width: 24 },
       { header: "Category", value: (r) => r.category, width: 22 },
       { header: "Description", value: (r) => r.description, width: 40 },
       { header: "Vendor", value: (r) => r.vendor ?? "" },
-      { header: "Project", value: (r) => (r.project ? (projectNo.get(r.project.toString()) ?? "") : "") },
-      { header: "Department", value: (r) => (r.department ? (departmentName.get(r.department.toString()) ?? "") : "") },
+      { header: "Project", value: (r) => (r.project ? (projectNo.get(r.project) ?? "") : "") },
+      { header: "Department", value: (r) => (r.department ? (departmentName.get(r.department) ?? "") : "") },
       { header: "Type", value: (r) => EXPENSE_TYPE_LABEL[r.type] },
       { header: "Amount", value: (r) => r.amount, type: "money" },
       { header: "Tax", value: (r) => r.taxAmount, type: "money" },

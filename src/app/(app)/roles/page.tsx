@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { forbidden } from "next/navigation";
 import { KeyRound } from "lucide-react";
+import { and, asc, count, eq } from "drizzle-orm";
 import { PersonCell } from "@/components/ui/avatar";
 import { Card, CardFooter } from "@/components/ui/card";
 import { OptionChip, StatusChip, Tag } from "@/components/ui/chip";
@@ -10,12 +11,13 @@ import { EmptyRow, TableWrap, THead, Td, Th, Tr } from "@/components/ui/table";
 import { LinkTabs } from "@/components/ui/tabs";
 import { can, requirePagePermission } from "@/lib/auth/session";
 import { cn } from "@/lib/cn";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { PERSON_TYPES, Role, User } from "@/lib/models";
-import { pageParam, PAGE_SIZE, param, searchRegex, type SearchParams } from "@/lib/query";
+import { pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
 import { ROLE_KEYS } from "@/lib/rbac/permissions";
 import { assignableRoles, ensureRoles } from "@/lib/rbac/roles";
 import { getSettings } from "@/lib/settings";
+import { inList, searchAny } from "@/lib/sql";
 import { timeAgo } from "@/lib/time";
 import { CreateRoleButton, RoleEditor, type RoleView } from "./role-editor";
 import { LinkSelect } from "../settings/ui";
@@ -59,17 +61,17 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
 async function loadRoles(): Promise<RoleView[]> {
   await ensureRoles();
   const [roles, counts, superAdmins] = await Promise.all([
-    Role.find().lean(),
-    User.aggregate<{ _id: string; n: number }>([{ $match: { isSuperAdmin: { $ne: true } } }, { $group: { _id: "$role", n: { $sum: 1 } } }]),
-    User.countDocuments({ isSuperAdmin: true }),
+    db().select().from(Role),
+    db().select({ role: User.role, n: count() }).from(User).where(eq(User.isSuperAdmin, false)).groupBy(User.role),
+    db().$count(User, eq(User.isSuperAdmin, true)),
   ]);
-  const byRole = new Map(counts.map((c) => [c._id, c.n]));
+  const byRole = new Map(counts.map((c) => [c.role, c.n]));
   const order = new Map<string, number>(ROLE_KEYS.map((k, i) => [k, i]));
   return roles
     .map((r) => ({
       key: r.key,
       name: r.name,
-      description: r.description,
+      description: r.description ?? undefined,
       system: r.system,
       permissions: r.permissions,
       userCount: r.key === "super_admin" ? superAdmins : (byRole.get(r.key) ?? 0),
@@ -111,29 +113,31 @@ function RolesTab({ sp, roles }: { sp: SearchParams; roles: RoleView[] }) {
 }
 
 async function UsersTab({ sp, currentUserId }: { sp: SearchParams; currentUserId: string }) {
-  await connectDB();
   const q = param(sp, "q");
   const roleFilter = param(sp, "role");
   const access = param(sp, "access");
   const page = pageParam(sp);
 
-  const filter: Record<string, unknown> = { personType: { $in: PERSON_TYPES } };
-  const rx = searchRegex(q);
-  if (rx) filter.$or = [{ name: rx }, { email: rx }, { employeeId: rx }];
-  if (roleFilter) filter.role = roleFilter;
-  if (access === "active") filter.accountActive = true;
-  if (access === "inactive") filter.accountActive = { $ne: true };
+  const filter = and(
+    inList(User.personType, PERSON_TYPES),
+    searchAny(q, User.name, User.email, User.employeeId),
+    roleFilter ? eq(User.role, roleFilter) : undefined,
+    access === "active" ? eq(User.accountActive, true) : undefined,
+    access === "inactive" ? eq(User.accountActive, false) : undefined,
+  );
 
-  const [people, total, roles, superAdmin, roleDocs, settings] = await Promise.all([
-    User.find(filter, { name: 1, email: 1, employeeId: 1, photo: 1, role: 1, accountActive: 1, lastLoginAt: 1, status: 1 })
-      .sort({ name: 1 })
-      .skip((page - 1) * PAGE_SIZE)
+  const [people, total, roles, [superAdmin], roleDocs, settings] = await Promise.all([
+    db()
+      .select({ _id: User._id, name: User.name, email: User.email, employeeId: User.employeeId, photo: User.photo, role: User.role, accountActive: User.accountActive, lastLoginAt: User.lastLoginAt, status: User.status })
+      .from(User)
+      .where(filter)
+      .orderBy(asc(User.name))
       .limit(PAGE_SIZE)
-      .lean(),
-    User.countDocuments(filter),
+      .offset((page - 1) * PAGE_SIZE),
+    db().$count(User, filter),
     assignableRoles(),
-    User.findOne({ isSuperAdmin: true }, { name: 1, email: 1, photo: 1, lastLoginAt: 1 }).lean(),
-    Role.find({}, { key: 1, name: 1 }).lean(),
+    db().select({ name: User.name, email: User.email, photo: User.photo, lastLoginAt: User.lastLoginAt }).from(User).where(eq(User.isSuperAdmin, true)).limit(1),
+    db().select({ key: Role.key, name: Role.name }).from(Role),
     getSettings(),
   ]);
   const roleNames = new Map(roleDocs.map((r) => [r.key, r.name]));
@@ -189,7 +193,7 @@ async function UsersTab({ sp, currentUserId }: { sp: SearchParams; currentUserId
           <tbody>
             {people.length === 0 && <EmptyRow colSpan={5}>No people match these filters.</EmptyRow>}
             {people.map((p) => {
-              const id = p._id.toString();
+              const id = p._id;
               return (
                 <Tr key={id}>
                   <Td>

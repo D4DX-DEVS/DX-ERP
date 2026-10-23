@@ -1,11 +1,14 @@
 "use server";
 
+import { and, eq, not } from "drizzle-orm";
 import { z } from "zod";
 import { actionPermission, actionUser, ActionError, parse, runAction, type ActionResult } from "@/lib/actions";
 import { audit } from "@/lib/audit";
 import { resolveFileRefs } from "@/lib/files";
+import { db } from "@/lib/db";
 import { Department, LearningResource, User } from "@/lib/models";
 import { notify } from "@/lib/notify";
+import { inList, jsonHasField, jsonPath, jsonPush } from "@/lib/sql";
 import { isObjectId, zs } from "@/lib/validation";
 import { resourceAppliesTo } from "./_lib/visibility";
 
@@ -48,9 +51,12 @@ export async function saveResource(input: Record<string, unknown>): Promise<Acti
     if (data.kind !== "activity" && !data.url && data.attachments.length === 0) {
       throw new ActionError("Add a link or attach a file.", { url: "Add a link or attach a file" });
     }
-    if (data.department && !(await Department.exists({ _id: data.department }))) throw new ActionError("Department not found.", { department: "Not found" });
+    if (data.department) {
+      const [dept] = await db().select({ id: Department._id }).from(Department).where(eq(Department._id, data.department)).limit(1);
+      if (!dept) throw new ActionError("Department not found.", { department: "Not found" });
+    }
     if (data.assignedTo.length > 0) {
-      const found = await User.countDocuments({ _id: { $in: data.assignedTo }, personType: { $in: ["employee", "trainee", "intern"] } });
+      const found = await db().$count(User, and(inList(User._id, data.assignedTo), inList(User.personType, ["employee", "trainee", "intern"])));
       if (found !== data.assignedTo.length) throw new ActionError("Some selected people are not available.", { assignedTo: "Invalid selection" });
     }
     const attachments = await resolveFileRefs(user, data.attachments);
@@ -71,20 +77,32 @@ export async function saveResource(input: Record<string, unknown>): Promise<Acti
     let id: string;
     let previouslyAssigned = new Set<string>();
     if (data.id) {
-      const existing = await LearningResource.findById(data.id, { assignedTo: 1 }).lean();
+      const [existing] = await db().select({ _id: LearningResource._id, assignedTo: LearningResource.assignedTo }).from(LearningResource).where(eq(LearningResource._id, data.id)).limit(1);
       if (!existing) throw new ActionError("Resource not found.");
-      previouslyAssigned = new Set(existing.assignedTo.map((a) => a.toString()));
-      const set: Record<string, unknown> = { title: fields.title, kind: fields.kind, attachments, audience, assignedTo: data.assignedTo };
-      const unset: Record<string, ""> = {};
-      for (const key of ["description", "url", "department", "dueDate", "estimatedHours"] as const) {
-        if (fields[key] === undefined) unset[key] = "";
-        else set[key] = fields[key];
-      }
-      await LearningResource.updateOne({ _id: existing._id }, { $set: set, ...(Object.keys(unset).length ? { $unset: unset } : {}) });
-      id = existing._id.toString();
+      previouslyAssigned = new Set(existing.assignedTo);
+      // Optional fields that were left empty are cleared (null), the rest are set.
+      await db()
+        .update(LearningResource)
+        .set({
+          title: fields.title,
+          kind: fields.kind,
+          attachments,
+          audience,
+          assignedTo: data.assignedTo,
+          description: fields.description ?? null,
+          url: fields.url ?? null,
+          department: fields.department ?? null,
+          dueDate: fields.dueDate ?? null,
+          estimatedHours: fields.estimatedHours ?? null,
+        })
+        .where(eq(LearningResource._id, existing._id));
+      id = existing._id;
     } else {
-      const created = await LearningResource.create({ ...fields, createdBy: user._id, createdByName: user.name });
-      id = created._id.toString();
+      const [created] = await db()
+        .insert(LearningResource)
+        .values({ ...fields, createdBy: user._id, createdByName: user.name })
+        .returning({ id: LearningResource._id });
+      id = created.id;
     }
 
     const added = data.assignedTo.filter((a) => !previouslyAssigned.has(a));
@@ -100,7 +118,7 @@ export async function setResourceActive(id: string, active: boolean): Promise<Ac
   return runAction(async () => {
     const user = await actionPermission("interns.manage");
     if (!isObjectId(id)) throw new ActionError("Resource not found.");
-    const res = await LearningResource.findOneAndUpdate({ _id: id }, { $set: { active } }, { returnDocument: "after", projection: { title: 1 } }).lean();
+    const [res] = await db().update(LearningResource).set({ active }).where(eq(LearningResource._id, id)).returning({ title: LearningResource.title });
     if (!res) throw new ActionError("Resource not found.");
     await audit(user, { action: "update", entity: "learning", entityId: id, ref: res.title, summary: `${active ? "Reactivated" : "Deactivated"} learning resource “${res.title}”`, changes: [{ field: "active", from: !active, to: active }] });
     return null;
@@ -112,20 +130,33 @@ export async function completeResource(id: string, note?: string): Promise<Actio
   return runAction(async () => {
     const user = await actionUser();
     if (!isObjectId(id)) throw new ActionError("Resource not found.");
-    const resource = await LearningResource.findById(id, { title: 1, active: 1, audience: 1, department: 1, assignedTo: 1 }).lean();
+    const [resource] = await db()
+      .select({
+        _id: LearningResource._id,
+        title: LearningResource.title,
+        active: LearningResource.active,
+        audience: LearningResource.audience,
+        department: LearningResource.department,
+        assignedTo: LearningResource.assignedTo,
+      })
+      .from(LearningResource)
+      .where(eq(LearningResource._id, id))
+      .limit(1);
     if (!resource) throw new ActionError("Resource not found.");
     if (!resourceAppliesTo(resource, { id: user.id, personType: user.personType, department: user.departmentId })) {
       throw new ActionError("This resource isn't available to you.");
     }
     const text = (note ?? "").trim().slice(0, 1000);
-    const res = await LearningResource.updateOne(
-      { _id: resource._id, "completions.user": { $ne: user._id } },
-      { $push: { completions: { user: user._id, at: new Date(), ...(text ? { note: text } : {}) } } },
-    );
-    if (res.modifiedCount === 0) throw new ActionError("You have already completed this.");
+    // The guard in `where` keeps a double click from recording the completion twice.
+    const done = await db()
+      .update(LearningResource)
+      .set({ completions: jsonPush(LearningResource.completions, { user: user._id, at: new Date(), ...(text ? { note: text } : {}) }) })
+      .where(and(eq(LearningResource._id, resource._id), not(jsonHasField(LearningResource.completions, "user", user._id))))
+      .returning({ id: LearningResource._id });
+    if (done.length === 0) throw new ActionError("You have already completed this.");
 
-    const me = await User.findById(user._id, { "internship.mentor": 1 }).lean();
-    await notify([me?.internship?.mentor], { type: "internship", title: `${user.name} completed “${resource.title}”`, body: text || undefined, link: `/interns/${user.id}` }, [user._id]);
+    const [me] = await db().select({ mentor: jsonPath<string | null>(User.internship, "mentor") }).from(User).where(eq(User._id, user._id)).limit(1);
+    await notify([me?.mentor], { type: "internship", title: `${user.name} completed “${resource.title}”`, body: text || undefined, link: `/interns/${user.id}` }, [user._id]);
     return null;
   }, "Marked as complete");
 }

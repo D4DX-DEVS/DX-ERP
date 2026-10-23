@@ -1,6 +1,8 @@
 import "server-only";
-import { connectDB } from "@/lib/db";
-import { Lead, Proposal } from "@/lib/models";
+import { and, desc, eq, gte, lte } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { Lead, Proposal, type ProposalStatus } from "@/lib/models";
+import { notInList } from "@/lib/sql";
 import { getSettings } from "@/lib/settings";
 import { statusLabel } from "@/lib/status";
 import { fmtDate } from "@/lib/time";
@@ -46,20 +48,37 @@ const enquiriesConversion = defineReport<ConversionRow>({
     { key: "owner", label: "Assigned to", type: "person" },
   ],
   async run(f, user) {
-    await connectDB();
     const settings = await getSettings();
     const hidden = await hiddenClientIds(user);
     const { from, to } = rangeOf(f);
     const { start, end } = instantRange(from, to);
-    const filter: Record<string, unknown> = { createdAt: { $gte: start, $lte: end }, ...(hidden.length ? { client: { $nin: hidden } } : {}) };
-    if (f.source) filter.source = f.source;
-    if (f.owner) filter.assignedTo = f.owner;
-    const leads = await Lead.find(filter, { source: 1, stage: 1, status: 1, assignedTo: 1, expectedValue: 1, budget: 1, convertedAt: 1, createdAt: 1 }).limit(50_000).lean();
+    const leads = await db()
+      .select({
+        source: Lead.source,
+        stage: Lead.stage,
+        status: Lead.status,
+        assignedTo: Lead.assignedTo,
+        expectedValue: Lead.expectedValue,
+        budget: Lead.budget,
+        convertedAt: Lead.convertedAt,
+        createdAt: Lead.createdAt,
+      })
+      .from(Lead)
+      .where(
+        and(
+          gte(Lead.createdAt, start),
+          lte(Lead.createdAt, end),
+          hidden.length ? notInList(Lead.client, hidden) : undefined,
+          f.source ? eq(Lead.source, f.source) : undefined,
+          f.owner ? eq(Lead.assignedTo, f.owner) : undefined,
+        ),
+      )
+      .limit(50_000);
     const people = await peopleMap(leads.map((l) => l.assignedTo));
     const groupBy = f.groupBy || "source";
     const keyOf = (l: (typeof leads)[number]): string => {
       if (groupBy === "stage") return settings.pipelineStages.find((s) => s.key === l.stage)?.label ?? titleCase(l.stage);
-      if (groupBy === "owner") return l.assignedTo ? (people.get(l.assignedTo.toString())?.name ?? "Unknown") : "Unassigned";
+      if (groupBy === "owner") return l.assignedTo ? (people.get(l.assignedTo)?.name ?? "Unknown") : "Unassigned";
       return l.source || "Unspecified";
     };
     const groups = new Map<string, ConversionRow & { winDays: number[] }>();
@@ -153,30 +172,42 @@ const proposalPipeline = defineReport<ProposalRow>({
     { key: "client", label: "Client", type: "client" },
   ],
   async run(f, user) {
-    await connectDB();
     const hidden = await hiddenClientIds(user);
     const { from, to } = rangeOf(f);
     const { start, end } = instantRange(from, to);
-    const filter: Record<string, unknown> = { createdAt: { $gte: start, $lte: end }, ...clientScope(f, hidden) };
-    if (f.status) filter.status = f.status;
-    const docs = await Proposal.find(filter, { proposalNo: 1, kind: 1, version: 1, title: 1, client: 1, status: 1, total: 1, sentAt: 1, decidedAt: 1, validUntil: 1, owner: 1, createdAt: 1 })
-      .sort({ createdAt: -1 })
-      .limit(20_000)
-      .lean();
+    const docs = await db()
+      .select({
+        proposalNo: Proposal.proposalNo,
+        kind: Proposal.kind,
+        version: Proposal.version,
+        title: Proposal.title,
+        client: Proposal.client,
+        status: Proposal.status,
+        total: Proposal.total,
+        sentAt: Proposal.sentAt,
+        decidedAt: Proposal.decidedAt,
+        validUntil: Proposal.validUntil,
+        owner: Proposal.owner,
+        createdAt: Proposal.createdAt,
+      })
+      .from(Proposal)
+      .where(and(gte(Proposal.createdAt, start), lte(Proposal.createdAt, end), clientScope(f, hidden, Proposal.client), f.status ? eq(Proposal.status, f.status as ProposalStatus) : undefined))
+      .orderBy(desc(Proposal.createdAt))
+      .limit(20_000);
     const [clients, people] = await Promise.all([clientNames(docs.map((d) => d.client), user), peopleMap(docs.map((d) => d.owner))]);
     const rows: ProposalRow[] = docs.map((d) => ({
       proposalNo: d.proposalNo,
       kind: titleCase(d.kind),
       version: d.version,
       title: d.title,
-      client: clients.get(d.client.toString()) ?? "",
+      client: clients.get(d.client) ?? "",
       status: statusLabel("proposal", d.status),
       statusKey: d.status,
       total: d.total,
-      sentAt: d.sentAt,
-      decidedAt: d.decidedAt,
-      validUntil: d.validUntil,
-      owner: d.owner ? (people.get(d.owner.toString())?.name ?? "") : "",
+      sentAt: d.sentAt ?? undefined,
+      decidedAt: d.decidedAt ?? undefined,
+      validUntil: d.validUntil ?? undefined,
+      owner: d.owner ? (people.get(d.owner)?.name ?? "") : "",
       createdAt: d.createdAt,
     }));
     const value = (...keys: string[]) => round2(rows.filter((r) => keys.includes(r.statusKey)).reduce((s, r) => s + r.total, 0));

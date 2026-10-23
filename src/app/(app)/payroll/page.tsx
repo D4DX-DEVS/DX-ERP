@@ -1,6 +1,7 @@
 import Link from "next/link";
+import { and, desc, eq } from "drizzle-orm";
 import { can, requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { PayrollRun, SalaryAdvance } from "@/lib/models";
 import { monthParam, pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
 import { inr, plural, round2 } from "@/lib/format";
@@ -22,23 +23,38 @@ const STATUSES = ["draft", "verified", "approved", "paid", "cancelled"] as const
 export default async function PayrollPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePagePermission("payroll.view");
   const sp = await searchParams;
-  await connectDB();
   const page = pageParam(sp);
 
-  const filter: Record<string, unknown> = {};
   const kind = param(sp, "kind");
-  if (kind === "salary" || kind === "stipend") filter.kind = kind;
   const status = param(sp, "status");
-  if ((STATUSES as readonly string[]).includes(status)) filter.status = status;
   const period = monthParam(sp, "period");
-  if (period) filter.period = period;
+  const filter = and(
+    kind === "salary" || kind === "stipend" ? eq(PayrollRun.kind, kind) : undefined,
+    (STATUSES as readonly string[]).includes(status) ? eq(PayrollRun.status, status as (typeof STATUSES)[number]) : undefined,
+    period ? eq(PayrollRun.period, period) : undefined,
+  );
 
   const [rows, total, awaitingApproval, awaitingPayment, advances] = await Promise.all([
-    PayrollRun.find(filter).sort({ period: -1, createdAt: -1 }).skip((page - 1) * PAGE_SIZE).limit(PAGE_SIZE).lean(),
-    PayrollRun.countDocuments(filter),
-    PayrollRun.find({ status: "verified" }, { totals: 1 }).lean(),
-    PayrollRun.find({ status: "approved" }, { totals: 1 }).lean(),
-    SalaryAdvance.find({ status: "open" }, { amount: 1, recovered: 1 }).lean(),
+    db()
+      .select({
+        _id: PayrollRun._id,
+        runNo: PayrollRun.runNo,
+        period: PayrollRun.period,
+        kind: PayrollRun.kind,
+        status: PayrollRun.status,
+        totals: PayrollRun.totals,
+        preparedByName: PayrollRun.preparedByName,
+        createdAt: PayrollRun.createdAt,
+      })
+      .from(PayrollRun)
+      .where(filter)
+      .orderBy(desc(PayrollRun.period), desc(PayrollRun.createdAt))
+      .limit(PAGE_SIZE)
+      .offset((page - 1) * PAGE_SIZE),
+    db().$count(PayrollRun, filter),
+    db().select({ totals: PayrollRun.totals }).from(PayrollRun).where(eq(PayrollRun.status, "verified")),
+    db().select({ totals: PayrollRun.totals }).from(PayrollRun).where(eq(PayrollRun.status, "approved")),
+    db().select({ amount: SalaryAdvance.amount, recovered: SalaryAdvance.recovered }).from(SalaryAdvance).where(eq(SalaryAdvance.status, "open")),
   ]);
   const approvalNet = awaitingApproval.reduce((s, r) => s + r.totals.net, 0);
   const paymentNet = awaitingPayment.reduce((s, r) => s + r.totals.net, 0);
@@ -93,7 +109,7 @@ export default async function PayrollPage({ searchParams }: { searchParams: Prom
               <EmptyRow colSpan={8}>{hasFilters ? "No runs match these filters." : prepare ? "No payroll runs yet. Create one with “New run”." : "No payroll runs yet."}</EmptyRow>
             )}
             {rows.map((r) => (
-              <Tr key={r._id.toString()}>
+              <Tr key={r._id}>
                 <Td>
                   <Link href={`/payroll/${r._id}`} className="font-mono text-xs font-semibold text-brand-600 hover:text-brand-800">
                     {r.runNo}

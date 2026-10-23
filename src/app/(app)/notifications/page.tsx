@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { Bell } from "lucide-react";
+import { and, desc, eq } from "drizzle-orm";
 import { can, requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Notification } from "@/lib/models";
 import { NOTIFICATION_EVENTS } from "@/lib/config-defaults";
 import { pageParam, PAGE_SIZE, param, withParams, type SearchParams } from "@/lib/query";
@@ -29,21 +30,34 @@ export default async function NotificationsPage({ searchParams }: { searchParams
   const today = todayKey();
   const canManage = can(user, "announcements.manage");
 
-  const filter: Record<string, unknown> = { user: user._id };
-  if (Object.hasOwn(NOTIFICATION_TYPES, type)) filter.type = type;
-  if (tab === "unread") filter.read = false;
-  if (tab === "approvals") filter.actionable = true;
+  const filter = and(
+    eq(Notification.user, user._id),
+    Object.hasOwn(NOTIFICATION_TYPES, type) ? eq(Notification.type, type) : undefined,
+    tab === "unread" ? eq(Notification.read, false) : undefined,
+    tab === "approvals" ? eq(Notification.actionable, true) : undefined,
+  );
 
-  await connectDB();
   const [docs, total, unread, pendingApprovals, announcements] = await Promise.all([
-    Notification.find(filter, { type: 1, title: 1, body: 1, link: 1, priority: 1, read: 1, actionable: 1, createdAt: 1 })
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * PAGE_SIZE)
+    db()
+      .select({
+        _id: Notification._id,
+        type: Notification.type,
+        title: Notification.title,
+        body: Notification.body,
+        link: Notification.link,
+        priority: Notification.priority,
+        read: Notification.read,
+        actionable: Notification.actionable,
+        createdAt: Notification.createdAt,
+      })
+      .from(Notification)
+      .where(filter)
+      .orderBy(desc(Notification.createdAt))
       .limit(PAGE_SIZE)
-      .lean(),
-    Notification.countDocuments(filter),
-    Notification.countDocuments({ user: user._id, read: false }),
-    Notification.countDocuments({ user: user._id, actionable: true, read: false }),
+      .offset((page - 1) * PAGE_SIZE),
+    db().$count(Notification, filter),
+    db().$count(Notification, and(eq(Notification.user, user._id), eq(Notification.read, false))),
+    db().$count(Notification, and(eq(Notification.user, user._id), eq(Notification.actionable, true), eq(Notification.read, false))),
     loadAnnouncements(user, today, { limit: canManage ? 30 : 8, all: canManage }),
   ]);
 
@@ -53,7 +67,7 @@ export default async function NotificationsPage({ searchParams }: { searchParams
     const day = dateKey(n.createdAt);
     const label = day === today ? "Today" : day === yesterday ? "Yesterday" : fmtDate(day, "EEEE, d MMMM yyyy");
     const view: NotificationView = {
-      id: n._id.toString(),
+      id: n._id,
       type: n.type,
       title: n.title,
       body: n.body || undefined,

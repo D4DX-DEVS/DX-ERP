@@ -1,8 +1,10 @@
 "use server";
 
+import { eq } from "drizzle-orm";
 import { actionPermission, ActionError, runAction, type ActionResult } from "@/lib/actions";
 import { audit } from "@/lib/audit";
 import { backupFileName, createBackup, pruneBackups, restoreBackup, verifyBackup, type RestoreResult } from "@/lib/backup";
+import { db } from "@/lib/db";
 import { Backup } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
 import { isObjectId } from "@/lib/validation";
@@ -25,7 +27,7 @@ export async function runBackupNow(): Promise<ActionResult<{ id: string; size: n
     const backup = await createBackup("manual", user);
     const settings = await getSettings();
     const pruned = await pruneBackups(settings.data.backupRetentionCount);
-    return { id: backup._id.toString(), size: backup.size, pruned };
+    return { id: backup._id, size: backup.size, pruned };
   }, "Backup completed");
 }
 
@@ -35,7 +37,7 @@ export async function verifyBackupAction(id: string): Promise<ActionResult<Verif
     const user = await actionPermission("backup.manage");
     if (!isObjectId(id)) throw new ActionError("Backup not found");
     const result = await verifyBackup(id);
-    const backup = await Backup.findById(id, { key: 1 }).lean();
+    const [backup] = await db().select({ key: Backup.key }).from(Backup).where(eq(Backup._id, id)).limit(1);
     await audit(user, {
       action: "backup",
       entity: "backup",

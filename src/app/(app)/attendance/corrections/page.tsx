@@ -1,4 +1,5 @@
 import { forbidden } from "next/navigation";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { CheckCircle2 } from "lucide-react";
 import { ActionButton, ReasonAction } from "@/components/ui/actions";
 import { Avatar } from "@/components/ui/avatar";
@@ -10,9 +11,10 @@ import { EmptyState, PageBody, PageHeader } from "@/components/ui/page";
 import { EmptyRow, TableWrap, THead, Td, Th, Tr } from "@/components/ui/table";
 import { LinkTabs } from "@/components/ui/tabs";
 import { requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { AttendanceCorrection, Department, User, type IAttendanceCorrection } from "@/lib/models";
 import { PAGE_SIZE, pageParam, param, type SearchParams } from "@/lib/query";
+import { inList } from "@/lib/sql";
 import { fmtDate, fmtDateTime, fmtTime, timeAgo } from "@/lib/time";
 import { approveCorrection, rejectCorrection } from "../actions";
 import { AttendanceTabs } from "../_components/tabs";
@@ -48,25 +50,30 @@ export default async function CorrectionsPage({ searchParams }: { searchParams: 
   const sp = await searchParams;
   const tab = param(sp, "tab") === "history" ? "history" : "pending";
   const page = pageParam(sp);
-  await connectDB();
   const now = currentTime();
 
-  const pendingFilter: Record<string, unknown> = { status: "pending", ...decidableFilter(user, access) };
-  const historyQuery: Record<string, unknown> = { status: { $in: ["approved", "rejected"] }, ...historyFilter(access) };
-  const rowsQuery =
-    tab === "pending"
-      ? AttendanceCorrection.find(pendingFilter).sort({ createdAt: 1 }).limit(100)
-      : AttendanceCorrection.find(historyQuery).sort({ reviewedAt: -1 }).skip((page - 1) * PAGE_SIZE).limit(PAGE_SIZE);
+  const pendingFilter = and(eq(AttendanceCorrection.status, "pending"), decidableFilter(user, access));
+  const historyQuery = and(inList(AttendanceCorrection.status, ["approved", "rejected"]), historyFilter(access));
   const [pendingCount, rows, historyTotal] = await Promise.all([
-    AttendanceCorrection.countDocuments(pendingFilter),
-    rowsQuery.lean(),
-    tab === "history" ? AttendanceCorrection.countDocuments(historyQuery) : Promise.resolve(0),
+    db().$count(AttendanceCorrection, pendingFilter),
+    tab === "pending"
+      ? db().select().from(AttendanceCorrection).where(pendingFilter).orderBy(asc(AttendanceCorrection.createdAt)).limit(100)
+      : db()
+          .select()
+          .from(AttendanceCorrection)
+          .where(historyQuery)
+          .orderBy(desc(AttendanceCorrection.reviewedAt))
+          .limit(PAGE_SIZE)
+          .offset((page - 1) * PAGE_SIZE),
+    tab === "history" ? db().$count(AttendanceCorrection, historyQuery) : Promise.resolve(0),
   ]);
 
-  const people = await User.find({ _id: { $in: rows.map((r) => r.user) } }, { name: 1, employeeId: 1, photo: 1, department: 1 }).lean();
-  const departments = await Department.find({ _id: { $in: people.flatMap((p) => (p.department ? [p.department] : [])) } }, { name: 1 }).lean();
-  const deptName = new Map(departments.map((d) => [d._id.toString(), d.name]));
-  const personById = new Map(people.map((p) => [p._id.toString(), { ...p, deptName: p.department ? deptName.get(p.department.toString()) : undefined }]));
+  const people = await db()
+    .select({ _id: User._id, name: User.name, employeeId: User.employeeId, photo: User.photo, deptName: Department.name })
+    .from(User)
+    .leftJoin(Department, eq(Department._id, User.department))
+    .where(inList(User._id, rows.map((r) => r.user)));
+  const personById = new Map(people.map((p) => [p._id, { ...p, photo: p.photo ?? undefined, deptName: p.deptName ?? undefined }]));
 
   return (
     <PageBody>
@@ -87,9 +94,9 @@ export default async function CorrectionsPage({ searchParams }: { searchParams: 
         ) : (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {rows.map((c) => {
-              const p = personById.get(c.user.toString());
+              const p = personById.get(c.user);
               const overdue = now.getTime() - c.createdAt.getTime() > 24 * 3_600_000;
-              const id = c._id.toString();
+              const id = c._id;
               return (
                 <article key={id} className="flex flex-col gap-3 rounded-[14px] border border-line bg-white p-4">
                   <div className="flex items-center gap-3">
@@ -145,9 +152,9 @@ export default async function CorrectionsPage({ searchParams }: { searchParams: 
             <tbody>
               {rows.length === 0 && <EmptyRow colSpan={6}>No decided corrections yet.</EmptyRow>}
               {rows.map((c) => {
-                const p = personById.get(c.user.toString());
+                const p = personById.get(c.user);
                 return (
-                  <Tr key={c._id.toString()} className="align-top">
+                  <Tr key={c._id} className="align-top">
                     <Td>
                       <div className="font-semibold">{p?.name ?? "Unknown person"}</div>
                       <div className="text-xs text-muted">{[p?.employeeId, p?.deptName].filter(Boolean).join(" · ")}</div>

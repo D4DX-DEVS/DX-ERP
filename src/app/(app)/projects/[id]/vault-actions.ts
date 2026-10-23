@@ -1,11 +1,15 @@
 "use server";
 
+import { and, eq, gt } from "drizzle-orm";
+import type { SQLiteUpdateSetSource } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 import { actionUser, ActionError, parse, runAction, type ActionResult } from "@/lib/actions";
 import type { CurrentUser } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { notify } from "@/lib/notify";
-import { Project, Types, VAULT_ENVIRONMENTS, VAULT_KINDS, VaultEvent, VaultItem, type IVaultItem, type VaultKind } from "@/lib/models";
+import { db } from "@/lib/db";
+import { newId, Project, VAULT_ENVIRONMENTS, VAULT_KINDS, VaultEvent, VaultItem, type Id, type IVaultItem, type VaultKind } from "@/lib/models";
+import { increment, inList } from "@/lib/sql";
 import { isObjectId, zs } from "@/lib/validation";
 import { VaultKeyError } from "@/lib/vault/crypto";
 import { parseDotenv, type EnvEntry } from "@/lib/vault/dotenv";
@@ -28,7 +32,11 @@ const MAX_ITEMS_PER_PROJECT = 300;
 
 async function loadVaultProject(user: CurrentUser, projectId: string) {
   if (!isObjectId(projectId)) throw new ActionError("Project not found.");
-  const project = await Project.findById(projectId, { projectNo: 1, title: 1, manager: 1, team: 1 }).lean();
+  const [project] = await db()
+    .select({ _id: Project._id, projectNo: Project.projectNo, title: Project.title, manager: Project.manager, team: Project.team })
+    .from(Project)
+    .where(eq(Project._id, projectId))
+    .limit(1);
   if (!project) throw new ActionError("Project not found.");
   const role = vaultRole(user, project);
   if (!role) throw new ActionError("Only the project manager and team members can use this project's secrets.");
@@ -38,14 +46,14 @@ async function loadVaultProject(user: CurrentUser, projectId: string) {
 async function loadItem(user: CurrentUser, projectId: string, itemId: string, need: "see" | "manage") {
   const { project, role } = await loadVaultProject(user, projectId);
   if (!isObjectId(itemId)) throw new ActionError("Secret not found.");
-  const item = await VaultItem.findOne({ _id: itemId, project: project._id });
+  const [item] = await db().select().from(VaultItem).where(and(eq(VaultItem._id, itemId), eq(VaultItem.project, project._id))).limit(1);
   if (!item || !canSeeItem(user, role, item)) throw new ActionError("Secret not found, or it isn't shared with you.");
   if (need === "manage" && !canManageItem(user, role, item)) throw new ActionError("Only the project manager or the person who added this secret can change it.");
   return { project, role, item };
 }
 
 /** Key errors (vault not configured / wrong master key) become readable action errors. */
-async function dataKey(projectId: Types.ObjectId, create: boolean): Promise<Buffer> {
+async function dataKey(projectId: Id, create: boolean): Promise<Buffer> {
   try {
     const key = await projectDataKey(projectId, create);
     if (!key) throw new ActionError("This project's vault has no key yet.");
@@ -124,11 +132,11 @@ function buildPayload(kind: VaultKind, input: Record<string, unknown>, existing:
 }
 
 /** Selected members must be on the team (the manager always has access). */
-function cleanMembers(project: { team: { user: Types.ObjectId }[] }, ids: string[]): Types.ObjectId[] {
-  const onTeam = new Set(project.team.map((m) => m.user.toString()));
+function cleanMembers(project: { team: { user: Id }[] }, ids: string[]): Id[] {
+  const onTeam = new Set(project.team.map((m) => m.user));
   const invalid = ids.filter((id) => !onTeam.has(id));
   if (invalid.length) throw new ActionError("Only project team members can be given access.", { members: "Choose people from the project team" });
-  return [...new Set(ids)].map((id) => new Types.ObjectId(id));
+  return [...new Set(ids)];
 }
 
 /* ------------------------------------------------------------------ */
@@ -144,31 +152,33 @@ export async function createVaultItem(projectId: string, input: Record<string, u
     const access = parse(accessSchema, input);
     const members = cleanMembers(project, access.members);
     const { payload, environment, entryCount } = buildPayload(kind, input, null);
-    if ((await VaultItem.countDocuments({ project: project._id })) >= MAX_ITEMS_PER_PROJECT) throw new ActionError(`A project can hold at most ${MAX_ITEMS_PER_PROJECT} secrets.`);
+    if ((await db().$count(VaultItem, eq(VaultItem.project, project._id))) >= MAX_ITEMS_PER_PROJECT) throw new ActionError(`A project can hold at most ${MAX_ITEMS_PER_PROJECT} secrets.`);
 
     const key = await dataKey(project._id, true);
-    const id = new Types.ObjectId();
-    await VaultItem.create({
-      _id: id,
-      project: project._id,
-      kind,
-      name: meta.name,
-      description: meta.description,
-      environment,
-      ciphertext: sealPayload(key, project._id, id, payload),
-      entryCount,
-      audience: access.audience,
-      members,
-      notifyOnReveal: access.notifyOnReveal,
-      rotateBy: meta.rotateBy,
-      version: 1,
-      valuesUpdatedAt: new Date(),
-      createdBy: user._id,
-      updatedBy: user._id,
-    });
+    const id = newId();
+    await db()
+      .insert(VaultItem)
+      .values({
+        _id: id,
+        project: project._id,
+        kind,
+        name: meta.name,
+        description: meta.description,
+        environment,
+        ciphertext: sealPayload(key, project._id, id, payload),
+        entryCount,
+        audience: access.audience,
+        members,
+        notifyOnReveal: access.notifyOnReveal,
+        rotateBy: meta.rotateBy,
+        version: 1,
+        valuesUpdatedAt: new Date(),
+        createdBy: user._id,
+        updatedBy: user._id,
+      });
     await logVaultEvent(user, { project: project._id, item: id, itemName: meta.name, action: "create" });
     await audit(user, { action: "create", entity: "vault_item", entityId: id, ref: project.projectNo, summary: `Added secret "${meta.name}" to ${project.projectNo}` });
-    return { id: id.toString() };
+    return { id };
   }, "Secret saved");
 }
 
@@ -183,27 +193,29 @@ export async function updateVaultItem(projectId: string, itemId: string, input: 
     const { payload, environment, entryCount } = buildPayload(item.kind, input, current);
     const valuesChanged = JSON.stringify(payload) !== JSON.stringify(current);
 
-    item.name = meta.name;
-    item.description = meta.description;
-    item.rotateBy = meta.rotateBy;
-    if (environment) item.environment = environment;
-    item.ciphertext = sealPayload(key, project._id, item._id, payload);
-    item.entryCount = entryCount;
-    item.updatedBy = user._id;
+    const patch: SQLiteUpdateSetSource<typeof VaultItem> = {
+      name: meta.name,
+      description: meta.description ?? null,
+      rotateBy: meta.rotateBy ?? null,
+      ciphertext: sealPayload(key, project._id, item._id, payload),
+      entryCount,
+      updatedBy: user._id,
+    };
+    if (environment) patch.environment = environment;
     if (valuesChanged) {
-      item.version += 1;
-      item.valuesUpdatedAt = new Date();
-      item.rotationAdvisedAt = undefined;
-      item.rotationAdvisedReason = undefined;
+      patch.version = increment(VaultItem.version, 1);
+      patch.valuesUpdatedAt = new Date();
+      patch.rotationAdvisedAt = null;
+      patch.rotationAdvisedReason = null;
     }
-    await item.save();
-    await logVaultEvent(user, { project: project._id, item: item._id, itemName: item.name, action: "update" });
+    await db().update(VaultItem).set(patch).where(eq(VaultItem._id, item._id));
+    await logVaultEvent(user, { project: project._id, item: item._id, itemName: meta.name, action: "update" });
     await audit(user, {
       action: "update",
       entity: "vault_item",
       entityId: item._id,
       ref: project.projectNo,
-      summary: `${valuesChanged ? "Changed the values of" : "Updated the details of"} secret "${item.name}" in ${project.projectNo}`,
+      summary: `${valuesChanged ? "Changed the values of" : "Updated the details of"} secret "${meta.name}" in ${project.projectNo}`,
     });
     return null;
   }, "Secret updated");
@@ -215,13 +227,12 @@ export async function updateVaultAccess(projectId: string, itemId: string, input
     const { project, item } = await loadItem(user, projectId, itemId, "manage");
     const access = parse(accessSchema, input);
     const members = cleanMembers(project, access.members);
-    const before = `${item.audience}:${item.members.map(String).sort().join(",")}:${item.notifyOnReveal}`;
-    item.audience = access.audience;
-    item.set("members", members);
-    item.notifyOnReveal = access.notifyOnReveal;
-    item.updatedBy = user._id;
-    await item.save();
-    const after = `${item.audience}:${item.members.map(String).sort().join(",")}:${item.notifyOnReveal}`;
+    const before = `${item.audience}:${[...item.members].sort().join(",")}:${item.notifyOnReveal}`;
+    await db()
+      .update(VaultItem)
+      .set({ audience: access.audience, members, notifyOnReveal: access.notifyOnReveal, updatedBy: user._id })
+      .where(eq(VaultItem._id, item._id));
+    const after = `${access.audience}:${[...members].sort().join(",")}:${access.notifyOnReveal}`;
     if (before !== after) {
       await logVaultEvent(user, { project: project._id, item: item._id, itemName: item.name, action: "access" });
       await audit(user, {
@@ -229,7 +240,7 @@ export async function updateVaultAccess(projectId: string, itemId: string, input
         entity: "vault_item",
         entityId: item._id,
         ref: project.projectNo,
-        summary: `Changed who can see secret "${item.name}" in ${project.projectNo} (${item.audience === "team" ? "whole team" : `${members.length} selected`})`,
+        summary: `Changed who can see secret "${item.name}" in ${project.projectNo} (${access.audience === "team" ? "whole team" : `${members.length} selected`})`,
       });
     }
     return null;
@@ -240,7 +251,7 @@ export async function deleteVaultItem(projectId: string, itemId: string): Promis
   return runAction(async () => {
     const user = await actionUser();
     const { project, item } = await loadItem(user, projectId, itemId, "manage");
-    await item.deleteOne();
+    await db().delete(VaultItem).where(eq(VaultItem._id, item._id));
     await logVaultEvent(user, { project: project._id, item: item._id, itemName: item.name, action: "delete" });
     await audit(user, { action: "delete", entity: "vault_item", entityId: item._id, ref: project.projectNo, summary: `Deleted secret "${item.name}" from ${project.projectNo}` });
     return null;
@@ -251,9 +262,7 @@ export async function dismissRotationAdvice(projectId: string, itemId: string): 
   return runAction(async () => {
     const user = await actionUser();
     const { project, item } = await loadItem(user, projectId, itemId, "manage");
-    item.rotationAdvisedAt = undefined;
-    item.rotationAdvisedReason = undefined;
-    await item.save();
+    await db().update(VaultItem).set({ rotationAdvisedAt: null, rotationAdvisedReason: null }).where(eq(VaultItem._id, item._id));
     await logVaultEvent(user, { project: project._id, item: item._id, itemName: item.name, action: "update", field: "rotation advice dismissed" });
     await audit(user, { action: "update", entity: "vault_item", entityId: item._id, ref: project.projectNo, summary: `Dismissed the rotation advice for secret "${item.name}" in ${project.projectNo}` });
     return null;
@@ -282,7 +291,7 @@ export async function revealVaultItem(projectId: string, itemId: string, purpose
     const req = parse(revealSchema, { purpose, field: field || undefined });
     const { project, item } = await loadItem(user, projectId, itemId, req.purpose === "edit_open" ? "manage" : "see");
 
-    const recent = await VaultEvent.countDocuments({ user: user._id, action: { $in: REVEAL_ACTIONS }, at: { $gt: new Date(Date.now() - 10 * 60_000) } });
+    const recent = await db().$count(VaultEvent, and(eq(VaultEvent.user, user._id), inList(VaultEvent.action, REVEAL_ACTIONS), gt(VaultEvent.at, new Date(Date.now() - 10 * 60_000))));
     if (recent >= REVEAL_LIMIT) throw new ActionError("Too many secret requests in a short time. Please wait a few minutes.");
 
     const key = await dataKey(project._id, false);

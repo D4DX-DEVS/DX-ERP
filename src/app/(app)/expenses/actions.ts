@@ -12,7 +12,10 @@ import { resolveFileRefs } from "@/lib/files";
 import { namesFor } from "@/lib/people";
 import { inr, round2 } from "@/lib/format";
 import { todayKey } from "@/lib/time";
-import { Client, Department, Expense, PayrollRun, Payslip, Project, type FileRef, type IExpense } from "@/lib/models";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { Client, Department, Expense, PayrollRun, Payslip, Project, newId, type FileRef, type IExpense } from "@/lib/models";
+import { inList, jsonHas, jsonPush } from "@/lib/sql";
 import { EXPENSE_PAY_METHODS } from "./constants";
 
 const expenseSchema = z.object({
@@ -40,13 +43,13 @@ const paySchema = z.object({
 
 async function loadExpense(id: string): Promise<IExpense> {
   if (!isObjectId(id)) throw new ActionError("Expense not found.");
-  const e = await Expense.findById(id).lean();
+  const [e] = await db().select().from(Expense).where(eq(Expense._id, id)).limit(1);
   if (!e) throw new ActionError("Expense not found.");
   return e;
 }
 
-const isOwner = (e: Pick<IExpense, "user">, user: Pick<CurrentUser, "id">) => e.user.toString() === user.id;
-const historyEntry = (user: Pick<CurrentUser, "_id" | "name">, action: string, note?: string) => ({ action, by: user._id, byName: user.name, at: new Date(), note });
+const isOwner = (e: Pick<IExpense, "user">, user: Pick<CurrentUser, "id">) => e.user === user.id;
+const historyEntry = (user: Pick<CurrentUser, "_id" | "name">, action: string, note?: string) => ({ _id: newId(), action, by: user._id, byName: user.name, at: new Date(), note });
 
 /** Notifies everyone who can approve expenses (never the submitter). */
 async function notifyApprovers(expense: Pick<IExpense, "_id" | "expenseNo" | "category" | "amount">, submitter: CurrentUser, title: string): Promise<void> {
@@ -79,19 +82,23 @@ export async function saveExpense(input: Record<string, unknown>): Promise<Actio
     if (taxAmount > amount) throw new ActionError("The tax amount cannot exceed the total amount.", { taxAmount: "Cannot exceed the amount" });
 
     if (data.project) {
-      const p = await Project.findById(data.project, { manager: 1, team: 1 }).lean();
+      const [p] = await db().select({ manager: Project.manager, team: Project.team }).from(Project).where(eq(Project._id, data.project)).limit(1);
       if (!p) throw new ActionError("Project not found.", { project: "Choose a project" });
-      const onProject = p.manager?.toString() === user.id || p.team.some((m) => m.user.toString() === user.id);
+      const onProject = p.manager === user.id || p.team.some((m) => m.user === user.id);
       if (!onProject && !can(user, "projects.view_all")) throw new ActionError("You can only charge expenses to projects you work on.", { project: "Not one of your projects" });
     }
     if (data.client) {
       if (!can(user, "crm.view")) throw new ActionError("You don't have access to client records.", { client: "Not allowed" });
-      if (!(await Client.exists({ _id: data.client }))) throw new ActionError("Client not found.", { client: "Choose a client" });
+      const [clientHit] = await db().select({ id: Client._id }).from(Client).where(eq(Client._id, data.client)).limit(1);
+      if (!clientHit) throw new ActionError("Client not found.", { client: "Choose a client" });
     }
-    if (data.department && !(await Department.exists({ _id: data.department }))) throw new ActionError("Department not found.", { department: "Choose a department" });
+    if (data.department) {
+      const [departmentHit] = await db().select({ id: Department._id }).from(Department).where(eq(Department._id, data.department)).limit(1);
+      if (!departmentHit) throw new ActionError("Department not found.", { department: "Choose a department" });
+    }
 
     // Keep references of receipts that are already attached; resolve the newly uploaded ones.
-    const kept = new Map((existing?.receipts ?? []).map((r) => [r.file.toString(), r]));
+    const kept = new Map((existing?.receipts ?? []).map((r) => [r.file, r]));
     const fresh = await resolveFileRefs(user, data.receipts.filter((r) => !kept.has(r)));
     const keptRefs = data.receipts.flatMap((r) => {
       const ref = kept.get(r);
@@ -117,35 +124,37 @@ export async function saveExpense(input: Record<string, unknown>): Promise<Actio
     const decisionReset = { approver: null, approverName: null, decidedAt: null, decisionNote: null };
 
     if (existing) {
-      const updated = await Expense.findOneAndUpdate(
-        { _id: existing._id, user: user._id, status: { $in: ["draft", "rejected"] } },
-        {
-          $set: { ...fields, status: submit ? "submitted" : "draft", ...(submit ? { submittedAt: new Date(), ...decisionReset } : {}) },
-          $push: { history: historyEntry(user, submit ? "submitted" : "edited") },
-        },
-        { returnDocument: "after" },
-      ).lean();
+      const [updated] = await db()
+        .update(Expense)
+        .set({
+          ...fields,
+          status: submit ? "submitted" : "draft",
+          ...(submit ? { submittedAt: new Date(), ...decisionReset } : {}),
+          history: jsonPush(Expense.history, historyEntry(user, submit ? "submitted" : "edited")),
+        })
+        .where(and(eq(Expense._id, existing._id), eq(Expense.user, user._id), inList(Expense.status, ["draft", "rejected"])))
+        .returning();
       if (!updated) throw new ActionError("This expense can no longer be edited.");
       await audit(user, { action: submit ? "submit" : "update", entity: "expense", entityId: updated._id, ref: updated.expenseNo, summary: `${submit ? "Submitted" : "Updated"} expense ${updated.expenseNo} (${inr(amount, true)})` });
       if (submit) await notifyApprovers(updated, user, `Expense ${updated.expenseNo} awaiting approval`);
-      return { id: updated._id.toString() };
+      return { id: updated._id };
     }
 
     const expenseNo = await nextNumber("expense", ID_PREFIX.expense, 5);
-    const doc = await Expense.create({
-      ...fields,
-      project: data.project,
-      client: data.client,
-      department: data.department,
-      expenseNo,
-      user: user._id,
-      status: submit ? "submitted" : "draft",
-      submittedAt: submit ? new Date() : undefined,
-      history: [historyEntry(user, "created"), ...(submit ? [historyEntry(user, "submitted")] : [])],
-    });
+    const [doc] = await db()
+      .insert(Expense)
+      .values({
+        ...fields,
+        expenseNo,
+        user: user._id,
+        status: submit ? "submitted" : "draft",
+        submittedAt: submit ? new Date() : undefined,
+        history: [historyEntry(user, "created"), ...(submit ? [historyEntry(user, "submitted")] : [])],
+      })
+      .returning();
     await audit(user, { action: submit ? "submit" : "create", entity: "expense", entityId: doc._id, ref: expenseNo, summary: `${submit ? "Submitted" : "Saved draft of"} expense ${expenseNo} (${inr(amount, true)}, ${data.category})` });
     if (submit) await notifyApprovers(doc, user, `Expense ${expenseNo} awaiting approval`);
-    return { id: doc._id.toString() };
+    return { id: doc._id };
   }, "Expense saved");
 }
 
@@ -155,11 +164,19 @@ export async function submitExpense(id: string): Promise<ActionResult<null>> {
     const user = await actionUser();
     const e = await loadExpense(id);
     if (!isOwner(e, user)) throw new ActionError("You can only submit your own expenses.");
-    const updated = await Expense.findOneAndUpdate(
-      { _id: e._id, user: user._id, status: { $in: ["draft", "rejected"] } },
-      { $set: { status: "submitted", submittedAt: new Date(), approver: null, approverName: null, decidedAt: null, decisionNote: null }, $push: { history: historyEntry(user, "submitted") } },
-      { returnDocument: "after" },
-    ).lean();
+    const [updated] = await db()
+      .update(Expense)
+      .set({
+        status: "submitted",
+        submittedAt: new Date(),
+        approver: null,
+        approverName: null,
+        decidedAt: null,
+        decisionNote: null,
+        history: jsonPush(Expense.history, historyEntry(user, "submitted")),
+      })
+      .where(and(eq(Expense._id, e._id), eq(Expense.user, user._id), inList(Expense.status, ["draft", "rejected"])))
+      .returning();
     if (!updated) throw new ActionError("This expense has already been submitted.");
     await audit(user, { action: "submit", entity: "expense", entityId: e._id, ref: e.expenseNo, summary: `Submitted expense ${e.expenseNo} (${inr(e.amount, true)})`, changes: [{ field: "status", from: e.status, to: "submitted" }] });
     await notifyApprovers(updated, user, `Expense ${e.expenseNo} awaiting approval`);
@@ -172,8 +189,11 @@ export async function deleteExpense(id: string): Promise<ActionResult<null>> {
     const user = await actionUser();
     const e = await loadExpense(id);
     if (!isOwner(e, user)) throw new ActionError("You can only delete your own expenses.");
-    const res = await Expense.deleteOne({ _id: e._id, user: user._id, status: { $in: ["draft", "rejected"] } });
-    if (res.deletedCount === 0) throw new ActionError("Only drafts and rejected expenses can be deleted.");
+    const deleted = await db()
+      .delete(Expense)
+      .where(and(eq(Expense._id, e._id), eq(Expense.user, user._id), inList(Expense.status, ["draft", "rejected"])))
+      .returning({ id: Expense._id });
+    if (deleted.length === 0) throw new ActionError("Only drafts and rejected expenses can be deleted.");
     await audit(user, { action: "delete", entity: "expense", entityId: e._id, ref: e.expenseNo, summary: `Deleted expense ${e.expenseNo}` });
     return null;
   }, "Expense deleted");
@@ -183,16 +203,20 @@ async function decide(id: string, decision: "approved" | "rejected", note: strin
   const user = await actionPermission("expenses.approve");
   const e = await loadExpense(id);
   if (isOwner(e, user)) throw new ActionError("You cannot approve or reject your own expense.");
-  const updated = await Expense.findOneAndUpdate(
-    { _id: e._id, status: "submitted" },
-    {
-      $set: { status: decision, approver: user._id, approverName: user.name, decidedAt: new Date(), decisionNote: note ?? "" },
-      $push: { history: historyEntry(user, decision, note) },
-    },
-    { returnDocument: "after" },
-  ).lean();
+  const [updated] = await db()
+    .update(Expense)
+    .set({
+      status: decision,
+      approver: user._id,
+      approverName: user.name,
+      decidedAt: new Date(),
+      decisionNote: note ?? "",
+      history: jsonPush(Expense.history, historyEntry(user, decision, note)),
+    })
+    .where(and(eq(Expense._id, e._id), eq(Expense.status, "submitted")))
+    .returning({ id: Expense._id });
   if (!updated) throw new ActionError("This expense is no longer waiting for approval.");
-  const submitterName = (await namesFor([e.user])).get(e.user.toString()) ?? "staff";
+  const submitterName = (await namesFor([e.user])).get(e.user) ?? "staff";
   await audit(user, {
     action: decision === "approved" ? "approve" : "reject",
     entity: "expense",
@@ -236,20 +260,23 @@ export async function payExpense(id: string, input: Record<string, unknown>): Pr
     if (data.date > todayKey()) throw new ActionError("The payment date cannot be in the future.", { date: "Cannot be in the future" });
 
     // Reimbursements that are part of an unfinished payroll run are paid with that run.
-    const slips = await Payslip.find({ reimbursedExpenses: e._id }, { run: 1 }).lean();
-    if (slips.length > 0) {
-      const run = await PayrollRun.findOne({ _id: { $in: slips.map((s) => s.run) }, status: { $in: ["draft", "verified", "approved"] } }, { runNo: 1 }).lean();
-      if (run) throw new ActionError(`This claim is included in payroll run ${run.runNo} and will be reimbursed with it.`);
-    }
+    const [run] = await db()
+      .select({ runNo: PayrollRun.runNo })
+      .from(Payslip)
+      .innerJoin(PayrollRun, eq(PayrollRun._id, Payslip.run))
+      .where(and(jsonHas(Payslip.reimbursedExpenses, e._id), inList(PayrollRun.status, ["draft", "verified", "approved"])))
+      .limit(1);
+    if (run) throw new ActionError(`This claim is included in payroll run ${run.runNo} and will be reimbursed with it.`);
 
-    const updated = await Expense.findOneAndUpdate(
-      { _id: e._id, status: "approved" },
-      {
-        $set: { status: "paid", payment: { date: data.date, method: data.method, reference: data.reference, viaPayroll: false, by: user._id, byName: user.name } },
-        $push: { history: historyEntry(user, "paid", `${data.method}${data.reference ? ` · ${data.reference}` : ""}`) },
-      },
-      { returnDocument: "after" },
-    ).lean();
+    const [updated] = await db()
+      .update(Expense)
+      .set({
+        status: "paid",
+        payment: { date: data.date, method: data.method, reference: data.reference, viaPayroll: false, by: user._id, byName: user.name },
+        history: jsonPush(Expense.history, historyEntry(user, "paid", `${data.method}${data.reference ? ` · ${data.reference}` : ""}`)),
+      })
+      .where(and(eq(Expense._id, e._id), eq(Expense.status, "approved")))
+      .returning({ id: Expense._id });
     if (!updated) throw new ActionError("This expense has already been paid.");
     await audit(user, { action: "payment", entity: "expense", entityId: e._id, ref: e.expenseNo, summary: `Recorded ${e.type === "reimbursable" ? "reimbursement" : "payment"} of ${inr(e.amount, true)} for ${e.expenseNo} (${data.method})`, changes: [{ field: "status", from: "approved", to: "paid" }] });
     await notify([e.user], {

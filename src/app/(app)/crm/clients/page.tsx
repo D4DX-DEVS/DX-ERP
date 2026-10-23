@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { Lock, Plus } from "lucide-react";
+import { and, asc, count, eq, sql, type SQL } from "drizzle-orm";
 import { can, requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
-import { Client, Invoice, Project } from "@/lib/models";
+import { db } from "@/lib/db";
+import { Client, Invoice, Project, type ClientStatus } from "@/lib/models";
 import { peopleOptions } from "@/lib/people";
-import { idParam, pageParam, PAGE_SIZE, param, searchRegex, type SearchParams } from "@/lib/query";
+import { idParam, pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
+import { inList, searchAny } from "@/lib/sql";
 import { inr } from "@/lib/format";
 import { STATUS } from "@/lib/status";
 import { ButtonLink } from "@/components/ui/button";
@@ -22,38 +24,55 @@ export const metadata = { title: "Clients" };
 export default async function ClientsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePagePermission("crm.view");
   const sp = await searchParams;
-  await connectDB();
   const page = pageParam(sp);
   const status = param(sp, "status");
   const owner = idParam(sp, "owner");
   const q = param(sp, "q");
   const showMoney = can(user, "invoices.view");
 
-  const and: Record<string, unknown>[] = [clientScope(user)];
-  if (status && status in STATUS.client) and.push({ status });
-  if (owner) and.push({ owner });
-  const re = searchRegex(q);
-  if (re) and.push({ $or: [{ name: re }, { clientNo: re }, { contactPerson: re }, { email: re }, { phone: re }] });
-  const filter = { $and: and };
+  const conds: (SQL | undefined)[] = [clientScope(user)];
+  if (status && status in STATUS.client) conds.push(eq(Client.status, status as ClientStatus));
+  if (owner) conds.push(eq(Client.owner, owner));
+  conds.push(searchAny(q, Client.name, Client.clientNo, Client.contactPerson, Client.email, Client.phone));
+  const filter = and(...conds);
 
   const [rows, total, people] = await Promise.all([
-    Client.find(filter).sort({ name: 1 }).skip((page - 1) * PAGE_SIZE).limit(PAGE_SIZE).lean(),
-    Client.countDocuments(filter),
+    db()
+      .select({
+        _id: Client._id,
+        clientNo: Client.clientNo,
+        name: Client.name,
+        type: Client.type,
+        contactPerson: Client.contactPerson,
+        contactDesignation: Client.contactDesignation,
+        email: Client.email,
+        phone: Client.phone,
+        status: Client.status,
+        owner: Client.owner,
+        confidential: Client.confidential,
+      })
+      .from(Client)
+      .where(filter)
+      .orderBy(asc(Client.name))
+      .limit(PAGE_SIZE)
+      .offset((page - 1) * PAGE_SIZE),
+    db().$count(Client, filter),
     peopleOptions(),
   ]);
   const ids = rows.map((r) => r._id);
   const [projectCounts, balances, owners] = await Promise.all([
-    ids.length ? Project.aggregate<{ _id: unknown; n: number }>([{ $match: { client: { $in: ids } } }, { $group: { _id: "$client", n: { $sum: 1 } } }]) : [],
+    ids.length ? db().select({ client: Project.client, n: count() }).from(Project).where(inList(Project.client, ids)).groupBy(Project.client) : [],
     showMoney && ids.length
-      ? Invoice.aggregate<{ _id: unknown; balance: number }>([
-          { $match: { client: { $in: ids }, status: { $in: ["issued", "partially_paid", "overdue"] } } },
-          { $group: { _id: "$client", balance: { $sum: "$balance" } } },
-        ])
+      ? db()
+          .select({ client: Invoice.client, balance: sql<number>`coalesce(sum(${Invoice.balance}), 0)`.mapWith(Number) })
+          .from(Invoice)
+          .where(and(inList(Invoice.client, ids), inList(Invoice.status, ["issued", "partially_paid", "overdue"])))
+          .groupBy(Invoice.client)
       : [],
     userCards(rows.map((r) => r.owner)),
   ]);
-  const projectsBy = new Map(projectCounts.map((p) => [String(p._id), p.n]));
-  const balanceBy = new Map(balances.map((b) => [String(b._id), b.balance]));
+  const projectsBy = new Map(projectCounts.map((p) => [p.client, p.n]));
+  const balanceBy = new Map(balances.map((b) => [b.client, b.balance]));
   const colCount = showMoney ? 8 : 7;
 
   return (
@@ -104,8 +123,8 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
               </EmptyRow>
             )}
             {rows.map((c) => {
-              const id = c._id.toString();
-              const o = c.owner ? owners.get(c.owner.toString()) : undefined;
+              const id = c._id;
+              const o = c.owner ? owners.get(c.owner) : undefined;
               const due = balanceBy.get(id) ?? 0;
               return (
                 <Tr key={id}>

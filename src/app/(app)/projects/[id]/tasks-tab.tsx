@@ -1,16 +1,19 @@
 import { Plus } from "lucide-react";
-import { Task, Types, type IProject } from "@/lib/models";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { Task, type IProject } from "@/lib/models";
 import type { CurrentUser } from "@/lib/auth/session";
 import type { AppSettings } from "@/lib/config-defaults";
-import { pageParam, PAGE_SIZE, param, searchRegex, type SearchParams } from "@/lib/query";
+import { pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
+import { searchAny } from "@/lib/sql";
 import { canCreateTask, keysInCategories, taskFilter, TASK_CLOSED_CATEGORIES, type Filter } from "@/lib/work-access";
 import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { FilterBar, Pagination, SearchInput, SelectFilter } from "@/components/ui/filters";
 import { Segmented } from "@/components/ui/tabs";
-import { queryTasks } from "../../tasks/_components/task-query";
+import { queryTaskBoard, queryTasks } from "../../tasks/_components/task-query";
 import { toTaskRows } from "../../tasks/_components/task-rows";
-import { TaskBoard, TaskTable, type BoardColumn } from "../../tasks/_components/task-ui";
+import { TaskBoard, TaskTable } from "../../tasks/_components/task-ui";
 
 const BOARD_COLUMN_LIMIT = 30;
 
@@ -21,17 +24,16 @@ export async function TasksTab({ user, project, settings, sp }: { user: CurrentU
   const view = param(sp, "view") === "board" ? "board" : "list";
   const base = `/projects/${project._id}`;
 
-  const and: Filter[] = [{ project: new Types.ObjectId(project._id) }, await taskFilter(user)];
+  const conds: Filter[] = [eq(Task.project, project._id), await taskFilter(user)];
   const status = param(sp, "status");
-  if (view === "list" && statuses.some((s) => s.key === status)) and.push({ status });
-  const rx = searchRegex(param(sp, "q"));
-  if (rx) and.push({ $or: [{ title: rx }, { taskNo: rx }] });
-  const filter: Filter = { $and: and };
+  if (view === "list" && statuses.some((s) => s.key === status)) conds.push(eq(Task.status, status));
+  conds.push(searchAny(param(sp, "q"), Task.title, Task.taskNo));
+  const filter: Filter = and(...conds);
 
   let body;
   if (view === "list") {
     const page = pageParam(sp);
-    const [tasks, total] = await Promise.all([queryTasks(filter, closedKeys, (page - 1) * PAGE_SIZE, PAGE_SIZE), Task.countDocuments(filter)]);
+    const [tasks, total] = await Promise.all([queryTasks(filter, closedKeys, (page - 1) * PAGE_SIZE, PAGE_SIZE), db().$count(Task, filter)]);
     const rows = await toTaskRows(user, tasks, settings);
     body = (
       <Card>
@@ -40,13 +42,7 @@ export async function TasksTab({ user, project, settings, sp }: { user: CurrentU
       </Card>
     );
   } else {
-    const columns: BoardColumn[] = await Promise.all(
-      statuses.map(async (s) => {
-        const colFilter: Filter = { $and: [...and, { status: s.key }] };
-        const [tasks, total] = await Promise.all([queryTasks(colFilter, closedKeys, 0, BOARD_COLUMN_LIMIT), Task.countDocuments(colFilter)]);
-        return { status: s, rows: await toTaskRows(user, tasks, settings), total };
-      }),
-    );
+    const columns = await queryTaskBoard(user, settings, filter, closedKeys, BOARD_COLUMN_LIMIT);
     body = <TaskBoard columns={columns} statuses={statuses} showProject={false} />;
   }
 

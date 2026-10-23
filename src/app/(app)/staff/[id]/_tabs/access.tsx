@@ -1,5 +1,6 @@
-import { connectDB } from "@/lib/db";
-import { Role } from "@/lib/models";
+import { eq, sql } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { Role, User } from "@/lib/models";
 import { assignableRoles } from "@/lib/rbac/roles";
 import { fmtDateTime } from "@/lib/time";
 import { Card, CardBody, CardHeader, DetailList } from "@/components/ui/card";
@@ -13,9 +14,14 @@ import type { TabProps } from "./types";
 
 /** Login access, role and sessions. Only rendered for users.manage. */
 export async function AccessTab({ user, person, settings }: TabProps) {
-  await connectDB();
-  const id = person._id.toString();
-  const [roles, role, sessions] = await Promise.all([assignableRoles(), Role.findOne({ key: person.role }, { name: 1 }).lean(), loadSessions(person._id)]);
+  const id = person._id;
+  // The profile projection leaves the Google subject out; only whether it is linked is needed here.
+  const [roles, [role], [link], sessions] = await Promise.all([
+    assignableRoles(),
+    db().select({ name: Role.name }).from(Role).where(eq(Role.key, person.role)).limit(1),
+    db().select({ linked: sql<number>`${User.googleSub} is not null`.mapWith(Boolean) }).from(User).where(eq(User._id, id)).limit(1),
+    loadSessions(person._id),
+  ]);
   const self = id === user.id;
   const exited = settings.employmentStatuses.find((s) => s.key === person.status)?.category === "exited";
 
@@ -32,7 +38,7 @@ export async function AccessTab({ user, person, settings }: TabProps) {
               columns={1}
               items={[
                 { label: "Sign-in account", value: person.email },
-                { label: "Google account linked", value: person.googleSub ? "Yes" : "Not yet — links on first sign-in" },
+                { label: "Google account linked", value: link?.linked ? "Yes" : "Not yet — links on first sign-in" },
                 { label: "Last sign-in", value: person.lastLoginAt ? fmtDateTime(person.lastLoginAt) : "Never" },
               ]}
             />

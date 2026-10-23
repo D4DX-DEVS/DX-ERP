@@ -1,6 +1,7 @@
 import { forbidden } from "next/navigation";
+import { asc } from "drizzle-orm";
 import { can, requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Client } from "@/lib/models";
 import { peopleOptions } from "@/lib/people";
 import { getSettings } from "@/lib/settings";
@@ -17,10 +18,14 @@ export default async function EditLeadPage({ params }: { params: Promise<{ id: s
   const user = await requirePagePermission("crm.view");
   if (!can(user, "crm.manage")) forbidden();
   const lead = await pageLead(user, id);
-  await connectDB();
   const settings = await getSettings();
   const [clients, people] = await Promise.all([
-    Client.find(clientScope(user), { name: 1, clientNo: 1, contactPerson: 1, email: 1, phone: 1 }).sort({ name: 1 }).limit(1000).lean(),
+    db()
+      .select({ _id: Client._id, name: Client.name, clientNo: Client.clientNo, contactPerson: Client.contactPerson, email: Client.email, phone: Client.phone })
+      .from(Client)
+      .where(clientScope(user))
+      .orderBy(asc(Client.name))
+      .limit(1000),
     peopleOptions(),
   ]);
 
@@ -33,7 +38,7 @@ export default async function EditLeadPage({ params }: { params: Promise<{ id: s
         initial={{
           id,
           title: lead.title,
-          client: lead.client?.toString() ?? "",
+          client: lead.client ?? "",
           companyName: lead.companyName,
           contactName: lead.contactName ?? "",
           email: lead.email ?? "",
@@ -42,12 +47,12 @@ export default async function EditLeadPage({ params }: { params: Promise<{ id: s
           budget: lead.budget?.toString() ?? "",
           expectedValue: lead.expectedValue?.toString() ?? "",
           source: lead.source ?? "",
-          assignedTo: lead.assignedTo?.toString() ?? "",
+          assignedTo: lead.assignedTo ?? "",
           stage: lead.stage,
           nextFollowUp: toLocalInput(lead.nextFollowUp),
           expectedCloseDate: lead.expectedCloseDate ?? "",
         }}
-        clients={clients.map((c) => ({ id: c._id.toString(), name: c.name, clientNo: c.clientNo, contactPerson: c.contactPerson, email: c.email, phone: c.phone }))}
+        clients={clients.map((c) => ({ id: c._id, name: c.name, clientNo: c.clientNo, contactPerson: c.contactPerson ?? undefined, email: c.email ?? undefined, phone: c.phone ?? undefined }))}
         people={people}
         sources={settings.leadSources}
         stages={openStages(settings.pipelineStages).map((s) => ({ key: s.key, label: s.label }))}

@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { forbidden, notFound } from "next/navigation";
+import { eq } from "drizzle-orm";
 import { can, requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { User } from "@/lib/models";
 import { peopleOptions } from "@/lib/people";
 import { todayKey } from "@/lib/time";
@@ -16,24 +17,28 @@ export default async function EditPersonPage({ params }: { params: Promise<{ id:
   const user = await requireUser();
   const { id } = await params;
   if (!isObjectId(id)) notFound();
-  await connectDB();
-  const target = await User.findById(id, {
-    name: 1,
-    email: 1,
-    phone: 1,
-    personalEmail: 1,
-    dob: 1,
-    gender: 1,
-    bloodGroup: 1,
-    address: 1,
-    emergencyContact: 1,
-    employmentType: 1,
-    team: 1,
-    joiningDate: 1,
-    personType: 1,
-    reportingManager: 1,
-    internship: 1,
-  }).lean();
+  const [target] = await db()
+    .select({
+      _id: User._id,
+      name: User.name,
+      email: User.email,
+      phone: User.phone,
+      personalEmail: User.personalEmail,
+      dob: User.dob,
+      gender: User.gender,
+      bloodGroup: User.bloodGroup,
+      address: User.address,
+      emergencyContact: User.emergencyContact,
+      employmentType: User.employmentType,
+      team: User.team,
+      joiningDate: User.joiningDate,
+      personType: User.personType,
+      reportingManager: User.reportingManager,
+      internship: User.internship,
+    })
+    .from(User)
+    .where(eq(User._id, id))
+    .limit(1);
   if (!target || target.personType === "admin") notFound();
   const access = personAccess(user, target);
   if (!access.canEdit) forbidden();
@@ -52,11 +57,11 @@ export default async function EditPersonPage({ params }: { params: Promise<{ id:
           id,
           name: target.name,
           email: target.email,
-          phone: target.phone,
-          personalEmail: target.personalEmail,
-          dob: target.dob,
-          gender: target.gender,
-          bloodGroup: target.bloodGroup,
+          phone: target.phone ?? undefined,
+          personalEmail: target.personalEmail ?? undefined,
+          dob: target.dob ?? undefined,
+          gender: target.gender ?? undefined,
+          bloodGroup: target.bloodGroup ?? undefined,
           addrLine1: target.address?.line1,
           addrLine2: target.address?.line2,
           city: target.address?.city,
@@ -67,10 +72,10 @@ export default async function EditPersonPage({ params }: { params: Promise<{ id:
           emergencyRelation: target.emergencyContact?.relation,
           emergencyPhone: target.emergencyContact?.phone,
           employmentType: target.employmentType,
-          team: target.team,
-          joiningDate: target.joiningDate,
+          team: target.team ?? undefined,
+          joiningDate: target.joiningDate ?? undefined,
           internship: i
-            ? { startDate: i.startDate, endDate: i.endDate, college: i.college, course: i.course, assignedRole: i.assignedRole, mentor: i.mentor?.toString() }
+            ? { startDate: i.startDate, endDate: i.endDate, college: i.college, course: i.course, assignedRole: i.assignedRole, mentor: i.mentor }
             : undefined,
         }}
       />

@@ -3,7 +3,9 @@ import { and, eq, gte, lte, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { Attendance, Holiday, LeaveRequest, Movement, type IAttendance } from "@/lib/models";
 import type { AppSettings } from "@/lib/config-defaults";
+import { runBatch } from "@/lib/domain/batch";
 import { getSettings } from "@/lib/settings";
+import { inList } from "@/lib/sql";
 import { hmToMinutes, minutesBetween, weekday, zonedDateTime } from "@/lib/time";
 
 export interface AttendanceMetrics {
@@ -92,44 +94,68 @@ export async function movementMinutesFor(userId: string, date: string): Promise<
 }
 
 /**
+ * Recomputes and saves the derived fields of several attendance days of one person in a fixed number of
+ * queries (days without an attendance row are skipped). Call after any change to the days' check-in/out,
+ * breaks, movements or leave.
+ */
+export async function recalcAttendanceDays(userId: string, dates: string[]): Promise<void> {
+  const days = [...new Set(dates)].sort();
+  if (days.length === 0) return;
+  const rows = await db()
+    .select()
+    .from(Attendance)
+    .where(and(eq(Attendance.user, userId), inList(Attendance.date, days)));
+  if (rows.length === 0) return;
+  const settings = await getSettings();
+  const first = days[0];
+  const last = days[days.length - 1];
+  const [movements, leaves, holidays] = await Promise.all([
+    db()
+      .select({ date: Movement.date, durationMinutes: Movement.durationMinutes, official: Movement.official })
+      .from(Movement)
+      .where(and(eq(Movement.user, userId), inList(Movement.date, days), eq(Movement.status, "returned"), ne(Movement.approvalStatus, "rejected"))),
+    db()
+      .select({ startDate: LeaveRequest.startDate, endDate: LeaveRequest.endDate, halfDay: LeaveRequest.halfDay })
+      .from(LeaveRequest)
+      .where(and(eq(LeaveRequest.user, userId), eq(LeaveRequest.status, "approved"), lte(LeaveRequest.startDate, last), gte(LeaveRequest.endDate, first))),
+    db()
+      .select({ date: Holiday.date })
+      .from(Holiday)
+      .where(and(inList(Holiday.date, days), eq(Holiday.optional, false))),
+  ]);
+  const holidayDays = new Set(holidays.map((h) => h.date));
+  const updates = rows.map((att) => {
+    const moves = { personal: 0, official: 0 };
+    for (const m of movements) {
+      if (m.date !== att.date) continue;
+      if (m.official) moves.official += m.durationMinutes ?? 0;
+      else moves.personal += m.durationMinutes ?? 0;
+    }
+    const leave = leaves.find((l) => l.startDate <= att.date && l.endDate >= att.date);
+    const m = computeAttendance(
+      {
+        date: att.date,
+        checkIn: att.checkIn,
+        checkOut: att.checkOut,
+        breaks: att.breaks,
+        personalMovementMinutes: moves.personal,
+        officialMovementMinutes: moves.official,
+        onLeave: leave ? (leave.halfDay ? "half" : "full") : null,
+        isHoliday: holidayDays.has(att.date),
+      },
+      settings,
+    );
+    return db().update(Attendance).set(m).where(eq(Attendance._id, att._id));
+  });
+  await runBatch(updates);
+}
+
+/**
  * Recomputes and saves the derived fields of one attendance day. Call after any change to the
  * day's check-in/out, breaks, movements or leave.
  */
 export async function recalcAttendanceDay(userId: string, date: string): Promise<void> {
-  const [att] = await db()
-    .select()
-    .from(Attendance)
-    .where(and(eq(Attendance.user, userId), eq(Attendance.date, date)))
-    .limit(1);
-  if (!att) return;
-  const settings = await getSettings();
-  const [moves, [leave], [holiday]] = await Promise.all([
-    movementMinutesFor(userId, date),
-    db()
-      .select({ halfDay: LeaveRequest.halfDay })
-      .from(LeaveRequest)
-      .where(and(eq(LeaveRequest.user, userId), eq(LeaveRequest.status, "approved"), lte(LeaveRequest.startDate, date), gte(LeaveRequest.endDate, date)))
-      .limit(1),
-    db()
-      .select({ id: Holiday._id })
-      .from(Holiday)
-      .where(and(eq(Holiday.date, date), eq(Holiday.optional, false)))
-      .limit(1),
-  ]);
-  const m = computeAttendance(
-    {
-      date,
-      checkIn: att.checkIn,
-      checkOut: att.checkOut,
-      breaks: att.breaks,
-      personalMovementMinutes: moves.personal,
-      officialMovementMinutes: moves.official,
-      onLeave: leave ? (leave.halfDay ? "half" : "full") : null,
-      isHoliday: Boolean(holiday),
-    },
-    settings,
-  );
-  await db().update(Attendance).set(m).where(eq(Attendance._id, att._id));
+  await recalcAttendanceDays(userId, [date]);
 }
 
 /** Minutes of the office day (used for progress bars / expected check-out). */

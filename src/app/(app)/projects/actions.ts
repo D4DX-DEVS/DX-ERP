@@ -1,15 +1,19 @@
 "use server";
 
+import { and, eq } from "drizzle-orm";
+import type { SQLiteUpdateSetSource } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 import { actionUser, ActionError, parse, runAction, type ActionResult } from "@/lib/actions";
 import { can, type CurrentUser } from "@/lib/auth/session";
 import { audit, diff } from "@/lib/audit";
 import { ID_PREFIX, nextNumber } from "@/lib/counters";
 import { resolveFileRefs } from "@/lib/files";
-import { Client, Contract, Expense, Invoice, Issue, PRIORITIES, Project, Proposal, Task, TimesheetEntry, Types, User, type ObjectId } from "@/lib/models";
+import { db } from "@/lib/db";
+import { Client, Contract, Expense, Invoice, Issue, newId, PRIORITIES, Project, Proposal, Task, TimesheetEntry, User, type HistoryEntry, type Id, type Milestone } from "@/lib/models";
 import { notify } from "@/lib/notify";
 import { EXITED_STATUSES } from "@/lib/people";
 import { getSettings } from "@/lib/settings";
+import { inList, jsonHas, jsonPush, notInList } from "@/lib/sql";
 import { optionLabel, statusLabel } from "@/lib/status";
 import { todayKey } from "@/lib/time";
 import { isObjectId, zs } from "@/lib/validation";
@@ -60,10 +64,13 @@ const projectSchema = z.object({
 
 type ProjectInput = z.infer<typeof projectSchema>;
 
+/** File refs get an id when embedded (they were sub-documents before), so they can be addressed later. */
+const withIds = <T extends { _id?: Id }>(refs: T[]): T[] => refs.map((r) => ({ ...r, _id: r._id ?? newId() }));
+
 /** Loads a project and checks the user's capability on it. */
 async function loadProject(user: CurrentUser, id: string, need: "view" | "manage") {
   if (!isObjectId(id)) throw new ActionError("Project not found.");
-  const project = await Project.findById(id);
+  const [project] = await db().select().from(Project).where(eq(Project._id, id)).limit(1);
   if (!project) throw new ActionError("Project not found.");
   const caps = projectCaps(user, project);
   if (!caps.view) throw new ActionError("Project not found, or you don't have access to it.");
@@ -71,19 +78,19 @@ async function loadProject(user: CurrentUser, id: string, need: "view" | "manage
   return { project, caps };
 }
 
-function teamRecipients(project: { manager?: ObjectId | null; team: { user: ObjectId }[] }): (ObjectId | null | undefined)[] {
+function teamRecipients(project: { manager?: Id | null; team: { user: Id }[] }): (Id | null | undefined)[] {
   return [project.manager, ...project.team.map((m) => m.user)];
 }
 
 async function assertStaff(userIds: string[], field: string) {
   const unique = [...new Set(userIds)];
   if (unique.length === 0) return;
-  const count = await User.countDocuments({ _id: { $in: unique }, personType: { $in: ["employee", "trainee", "intern"] }, status: { $nin: EXITED_STATUSES } });
+  const count = await db().$count(User, and(inList(User._id, unique), inList(User.personType, ["employee", "trainee", "intern"]), notInList(User.status, EXITED_STATUSES)));
   if (count !== unique.length) throw new ActionError("Choose active staff members only.", { [field]: "Choose active staff members only." });
 }
 
 /** Cross-field and reference checks shared by create and update. */
-async function validateProjectInput(user: CurrentUser, data: ProjectInput, existing?: { client?: ObjectId | null; proposal?: ObjectId | null; contract?: ObjectId | null }) {
+async function validateProjectInput(user: CurrentUser, data: ProjectInput, existing?: { client?: Id | null; proposal?: Id | null; contract?: Id | null }) {
   const settings = await getSettings();
   if (!settings.projectStatuses.some((s) => s.key === data.status)) throw new ActionError("Choose a valid status.", { status: "Choose a valid status" });
   if (data.startDate && data.targetDate && data.targetDate < data.startDate) {
@@ -96,22 +103,22 @@ async function validateProjectInput(user: CurrentUser, data: ProjectInput, exist
   await assertStaff(teamIds, "team");
 
   let clientId = data.internal ? undefined : data.client;
-  if (clientId && clientId !== existing?.client?.toString()) {
-    const client = await Client.findById(clientId, { confidential: 1, owner: 1 }).lean();
+  if (clientId && clientId !== existing?.client) {
+    const [client] = await db().select({ confidential: Client.confidential, owner: Client.owner }).from(Client).where(eq(Client._id, clientId)).limit(1);
     if (!client || !canSeeClient(user, client)) throw new ActionError("Choose a valid client.", { client: "Choose a valid client" });
   }
   // A restricted client the editor can't see is preserved rather than silently dropped.
-  if (!data.internal && !clientId) clientId = existing?.client?.toString();
+  if (!data.internal && !clientId) clientId = existing?.client ?? undefined;
 
-  if (data.proposal && data.proposal !== existing?.proposal?.toString()) {
-    const p = await Proposal.findById(data.proposal, { client: 1 }).lean();
+  if (data.proposal && data.proposal !== existing?.proposal) {
+    const [p] = await db().select({ client: Proposal.client }).from(Proposal).where(eq(Proposal._id, data.proposal)).limit(1);
     if (!p || !can(user, "proposals.view")) throw new ActionError("Choose a valid proposal.", { proposal: "Choose a valid proposal" });
-    if (clientId && p.client.toString() !== clientId) throw new ActionError("That proposal belongs to a different client.", { proposal: "Different client" });
+    if (clientId && p.client !== clientId) throw new ActionError("That proposal belongs to a different client.", { proposal: "Different client" });
   }
-  if (data.contract && data.contract !== existing?.contract?.toString()) {
-    const c = await Contract.findById(data.contract, { client: 1 }).lean();
+  if (data.contract && data.contract !== existing?.contract) {
+    const [c] = await db().select({ client: Contract.client }).from(Contract).where(eq(Contract._id, data.contract)).limit(1);
     if (!c || !can(user, "contracts.view")) throw new ActionError("Choose a valid contract.", { contract: "Choose a valid contract" });
-    if (clientId && c.client.toString() !== clientId) throw new ActionError("That contract belongs to a different client.", { contract: "Different client" });
+    if (clientId && c.client !== clientId) throw new ActionError("That contract belongs to a different client.", { contract: "Different client" });
   }
   return { settings, clientId };
 }
@@ -129,28 +136,31 @@ export async function createProject(input: Record<string, unknown>): Promise<Act
 
     const projectNo = await nextNumber("project", ID_PREFIX.project, 4);
     const completed = categoryOf(settings.projectStatuses, data.status) === "completed";
-    const project = await Project.create({
-      projectNo,
-      title: data.title,
-      client: clientId,
-      internal: data.internal,
-      description: data.description,
-      scope: data.scope,
-      deliverables: data.deliverables,
-      manager: data.manager,
-      team: data.team.map((m) => ({ user: m.user, role: m.role, allocation: m.allocation })),
-      startDate: data.startDate,
-      targetDate: data.targetDate,
-      completedDate: completed ? todayKey() : undefined,
-      budget: can(user, "projects.financials") ? (data.budget ?? 0) : 0,
-      estimatedHours: data.estimatedHours ?? 0,
-      priority: data.priority,
-      status: data.status,
-      proposal: data.proposal,
-      contract: data.contract,
-      createdBy: user._id,
-      history: [historyEntry(user, "Project created", { to: optionLabel(settings.projectStatuses, data.status) })],
-    });
+    const [project] = await db()
+      .insert(Project)
+      .values({
+        projectNo,
+        title: data.title,
+        client: clientId,
+        internal: data.internal,
+        description: data.description,
+        scope: data.scope,
+        deliverables: data.deliverables,
+        manager: data.manager,
+        team: data.team.map((m) => ({ user: m.user, role: m.role, allocation: m.allocation })),
+        startDate: data.startDate,
+        targetDate: data.targetDate,
+        completedDate: completed ? todayKey() : undefined,
+        budget: can(user, "projects.financials") ? (data.budget ?? 0) : 0,
+        estimatedHours: data.estimatedHours ?? 0,
+        priority: data.priority,
+        status: data.status,
+        proposal: data.proposal,
+        contract: data.contract,
+        createdBy: user._id,
+        history: [historyEntry(user, "Project created", { to: optionLabel(settings.projectStatuses, data.status) })],
+      })
+      .returning();
 
     await audit(user, { action: "create", entity: "project", entityId: project._id, ref: projectNo, summary: `Created project ${projectNo}: ${project.title}` });
     await notify(
@@ -158,7 +168,7 @@ export async function createProject(input: Record<string, unknown>): Promise<Act
       { type: "project", title: `You were added to project ${projectNo}`, body: project.title, link: `/projects/${project._id}` },
       [user._id],
     );
-    return { id: project._id.toString() };
+    return { id: project._id };
   }, "Project created");
 }
 
@@ -174,8 +184,8 @@ export async function updateProject(id: string, input: Record<string, unknown>):
     if (statusChanged && categoryOf(settings.projectStatuses, data.status) === "cancelled" && !can(user, "projects.delete")) {
       throw new ActionError("Only users who can cancel projects may set a cancelled status.", { status: "Not permitted" });
     }
-    const previousManager = project.manager?.toString();
-    const previousPeople = [previousManager, ...project.team.map((m) => m.user.toString())].filter(Boolean) as string[];
+    const previousManager = project.manager ?? undefined;
+    const previousPeople = [previousManager, ...project.team.map((m) => m.user)].filter(Boolean) as string[];
     // Vault access follows membership: `projects.manage` alone must not let someone put themselves on the team.
     if (!user.isSuperAdmin && !caps.isManager) {
       if (data.manager === user.id && previousManager !== user.id) {
@@ -187,20 +197,20 @@ export async function updateProject(id: string, input: Record<string, unknown>):
     }
     const before = {
       title: project.title,
-      client: project.client?.toString(),
+      client: project.client ?? undefined,
       internal: project.internal,
-      description: project.description,
-      scope: project.scope,
+      description: project.description ?? undefined,
+      scope: project.scope ?? undefined,
       deliverables: project.deliverables.join("\n"),
-      manager: project.manager?.toString(),
+      manager: project.manager ?? undefined,
       team: project.team.map((m) => `${m.user}:${m.role ?? ""}:${m.allocation}`).join(","),
-      startDate: project.startDate,
-      targetDate: project.targetDate,
+      startDate: project.startDate ?? undefined,
+      targetDate: project.targetDate ?? undefined,
       budget: project.budget,
       estimatedHours: project.estimatedHours,
       priority: project.priority,
-      proposal: project.proposal?.toString(),
-      contract: project.contract?.toString(),
+      proposal: project.proposal ?? undefined,
+      contract: project.contract ?? undefined,
     };
     const budget = caps.financials ? (data.budget ?? 0) : project.budget;
     const after = {
@@ -217,36 +227,43 @@ export async function updateProject(id: string, input: Record<string, unknown>):
       budget,
       estimatedHours: data.estimatedHours ?? 0,
       priority: data.priority,
-      proposal: data.proposal ?? (can(user, "proposals.view") ? undefined : project.proposal?.toString()),
-      contract: data.contract ?? (can(user, "contracts.view") ? undefined : project.contract?.toString()),
+      proposal: data.proposal ?? (can(user, "proposals.view") ? undefined : (project.proposal ?? undefined)),
+      contract: data.contract ?? (can(user, "contracts.view") ? undefined : (project.contract ?? undefined)),
     };
     const changes = diff(before, after, ["title", "client", "internal", "description", "scope", "deliverables", "manager", "team", "startDate", "targetDate", "budget", "estimatedHours", "priority", "proposal", "contract"], ["budget"]);
 
-    project.title = data.title;
-    project.set("client", clientId);
-    project.internal = data.internal;
-    project.description = data.description;
-    project.scope = data.scope;
-    project.set("deliverables", data.deliverables);
-    project.set("manager", data.manager);
-    project.set("team", data.team.map((m) => ({ user: m.user, role: m.role, allocation: m.allocation })));
-    project.startDate = data.startDate;
-    project.targetDate = data.targetDate;
-    project.budget = budget;
-    project.estimatedHours = data.estimatedHours ?? 0;
-    project.priority = data.priority;
-    project.set("proposal", after.proposal);
-    project.set("contract", after.contract);
+    const team = data.team.map((m) => ({ user: m.user, role: m.role, allocation: m.allocation }));
+    const patch: SQLiteUpdateSetSource<typeof Project> = {
+      title: data.title,
+      client: clientId ?? null,
+      internal: data.internal,
+      description: data.description ?? null,
+      scope: data.scope ?? null,
+      deliverables: data.deliverables,
+      manager: data.manager ?? null,
+      team,
+      startDate: data.startDate ?? null,
+      targetDate: data.targetDate ?? null,
+      budget,
+      estimatedHours: data.estimatedHours ?? 0,
+      priority: data.priority,
+      proposal: after.proposal ?? null,
+      contract: after.contract ?? null,
+    };
 
     if (changes.length === 0 && !statusChanged) return { id };
-    if (changes.length) project.history.push(historyEntry(user, "Project updated", { note: changes.map((c) => c.field).join(", ") }));
+    const entries: HistoryEntry[] = [];
+    if (changes.length) entries.push(historyEntry(user, "Project updated", { note: changes.map((c) => c.field).join(", ") }));
     if (statusChanged) {
-      project.status = data.status;
+      patch.status = data.status;
       const cat = categoryOf(settings.projectStatuses, data.status);
-      project.completedDate = cat === "completed" ? todayKey() : undefined;
-      project.history.push(historyEntry(user, "Status changed", { from: optionLabel(settings.projectStatuses, previousStatus), to: optionLabel(settings.projectStatuses, data.status) }));
+      patch.completedDate = cat === "completed" ? todayKey() : null;
+      entries.push(historyEntry(user, "Status changed", { from: optionLabel(settings.projectStatuses, previousStatus), to: optionLabel(settings.projectStatuses, data.status) }));
     }
-    await project.save();
+    patch.history = jsonPush(Project.history, ...entries);
+    await db().update(Project).set(patch).where(eq(Project._id, project._id));
+    // The rest of the action reports the saved state.
+    const saved = { ...project, title: data.title, manager: data.manager ?? null, team };
 
     await audit(user, { action: "update", entity: "project", entityId: project._id, ref: project.projectNo, summary: `Updated project ${project.projectNo}`, changes: [...changes, ...(statusChanged ? [{ field: "status", from: previousStatus, to: data.status }] : [])] });
     const nowPeople = [data.manager, ...data.team.map((m) => m.user)].filter(Boolean) as string[];
@@ -255,16 +272,16 @@ export async function updateProject(id: string, input: Record<string, unknown>):
       // Owner → member: they keep team-level items but lose the owner's view of every item.
       await adviseRotationForRemoved(project._id, [previousManager], "The previous project manager is now a team member");
     }
-    await notify(nowPeople.filter((p) => !previousPeople.includes(p)), { type: "project", title: `You were added to project ${project.projectNo}`, body: project.title, link: `/projects/${project._id}` }, [user._id]);
+    await notify(nowPeople.filter((p) => !previousPeople.includes(p)), { type: "project", title: `You were added to project ${project.projectNo}`, body: saved.title, link: `/projects/${project._id}` }, [user._id]);
     if (changes.some((c) => c.field === "manager" || c.field === "team")) {
       await notify(
         [previousManager, data.manager],
-        { type: "project", title: `Team changed on ${project.projectNo}`, body: `${user.name} changed the ${changes.some((c) => c.field === "manager") ? "manager" : "team"} of ${project.title}.`, link: `/projects/${project._id}?tab=team` },
+        { type: "project", title: `Team changed on ${project.projectNo}`, body: `${user.name} changed the ${changes.some((c) => c.field === "manager") ? "manager" : "team"} of ${saved.title}.`, link: `/projects/${project._id}?tab=team` },
         [user._id],
       );
     }
     if (statusChanged) {
-      await notify(teamRecipients(project), { type: "project", title: `${project.projectNo} is now ${optionLabel(settings.projectStatuses, data.status)}`, body: project.title, link: `/projects/${project._id}` }, [user._id]);
+      await notify(teamRecipients(saved), { type: "project", title: `${project.projectNo} is now ${optionLabel(settings.projectStatuses, data.status)}`, body: saved.title, link: `/projects/${project._id}` }, [user._id]);
     }
     return { id };
   }, "Project saved");
@@ -281,10 +298,14 @@ export async function setProjectStatus(id: string, status: string, rawNote?: str
     const cat = categoryOf(settings.projectStatuses, status);
     if (cat === "cancelled" && !can(user, "projects.delete")) throw new ActionError("Only users who can cancel projects may do this. Ask an administrator.");
     const previous = project.status;
-    project.status = status;
-    project.completedDate = cat === "completed" ? todayKey() : undefined;
-    project.history.push(historyEntry(user, "Status changed", { from: optionLabel(settings.projectStatuses, previous), to: optionLabel(settings.projectStatuses, status), note: note?.trim() || undefined }));
-    await project.save();
+    await db()
+      .update(Project)
+      .set({
+        status,
+        completedDate: cat === "completed" ? todayKey() : null,
+        history: jsonPush(Project.history, historyEntry(user, "Status changed", { from: optionLabel(settings.projectStatuses, previous), to: optionLabel(settings.projectStatuses, status), note: note?.trim() || undefined })),
+      })
+      .where(eq(Project._id, project._id));
     await audit(user, { action: "status", entity: "project", entityId: project._id, ref: project.projectNo, summary: `${project.projectNo}: ${optionLabel(settings.projectStatuses, previous)} → ${optionLabel(settings.projectStatuses, status)}` });
     await notify(teamRecipients(project), { type: "project", title: `${project.projectNo} is now ${optionLabel(settings.projectStatuses, status)}`, body: note?.trim() || project.title, link: `/projects/${project._id}` }, [user._id]);
     return null;
@@ -303,10 +324,14 @@ export async function cancelProject(id: string, reason: string): Promise<ActionR
     if (!cancelled) throw new ActionError("No cancelled status is configured. Ask an administrator to add one.");
     if (project.status === cancelled) throw new ActionError("This project is already cancelled.");
     const previous = project.status;
-    project.status = cancelled;
-    project.completedDate = undefined;
-    project.history.push(historyEntry(user, "Project cancelled", { from: optionLabel(settings.projectStatuses, previous), to: optionLabel(settings.projectStatuses, cancelled), note: why }));
-    await project.save();
+    await db()
+      .update(Project)
+      .set({
+        status: cancelled,
+        completedDate: null,
+        history: jsonPush(Project.history, historyEntry(user, "Project cancelled", { from: optionLabel(settings.projectStatuses, previous), to: optionLabel(settings.projectStatuses, cancelled), note: why })),
+      })
+      .where(eq(Project._id, project._id));
     await audit(user, { action: "cancel", entity: "project", entityId: project._id, ref: project.projectNo, summary: `Cancelled project ${project.projectNo}: ${why}` });
     await notify(teamRecipients(project), { type: "project", title: `Project cancelled: ${project.projectNo}`, body: why, link: `/projects/${project._id}`, priority: "high" }, [user._id]);
     return null;
@@ -319,11 +344,11 @@ export async function deleteProject(id: string): Promise<ActionResult<null>> {
     if (!can(user, "projects.delete")) throw new ActionError("You don't have permission to delete projects.");
     const { project } = await loadProject(user, id, "view");
     const [tasks, entries, issues, invoices, expenses] = await Promise.all([
-      Task.countDocuments({ project: project._id }),
-      TimesheetEntry.countDocuments({ project: project._id }),
-      Issue.countDocuments({ project: project._id }),
-      Invoice.countDocuments({ project: project._id }),
-      Expense.countDocuments({ project: project._id }),
+      db().$count(Task, eq(Task.project, project._id)),
+      db().$count(TimesheetEntry, eq(TimesheetEntry.project, project._id)),
+      db().$count(Issue, eq(Issue.project, project._id)),
+      db().$count(Invoice, eq(Invoice.project, project._id)),
+      db().$count(Expense, eq(Expense.project, project._id)),
     ]);
     const blockers = [
       tasks && `${tasks} ${tasks === 1 ? "task" : "tasks"}`,
@@ -333,7 +358,7 @@ export async function deleteProject(id: string): Promise<ActionResult<null>> {
       expenses && `${expenses} ${expenses === 1 ? "expense" : "expenses"}`,
     ].filter(Boolean);
     if (blockers.length) throw new ActionError(`This project has ${blockers.join(", ")} and can't be deleted. Cancel it instead.`);
-    await project.deleteOne();
+    await db().delete(Project).where(eq(Project._id, project._id));
     const shredded = await shredProjectVault(project._id);
     await audit(user, { action: "delete", entity: "project", entityId: project._id, ref: project.projectNo, summary: `Deleted project ${project.projectNo}: ${project.title}${shredded ? ` (${shredded} secret${shredded === 1 ? "" : "s"} and the vault access log shredded)` : ""}` });
     return null;
@@ -364,7 +389,7 @@ export async function saveMilestone(projectId: string, milestoneId: string | und
     const user = await actionUser();
     const { project, caps } = await loadProject(user, projectId, "manage");
     const data = parse(milestoneSchema, input);
-    const existing = milestoneId ? project.milestones.find((m) => m._id.toString() === milestoneId) : undefined;
+    const existing = milestoneId ? project.milestones.find((m) => m._id === milestoneId) : undefined;
     if (milestoneId && !existing) throw new ActionError("That milestone no longer exists.");
     if (data.status === "delayed" && existing?.status !== "delayed") {
       throw new ActionError("Overdue milestones are marked delayed automatically.", { status: "Choose another status" });
@@ -390,19 +415,25 @@ export async function saveMilestone(projectId: string, milestoneId: string | und
     if (existing) {
       const previous = existing.status;
       const becameApproved = (status === "approved" || status === "delivered") && !existing.approvedAt;
-      Object.assign(existing, fields);
-      if (becameApproved) existing.approvedAt = new Date();
-      if (previous !== status) project.history.push(historyEntry(user, `Milestone “${data.title}”`, { from: MILESTONE_LABEL(previous), to: MILESTONE_LABEL(status) }));
-      else project.history.push(historyEntry(user, `Milestone “${data.title}” updated`));
-      await project.save();
+      const updated: Milestone = { ...existing, ...fields, ...(becameApproved ? { approvedAt: new Date() } : {}) };
+      const entry =
+        previous !== status
+          ? historyEntry(user, `Milestone “${data.title}”`, { from: MILESTONE_LABEL(previous), to: MILESTONE_LABEL(status) })
+          : historyEntry(user, `Milestone “${data.title}” updated`);
+      await db()
+        .update(Project)
+        .set({ milestones: project.milestones.map((m) => (m._id === existing._id ? updated : m)), history: jsonPush(Project.history, entry) })
+        .where(eq(Project._id, project._id));
       await audit(user, { action: "update", entity: "project", entityId: project._id, ref: project.projectNo, summary: `Updated milestone “${data.title}” on ${project.projectNo}${previous !== status ? ` (${MILESTONE_LABEL(previous)} → ${MILESTONE_LABEL(status)})` : ""}` });
       if (previous !== status) {
         await notify(teamRecipients(project), { type: "project", title: `Milestone ${MILESTONE_LABEL(status).toLowerCase()}: ${data.title}`, body: `${project.projectNo} · ${project.title}`, link: `/projects/${project._id}?tab=milestones` }, [user._id]);
       }
     } else {
-      project.milestones.push({ _id: new Types.ObjectId(), ...fields, amount: caps.financials ? data.amount : undefined, invoiced: false, approvedAt: status === "approved" || status === "delivered" ? new Date() : undefined });
-      project.history.push(historyEntry(user, `Milestone “${data.title}” added`, { to: data.dueDate }));
-      await project.save();
+      const milestone: Milestone = { _id: newId(), ...fields, amount: caps.financials ? data.amount : undefined, invoiced: false, approvedAt: status === "approved" || status === "delivered" ? new Date() : undefined };
+      await db()
+        .update(Project)
+        .set({ milestones: jsonPush(Project.milestones, milestone), history: jsonPush(Project.history, historyEntry(user, `Milestone “${data.title}” added`, { to: data.dueDate })) })
+        .where(eq(Project._id, project._id));
       await audit(user, { action: "create", entity: "project", entityId: project._id, ref: project.projectNo, summary: `Added milestone “${data.title}” to ${project.projectNo}` });
     }
     return null;
@@ -414,8 +445,9 @@ export async function advanceMilestone(projectId: string, milestoneId: string): 
   return runAction(async () => {
     const user = await actionUser();
     const { project } = await loadProject(user, projectId, "manage");
-    const m = project.milestones.find((x) => x._id.toString() === milestoneId);
-    if (!m) throw new ActionError("That milestone no longer exists.");
+    const found = project.milestones.find((x) => x._id === milestoneId);
+    if (!found) throw new ActionError("That milestone no longer exists.");
+    const m: Milestone = { ...found };
     const index = (MILESTONE_FLOW as readonly string[]).indexOf(m.status);
     // A delayed milestone resumes at "in progress".
     const next = m.status === "delayed" ? "in_progress" : MILESTONE_FLOW[index + 1];
@@ -427,8 +459,13 @@ export async function advanceMilestone(projectId: string, milestoneId: string): 
       m.approvedBy = m.approvedBy ?? user.name;
     }
     if (next === "delivered") m.deliveredAt = todayKey();
-    project.history.push(historyEntry(user, `Milestone “${m.title}”`, { from: MILESTONE_LABEL(previous), to: MILESTONE_LABEL(next) }));
-    await project.save();
+    await db()
+      .update(Project)
+      .set({
+        milestones: project.milestones.map((x) => (x._id === m._id ? m : x)),
+        history: jsonPush(Project.history, historyEntry(user, `Milestone “${m.title}”`, { from: MILESTONE_LABEL(previous), to: MILESTONE_LABEL(next) })),
+      })
+      .where(eq(Project._id, project._id));
     await audit(user, { action: "status", entity: "project", entityId: project._id, ref: project.projectNo, summary: `Milestone “${m.title}” on ${project.projectNo}: ${MILESTONE_LABEL(previous)} → ${MILESTONE_LABEL(next)}` });
     await notify(teamRecipients(project), { type: "project", title: `Milestone ${MILESTONE_LABEL(next).toLowerCase()}: ${m.title}`, body: `${project.projectNo} · ${project.title}`, link: `/projects/${project._id}?tab=milestones` }, [user._id]);
     return null;
@@ -439,15 +476,16 @@ export async function deleteMilestone(projectId: string, milestoneId: string): P
   return runAction(async () => {
     const user = await actionUser();
     const { project } = await loadProject(user, projectId, "manage");
-    const m = project.milestones.find((x) => x._id.toString() === milestoneId);
+    const m = project.milestones.find((x) => x._id === milestoneId);
     if (!m) throw new ActionError("That milestone no longer exists.");
     if (m.invoiced) throw new ActionError("This milestone has been invoiced and can't be deleted.");
-    const linked = await Task.countDocuments({ project: project._id, milestone: m._id });
+    const linked = await db().$count(Task, and(eq(Task.project, project._id), eq(Task.milestone, m._id)));
     if (linked) throw new ActionError(`${linked} ${linked === 1 ? "task is" : "tasks are"} linked to this milestone. Move them first.`);
     const title = m.title;
-    project.set("milestones", project.milestones.filter((x) => x._id.toString() !== milestoneId));
-    project.history.push(historyEntry(user, `Milestone “${title}” removed`));
-    await project.save();
+    await db()
+      .update(Project)
+      .set({ milestones: project.milestones.filter((x) => x._id !== milestoneId), history: jsonPush(Project.history, historyEntry(user, `Milestone “${title}” removed`)) })
+      .where(eq(Project._id, project._id));
     await audit(user, { action: "delete", entity: "project", entityId: project._id, ref: project.projectNo, summary: `Removed milestone “${title}” from ${project.projectNo}` });
     return null;
   }, "Milestone removed");
@@ -466,20 +504,21 @@ export async function saveTeamMember(projectId: string, input: Record<string, un
     const { project, caps } = await loadProject(actor, projectId, "manage");
     const data = parse(memberSchema, input);
     await assertStaff([data.user], "user");
-    const existing = project.team.find((m) => m.user.toString() === data.user);
+    const existing = project.team.find((m) => m.user === data.user);
     // Vault access follows membership: `projects.manage` alone must not let someone put themselves on the team.
     if (!existing && data.user === actor.id && !actor.isSuperAdmin && !caps.isManager) {
       throw new ActionError("You can't add yourself to the project team. Ask the project manager or an administrator.", { user: "Not permitted" });
     }
-    const person = await User.findById(data.user, { name: 1 }).lean();
-    if (existing) {
-      existing.role = data.role;
-      existing.allocation = data.allocation;
-    } else {
-      project.team.push({ user: new Types.ObjectId(data.user), role: data.role, allocation: data.allocation });
-    }
-    project.history.push(historyEntry(actor, existing ? "Team member updated" : "Team member added", { note: `${data.role ?? "Member"} · ${data.allocation}%` }));
-    await project.save();
+    const [person] = await db().select({ name: User.name }).from(User).where(eq(User._id, data.user)).limit(1);
+    await db()
+      .update(Project)
+      .set({
+        team: existing
+          ? project.team.map((m) => (m === existing ? { ...m, role: data.role, allocation: data.allocation } : m))
+          : jsonPush(Project.team, { user: data.user, role: data.role, allocation: data.allocation }),
+        history: jsonPush(Project.history, historyEntry(actor, existing ? "Team member updated" : "Team member added", { note: `${data.role ?? "Member"} · ${data.allocation}%` })),
+      })
+      .where(eq(Project._id, project._id));
     await audit(actor, { action: "assign", entity: "project", entityId: project._id, ref: project.projectNo, summary: `${existing ? "Updated" : "Added"} ${person?.name ?? "a team member"} on ${project.projectNo} (${data.role ?? "Member"}, ${data.allocation}% allocation)` });
     if (!existing) await notify([data.user], { type: "project", title: `You were added to project ${project.projectNo}`, body: project.title, link: `/projects/${project._id}` }, [actor._id]);
     await notify(
@@ -495,17 +534,21 @@ export async function removeTeamMember(projectId: string, userId: string): Promi
   return runAction(async () => {
     const actor = await actionUser();
     const { project } = await loadProject(actor, projectId, "manage");
-    const member = project.team.find((m) => m.user.toString() === userId);
+    const member = project.team.find((m) => m.user === userId);
     if (!member) throw new ActionError("That person is not on the team.");
     const settings = await getSettings();
-    const open = await Task.countDocuments({ project: project._id, assignees: member.user, status: { $nin: keysInCategories(settings.taskStatuses, TASK_CLOSED_CATEGORIES) } });
+    const open = await db().$count(
+      Task,
+      and(eq(Task.project, project._id), jsonHas(Task.assignees, member.user), notInList(Task.status, keysInCategories(settings.taskStatuses, TASK_CLOSED_CATEGORIES))),
+    );
     if (open) throw new ActionError(`They still have ${open} open ${open === 1 ? "task" : "tasks"} in this project. Reassign them first.`);
-    project.set("team", project.team.filter((m) => m.user.toString() !== userId));
-    project.history.push(historyEntry(actor, "Team member removed"));
-    await project.save();
-    const removed = await User.findById(userId, { name: 1 }).lean();
+    await db()
+      .update(Project)
+      .set({ team: project.team.filter((m) => m.user !== userId), history: jsonPush(Project.history, historyEntry(actor, "Team member removed")) })
+      .where(eq(Project._id, project._id));
+    const [removed] = await db().select({ name: User.name }).from(User).where(eq(User._id, userId)).limit(1);
     const removedName = removed?.name ?? "A team member";
-    if (project.manager?.toString() !== userId) {
+    if (project.manager !== userId) {
       await adviseRotationForRemoved(project._id, [userId], `${removedName} was removed from the team after accessing it`);
     }
     await audit(actor, { action: "assign", entity: "project", entityId: project._id, ref: project.projectNo, summary: `Removed ${removedName} from ${project.projectNo}` });
@@ -525,8 +568,10 @@ export async function addProjectComment(projectId: string, input: Record<string,
     const data = parse(z.object({ text: zs.text("Comment", 5000), attachments: zs.ids() }), input);
     const { project } = await loadProject(user, projectId, "view");
     const attachments = await resolveFileRefs(user, data.attachments);
-    project.comments.push({ user: user._id, userName: user.name, text: data.text, attachments, at: new Date() });
-    await project.save();
+    await db()
+      .update(Project)
+      .set({ comments: jsonPush(Project.comments, { _id: newId(), user: user._id, userName: user.name, text: data.text, attachments: withIds(attachments), at: new Date() }) })
+      .where(eq(Project._id, project._id));
     await notify(teamRecipients(project), { type: "project", title: `${user.name} commented on ${project.projectNo}`, body: data.text.slice(0, 200), link: `/projects/${project._id}?tab=activity` }, [user._id]);
     return null;
   }, "Comment added");
@@ -539,9 +584,13 @@ export async function addProjectFiles(projectId: string, input: Record<string, u
     const { project } = await loadProject(user, projectId, "view");
     const files = await resolveFileRefs(user, data.attachments);
     if (files.length === 0) throw new ActionError("Choose at least one file to attach.");
-    project.attachments.push(...files);
-    project.history.push(historyEntry(user, "Files attached", { note: files.map((f) => f.name).join(", ") }));
-    await project.save();
+    await db()
+      .update(Project)
+      .set({
+        attachments: jsonPush(Project.attachments, ...withIds(files)),
+        history: jsonPush(Project.history, historyEntry(user, "Files attached", { note: files.map((f) => f.name).join(", ") })),
+      })
+      .where(eq(Project._id, project._id));
     return null;
   }, "Files attached");
 }
@@ -550,13 +599,14 @@ export async function removeProjectFile(projectId: string, refId: string): Promi
   return runAction(async () => {
     const user = await actionUser();
     const { project, caps } = await loadProject(user, projectId, "view");
-    const ref = project.attachments.find((a) => a._id?.toString() === refId);
+    const ref = project.attachments.find((a) => a._id === refId);
     if (!ref) throw new ActionError("That file no longer exists.");
-    if (!caps.manage && ref.uploadedBy?.toString() !== user.id) throw new ActionError("You can only remove files you uploaded.");
+    if (!caps.manage && ref.uploadedBy !== user.id) throw new ActionError("You can only remove files you uploaded.");
     const name = ref.name;
-    project.set("attachments", project.attachments.filter((a) => a._id?.toString() !== refId));
-    project.history.push(historyEntry(user, "File removed", { note: name }));
-    await project.save();
+    await db()
+      .update(Project)
+      .set({ attachments: project.attachments.filter((a) => a._id !== refId), history: jsonPush(Project.history, historyEntry(user, "File removed", { note: name })) })
+      .where(eq(Project._id, project._id));
     return null;
   }, "File removed");
 }

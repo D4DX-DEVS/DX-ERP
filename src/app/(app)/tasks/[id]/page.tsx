@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Ban, Clock, GraduationCap, History, MessageSquare, Pencil, Plus } from "lucide-react";
+import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
 import { requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Project, Task, TimesheetEntry } from "@/lib/models";
 import { param, type SearchParams } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
+import { inList, jsonHas } from "@/lib/sql";
 import { optionLabel } from "@/lib/status";
 import { diffDays, fmtDate, fmtDateTime, formatDuration, todayKey } from "@/lib/time";
 import { isObjectId } from "@/lib/validation";
@@ -57,35 +59,54 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   if (!isObjectId(id)) notFound();
   const sp = await searchParams;
   const user = await requireUser();
-  await connectDB();
   const visible = await taskFilter(user);
-  const task = await Task.findOne({ $and: [{ _id: id }, visible] }).lean();
+  const [task] = await db().select().from(Task).where(and(eq(Task._id, id), visible)).limit(1);
   if (!task) notFound();
 
   const settings = await getSettings();
   const statuses = settings.taskStatuses;
   const closedKeys = keysInCategories(statuses, TASK_CLOSED_CATEGORIES);
-  const project = task.project ? await Project.findById(task.project, { projectNo: 1, title: 1, manager: 1, team: 1, milestones: 1 }).lean() : null;
+  const [project] = task.project
+    ? await db()
+        .select({ _id: Project._id, projectNo: Project.projectNo, title: Project.title, manager: Project.manager, team: Project.team, milestones: Project.milestones })
+        .from(Project)
+        .where(eq(Project._id, task.project))
+        .limit(1)
+    : [];
   const caps = taskCaps(user, task, project?.manager);
   const canOpenProject = project ? projectCaps(user, project).view : false;
   const category = categoryOf(statuses, task.status);
   const closed = closedKeys.includes(task.status);
   const today = todayKey();
   const tab = ["comments", "history", "time"].includes(param(sp, "tab")) ? param(sp, "tab") : "comments";
-  const isShared = task.sharedWith.some((s) => s.toString() === user.id);
+  const isShared = task.sharedWith.some((s) => s === user.id);
 
-  const [people, allDeps, visibleDeps, dependents, subtaskDocs, parentTask, timeTotals, timeEntries] = await Promise.all([
+  const [people, allDeps, visibleDeps, dependents, subtaskDocs, [parentTask], timeTotals, timeEntries] = await Promise.all([
     peopleMap([...task.assignees, task.reporter, task.reviewer, ...task.sharedWith]),
-    task.dependencies.length ? Task.find({ _id: { $in: task.dependencies } }, { status: 1 }).lean() : [],
-    task.dependencies.length ? Task.find({ $and: [{ _id: { $in: task.dependencies } }, visible] }, { taskNo: 1, title: 1, status: 1 }).lean() : [],
-    Task.find({ $and: [{ dependencies: task._id }, visible] }, { taskNo: 1, title: 1, status: 1 }).limit(20).lean(),
-    Task.find({ $and: [{ parent: task._id }, visible] }, TASK_ROW_FIELDS).sort({ createdAt: 1 }).lean(),
-    task.parent ? Task.findOne({ $and: [{ _id: task.parent }, visible] }, { taskNo: 1, title: 1 }).lean() : null,
-    TimesheetEntry.aggregate<{ _id: null; minutes: number }>([{ $match: { task: task._id, status: { $ne: "rejected" } } }, { $group: { _id: null, minutes: { $sum: "$minutes" } } }]),
-    TimesheetEntry.find(caps.manage ? { task: task._id, status: { $ne: "rejected" } } : { task: task._id, user: user._id, status: { $ne: "rejected" } })
-      .sort({ date: -1 })
-      .limit(100)
-      .lean(),
+    task.dependencies.length ? db().select({ _id: Task._id, status: Task.status }).from(Task).where(inList(Task._id, task.dependencies)) : [],
+    task.dependencies.length
+      ? db()
+          .select({ _id: Task._id, taskNo: Task.taskNo, title: Task.title, status: Task.status })
+          .from(Task)
+          .where(and(inList(Task._id, task.dependencies), visible))
+      : [],
+    db()
+      .select({ _id: Task._id, taskNo: Task.taskNo, title: Task.title, status: Task.status })
+      .from(Task)
+      .where(and(jsonHas(Task.dependencies, task._id), visible))
+      .limit(20),
+    db().select(TASK_ROW_FIELDS).from(Task).where(and(eq(Task.parent, task._id), visible)).orderBy(asc(Task.createdAt)),
+    task.parent ? db().select({ _id: Task._id, taskNo: Task.taskNo, title: Task.title }).from(Task).where(and(eq(Task._id, task.parent), visible)).limit(1) : [],
+    db()
+      .select({ minutes: sql<number>`coalesce(sum(${TimesheetEntry.minutes}), 0)`.mapWith(Number) })
+      .from(TimesheetEntry)
+      .where(and(eq(TimesheetEntry.task, task._id), ne(TimesheetEntry.status, "rejected"))),
+    db()
+      .select({ _id: TimesheetEntry._id, user: TimesheetEntry.user, date: TimesheetEntry.date, description: TimesheetEntry.description, status: TimesheetEntry.status, minutes: TimesheetEntry.minutes })
+      .from(TimesheetEntry)
+      .where(and(eq(TimesheetEntry.task, task._id), caps.manage ? undefined : eq(TimesheetEntry.user, user._id), ne(TimesheetEntry.status, "rejected")))
+      .orderBy(desc(TimesheetEntry.date))
+      .limit(100),
   ]);
   const subtasks = await toTaskRows(user, subtaskDocs, settings);
   const entryPeople = await peopleMap(timeEntries.map((e) => e.user));
@@ -94,7 +115,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
   const unmetDeps = allDeps.filter((d) => !closedKeys.includes(d.status)).length;
   const blocked = !closed && (category === "blocked" || unmetDeps > 0);
   const daysLate = !closed && task.dueDate && task.dueDate < today ? diffDays(task.dueDate, today) : 0;
-  const milestone = project?.milestones.find((m) => m._id.toString() === task.milestone?.toString());
+  const milestone = project?.milestones.find((m) => m._id === task.milestone);
   const inReview = category === "review";
   const pendingSubmission = task.submissions.some((s) => s.reviewStatus === "pending");
   const current = statuses.find((s) => s.key === task.status);
@@ -212,7 +233,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
                     <h2 className={`font-sans text-xs font-semibold ${unmetDeps > 0 ? "text-[#8e1c1c]" : "text-ink-2"}`}>Depends on</h2>
                     {visibleDeps.length === 0 && allDeps.length === 0 && <span className="text-[13px] text-muted">Nothing</span>}
                     {visibleDeps.map((d) => (
-                      <Link key={d._id.toString()} href={`/tasks/${d._id}`} className="flex items-center justify-between gap-2 text-[13px] font-semibold text-ink hover:text-brand-600">
+                      <Link key={d._id} href={`/tasks/${d._id}`} className="flex items-center justify-between gap-2 text-[13px] font-semibold text-ink hover:text-brand-600">
                         <span className="min-w-0 break-words">
                           {d.taskNo} · {d.title}
                         </span>
@@ -225,7 +246,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
                     <h2 className="font-sans text-xs font-semibold text-ink-2">Blocks</h2>
                     {dependents.length === 0 && <span className="text-[13px] text-muted">Nothing</span>}
                     {dependents.map((d) => (
-                      <Link key={d._id.toString()} href={`/tasks/${d._id}`} className="min-w-0 break-words text-[13px] font-semibold text-ink hover:text-brand-600">
+                      <Link key={d._id} href={`/tasks/${d._id}`} className="min-w-0 break-words text-[13px] font-semibold text-ink hover:text-brand-600">
                         {d.taskNo} · {d.title}
                       </Link>
                     ))}
@@ -235,7 +256,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
 
               <section aria-label="Attachments" className="flex flex-col gap-2">
                 <h2 className="font-sans text-sm font-semibold">Attachments</h2>
-                <AttachmentList files={task.attachments.map((a) => ({ file: a.file.toString(), name: a.name, size: a.size }))} />
+                <AttachmentList files={task.attachments.map((a) => ({ file: a.file, name: a.name, size: a.size }))} />
                 {caps.attach && <AttachFiles taskId={id} />}
               </section>
             </CardBody>
@@ -247,7 +268,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
               <CardBody className="flex flex-col gap-4">
                 {task.submissions.length === 0 && <p className="text-[13px] text-muted">Nothing submitted yet. When you finish, use “Submit work for review”.</p>}
                 {[...task.submissions].reverse().map((s, i) => (
-                  <article key={s._id?.toString() ?? i} className="flex flex-col gap-2 rounded-xl border border-line-soft p-3.5">
+                  <article key={s._id ?? i} className="flex flex-col gap-2 rounded-xl border border-line-soft p-3.5">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="text-[13px]">
                         <strong>{s.submittedByName}</strong> <span className="text-muted">· {fmtDateTime(s.submittedAt)}</span>
@@ -260,7 +281,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
                         {s.link}
                       </a>
                     )}
-                    {s.attachments.length > 0 && <AttachmentList files={s.attachments.map((a) => ({ file: a.file.toString(), name: a.name, size: a.size }))} />}
+                    {s.attachments.length > 0 && <AttachmentList files={s.attachments.map((a) => ({ file: a.file, name: a.name, size: a.size }))} />}
                     {s.reviewStatus !== "pending" && (
                       <div className="rounded-lg bg-field px-3 py-2 text-[13px] text-ink-2">
                         <strong>{s.reviewedByName}</strong> {s.reviewStatus === "approved" ? "approved" : "requested changes"}
@@ -304,9 +325,9 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
                   {timeEntries.length === 0 && <p className="text-[13px] text-muted">No time logged on this task yet.</p>}
                   <ul className="flex flex-col divide-y divide-line-soft">
                     {timeEntries.map((e) => (
-                      <li key={e._id.toString()} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-[13px]">
+                      <li key={e._id} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-[13px]">
                         <span className="min-w-0">
-                          <span className="font-semibold">{entryPeople.get(e.user.toString())?.name ?? "Unknown"}</span>
+                          <span className="font-semibold">{entryPeople.get(e.user)?.name ?? "Unknown"}</span>
                           <span className="text-muted"> · {fmtDate(e.date, "EEE d MMM")}</span>
                           <span className="block min-w-0 break-words text-ink-2">{e.description}</span>
                         </span>
@@ -355,27 +376,27 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
                 <Row label="Assignees">
                   {task.assignees.length === 0 && <span className="text-muted">Unassigned</span>}
                   {task.assignees.map((a) => {
-                    const p = people.get(a.toString());
-                    return <PersonRow key={a.toString()} name={p?.name ?? "Unknown"} photo={p?.photo} sub={p?.personType === "intern" || p?.personType === "trainee" ? "Intern" : undefined} />;
+                    const p = people.get(a);
+                    return <PersonRow key={a} name={p?.name ?? "Unknown"} photo={p?.photo} sub={p?.personType === "intern" || p?.personType === "trainee" ? "Intern" : undefined} />;
                   })}
                 </Row>
                 <Row label="Reviewer">
-                  {task.reviewer ? <PersonRow name={people.get(task.reviewer.toString())?.name ?? "Unknown"} photo={people.get(task.reviewer.toString())?.photo} /> : <span className="text-muted">None</span>}
+                  {task.reviewer ? <PersonRow name={people.get(task.reviewer)?.name ?? "Unknown"} photo={people.get(task.reviewer)?.photo} /> : <span className="text-muted">None</span>}
                 </Row>
                 <Row label="Reporter">
-                  {task.reporter ? <PersonRow name={people.get(task.reporter.toString())?.name ?? "Unknown"} photo={people.get(task.reporter.toString())?.photo} /> : <span className="text-muted">—</span>}
+                  {task.reporter ? <PersonRow name={people.get(task.reporter)?.name ?? "Unknown"} photo={people.get(task.reporter)?.photo} /> : <span className="text-muted">—</span>}
                 </Row>
                 {task.sharedWith.length > 0 && (caps.manage || isShared) && (
                   <Row label="Shared with">
                     {task.sharedWith.map((s) => (
-                      <PersonRow key={s.toString()} name={people.get(s.toString())?.name ?? "Unknown"} photo={people.get(s.toString())?.photo} />
+                      <PersonRow key={s} name={people.get(s)?.name ?? "Unknown"} photo={people.get(s)?.photo} />
                     ))}
                   </Row>
                 )}
                 <Row label="Start">{fmtDate(task.startDate)}</Row>
                 <Row label="Due">
                   <span>
-                    {fmtDate(task.dueDate, "EEE d MMM yyyy")} {daysLate > 0 && <DueLabel row={{ dueDate: task.dueDate, daysLate }} className="ml-1" />}
+                    {fmtDate(task.dueDate, "EEE d MMM yyyy")} {daysLate > 0 && <DueLabel row={{ dueDate: task.dueDate ?? undefined, daysLate }} className="ml-1" />}
                   </span>
                 </Row>
                 <Row label="Created">{fmtDate(task.createdAt)}</Row>

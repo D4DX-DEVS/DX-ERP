@@ -2,23 +2,23 @@ import type { ProposalContent } from "@/lib/models/sales";
 import type { IProposal } from "@/lib/models";
 
 /** Plain snapshot of a proposal's editable content (stored in `revisions` and used for the PDF / read view). */
-export function contentOf(p: ProposalContent): ProposalContent {
+export function contentOf(p: Pick<IProposal, keyof ProposalContent>): ProposalContent {
   return {
     title: p.title,
-    summary: p.summary,
-    scope: p.scope,
+    summary: p.summary ?? undefined,
+    scope: p.scope ?? undefined,
     deliverables: [...p.deliverables],
-    timeline: p.timeline,
-    startDate: p.startDate,
-    endDate: p.endDate,
+    timeline: p.timeline ?? undefined,
+    startDate: p.startDate ?? undefined,
+    endDate: p.endDate ?? undefined,
     items: p.items.map((i) => ({ description: i.description, quantity: i.quantity, rate: i.rate, taxRate: i.taxRate, amount: i.amount })),
     discount: p.discount,
     subtotal: p.subtotal,
     taxTotal: p.taxTotal,
     total: p.total,
     paymentMilestones: p.paymentMilestones.map((m) => ({ title: m.title, percent: m.percent, amount: m.amount, dueOn: m.dueOn })),
-    terms: p.terms,
-    validUntil: p.validUntil,
+    terms: p.terms ?? undefined,
+    validUntil: p.validUntil ?? undefined,
   };
 }
 

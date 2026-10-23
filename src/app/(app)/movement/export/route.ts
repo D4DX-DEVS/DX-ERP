@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
-import type { Types } from "mongoose";
+import { and, asc, eq, gte, lt, lte } from "drizzle-orm";
 import { can, getCurrentUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Client, Department, Movement, Project, User, type IMovement } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
 import { directReportIds } from "@/lib/people";
 import { displayStatus, movementScope, scopeFilter } from "@/lib/movement/access";
 import { exportResponse, isExportFormat } from "@/lib/export";
 import { audit } from "@/lib/audit";
-import { escapeRegex } from "@/lib/format";
+import { inList, searchAny } from "@/lib/sql";
 import { fmtDate, fmtDateTime, formatDuration, todayKey } from "@/lib/time";
 import { statusLabel } from "@/lib/status";
 import { isObjectId } from "@/lib/validation";
@@ -25,46 +25,60 @@ export async function GET(request: Request) {
   const format = sp.get("format");
   if (!isExportFormat(format)) return NextResponse.json({ error: "Unknown format" }, { status: 400 });
 
-  await connectDB();
   const settings = await getSettings();
   const today = todayKey();
   const valid = (v: string | null) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined);
   const from = valid(sp.get("from")) ?? today;
   const to = valid(sp.get("to")) ?? from;
-  const filter: Record<string, unknown> = { ...scopeFilter(user, scope), date: { $gte: from <= to ? from : to, $lte: from <= to ? to : from } };
-
   const department = sp.get("department");
   const q = sp.get("q")?.trim().slice(0, 100);
+  let personIds: string[] | undefined;
   if ((department && isObjectId(department)) || q) {
-    const pf: Record<string, unknown> = {};
-    if (department && isObjectId(department)) pf.department = department;
-    if (q) pf.$or = [{ name: new RegExp(escapeRegex(q), "i") }, { employeeId: new RegExp(escapeRegex(q), "i") }];
-    const ids = (await User.find(pf, { _id: 1 }).lean()).map((u) => u._id.toString());
-    filter.user = { $in: scope.kind === "team" ? ids.filter((id) => scope.userIds.includes(id)) : ids };
+    const found = await db()
+      .select({ id: User._id })
+      .from(User)
+      .where(and(department && isObjectId(department) ? eq(User.department, department) : undefined, q ? searchAny(q, User.name, User.employeeId) : undefined));
+    const ids = found.map((u) => u.id);
+    personIds = scope.kind === "team" ? ids.filter((id) => scope.userIds.includes(id)) : ids;
   }
   const category = sp.get("category");
-  if (category) filter.category = category;
   const approval = sp.get("approval");
-  if (approval) filter.approvalStatus = approval;
   const status = sp.get("status");
-  if (status === "returned" || status === "cancelled" || status === "out") filter.status = status;
-  if (status === "overdue") Object.assign(filter, { status: "out", expectedReturn: { $lt: new Date(Date.now() - settings.movement.overdueGraceMinutes * 60_000) } });
-  if (status === "missing_in") Object.assign(filter, { status: "out", date: { $lt: today, $gte: from } });
+  const filter = and(
+    scopeFilter(user, scope),
+    status === "missing_in"
+      ? and(lt(Movement.date, today), gte(Movement.date, from))
+      : and(gte(Movement.date, from <= to ? from : to), lte(Movement.date, from <= to ? to : from)),
+    personIds ? inList(Movement.user, personIds) : undefined,
+    category ? eq(Movement.category, category) : undefined,
+    approval ? eq(Movement.approvalStatus, approval as IMovement["approvalStatus"]) : undefined,
+    status === "returned" || status === "cancelled" || status === "out" ? eq(Movement.status, status) : undefined,
+    status === "overdue" || status === "missing_in" ? eq(Movement.status, "out") : undefined,
+    status === "overdue" ? lt(Movement.expectedReturn, new Date(Date.now() - settings.movement.overdueGraceMinutes * 60_000)) : undefined,
+  );
 
-  const rows = await Movement.find(filter).sort({ date: 1, outTime: 1 }).limit(20_000).lean<(IMovement & { _id: Types.ObjectId })[]>();
-  const [people, departments, projects, clients, reports] = await Promise.all([
-    User.find({ _id: { $in: [...new Set(rows.map((r) => r.user.toString()))] } }, { name: 1, employeeId: 1, department: 1 }).lean(),
-    Department.find({}, { name: 1 }).lean(),
-    Project.find({ _id: { $in: rows.map((r) => r.project).filter((x): x is Types.ObjectId => Boolean(x)) } }, { projectNo: 1 }).lean(),
-    Client.find({ _id: { $in: rows.map((r) => r.client).filter((x): x is Types.ObjectId => Boolean(x)) } }, { clientNo: 1 }).lean(),
+  const rows = await db().select().from(Movement).where(filter).orderBy(asc(Movement.date), asc(Movement.outTime)).limit(20_000);
+  const [people, projects, clients, reports] = await Promise.all([
+    db()
+      .select({ _id: User._id, name: User.name, employeeId: User.employeeId, deptName: Department.name })
+      .from(User)
+      .leftJoin(Department, eq(Department._id, User.department))
+      .where(inList(User._id, [...new Set(rows.map((r) => r.user))])),
+    db()
+      .select({ _id: Project._id, projectNo: Project.projectNo })
+      .from(Project)
+      .where(inList(Project._id, [...new Set(rows.map((r) => r.project).filter((x): x is string => Boolean(x)))])),
+    db()
+      .select({ _id: Client._id, clientNo: Client.clientNo })
+      .from(Client)
+      .where(inList(Client._id, [...new Set(rows.map((r) => r.client).filter((x): x is string => Boolean(x)))])),
     directReportIds(user._id),
   ]);
-  const person = new Map(people.map((p) => [p._id.toString(), p]));
-  const dept = new Map(departments.map((d) => [d._id.toString(), d.name]));
-  const proj = new Map(projects.map((p) => [p._id.toString(), p.projectNo]));
-  const cli = new Map(clients.map((c) => [c._id.toString(), c.clientNo]));
+  const person = new Map(people.map((p) => [p._id, p]));
+  const proj = new Map(projects.map((p) => [p._id, p.projectNo]));
+  const cli = new Map(clients.map((c) => [c._id, c.clientNo]));
   const reportSet = new Set(reports);
-  const showPersonal = (m: IMovement) => m.official || m.user.toString() === user.id || reportSet.has(m.user.toString()) || can(user, "movement.view_personal");
+  const showPersonal = (m: IMovement) => m.official || m.user === user.id || reportSet.has(m.user) || can(user, "movement.view_personal");
 
   await audit(user, { action: "export", entity: "movement", summary: `Exported movement register ${from} – ${to} (${rows.length} rows, ${format})` });
 
@@ -77,14 +91,14 @@ export async function GET(request: Request) {
     columns: [
       { header: "Movement ID", value: (m) => m.movementNo, width: 14 },
       { header: "Date", value: (m) => m.date, width: 12 },
-      { header: "Employee ID", value: (m) => person.get(m.user.toString())?.employeeId, width: 12 },
-      { header: "Name", value: (m) => person.get(m.user.toString())?.name, width: 22 },
-      { header: "Department", value: (m) => { const d = person.get(m.user.toString())?.department; return d ? dept.get(d.toString()) : ""; }, width: 18 },
+      { header: "Employee ID", value: (m) => person.get(m.user)?.employeeId, width: 12 },
+      { header: "Name", value: (m) => person.get(m.user)?.name, width: 22 },
+      { header: "Department", value: (m) => person.get(m.user)?.deptName ?? "", width: 18 },
       { header: "Category", value: (m) => (showPersonal(m) ? m.categoryLabel : "Personal"), width: 18 },
       { header: "Type", value: (m) => (m.official ? "Official" : "Personal"), width: 10 },
       { header: "Purpose", value: (m) => (showPersonal(m) ? m.purpose : "Personal"), width: 30 },
       { header: "Destination", value: (m) => (showPersonal(m) ? m.destination : ""), width: 24 },
-      { header: "Reference", value: (m) => (m.project && proj.get(m.project.toString())) || (m.client && cli.get(m.client.toString())) || "", width: 12 },
+      { header: "Reference", value: (m) => (m.project && proj.get(m.project)) || (m.client && cli.get(m.client)) || "", width: 12 },
       { header: "Out-Time", value: (m) => fmtDateTime(m.outTime), width: 18 },
       { header: "Expected return", value: (m) => fmtDateTime(m.expectedReturn), width: 18 },
       { header: "In-Time", value: (m) => (m.inTime ? fmtDateTime(m.inTime) : ""), width: 18 },

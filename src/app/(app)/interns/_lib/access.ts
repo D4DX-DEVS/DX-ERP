@@ -1,12 +1,12 @@
 import "server-only";
-import type { Types } from "mongoose";
 import { can, type CurrentUser } from "@/lib/auth/session";
+import type { Id } from "@/lib/models";
 
 export interface InternTarget {
-  _id: Types.ObjectId;
+  _id: Id;
   personType: string;
-  reportingManager?: Types.ObjectId | null;
-  internship?: { mentor?: Types.ObjectId | null } | null;
+  reportingManager?: Id | null;
+  internship?: { mentor?: Id | null } | null;
 }
 
 export interface InternAccess {
@@ -26,9 +26,9 @@ export interface InternAccess {
 
 /** Permissions on one intern / trainee record (FRS §6.3). */
 export function internAccess(user: CurrentUser, t: InternTarget): InternAccess {
-  const isSelf = user.id === t._id.toString();
-  const isMentor = t.internship?.mentor?.toString() === user.id;
-  const isManager = t.reportingManager?.toString() === user.id;
+  const isSelf = user.id === t._id;
+  const isMentor = t.internship?.mentor === user.id;
+  const isManager = t.reportingManager === user.id;
   const internLike = t.personType === "intern" || t.personType === "trainee";
   const canManage = internLike && can(user, "interns.manage");
   const canReview = internLike && can(user, "interns.review");

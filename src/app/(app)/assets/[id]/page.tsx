@@ -1,4 +1,5 @@
 import { forbidden, notFound } from "next/navigation";
+import { asc, eq } from "drizzle-orm";
 import { PersonCell } from "@/components/ui/avatar";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, CardBody, CardHeader, DetailList } from "@/components/ui/card";
@@ -7,7 +8,7 @@ import { AttachmentList } from "@/components/ui/file-upload";
 import { PageBody, PageHeader } from "@/components/ui/page";
 import { Timeline } from "@/components/ui/timeline";
 import { can, getCurrentUser, requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { inr, titleCase } from "@/lib/format";
 import { Asset, Department, User } from "@/lib/models";
 import { peopleOptions } from "@/lib/people";
@@ -21,8 +22,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   if (!isObjectId(id)) return { title: "Asset" };
   const user = await getCurrentUser();
   if (!user || !can(user, "assets.view")) return { title: "Asset" };
-  await connectDB();
-  const asset = await Asset.findById(id, { assetNo: 1, name: 1 }).lean();
+  const [asset] = await db().select({ assetNo: Asset.assetNo, name: Asset.name }).from(Asset).where(eq(Asset._id, id)).limit(1);
   return { title: asset ? `${asset.assetNo} · ${asset.name}` : "Asset" };
 }
 
@@ -30,30 +30,29 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const user = await requireUser();
   const { id } = await params;
   if (!isObjectId(id)) notFound();
-  await connectDB();
-  const asset = await Asset.findById(id).lean();
+  const [asset] = await db().select().from(Asset).where(eq(Asset._id, id)).limit(1);
   if (!asset) notFound();
 
   // Asset managers see everything; the person an asset is issued to may see their own item (read-only, no cost or documents).
   const canViewAll = can(user, "assets.view");
   const canManage = can(user, "assets.manage");
-  if (!canViewAll && asset.assignedTo?.toString() !== user.id) forbidden();
+  if (!canViewAll && asset.assignedTo !== user.id) forbidden();
 
-  const [holder, dept, people, departments] = await Promise.all([
-    asset.assignedTo ? User.findById(asset.assignedTo, { name: 1, employeeId: 1, photo: 1 }).lean() : null,
-    asset.department ? Department.findById(asset.department, { name: 1 }).lean() : null,
+  const [[holder], [dept], people, departments] = await Promise.all([
+    asset.assignedTo ? db().select({ _id: User._id, name: User.name, employeeId: User.employeeId, photo: User.photo }).from(User).where(eq(User._id, asset.assignedTo)).limit(1) : Promise.resolve([]),
+    asset.department ? db().select({ name: Department.name }).from(Department).where(eq(Department._id, asset.department)).limit(1) : Promise.resolve([]),
     canManage ? peopleOptions() : [],
-    canManage ? Department.find({ active: true }, { name: 1 }).sort({ name: 1 }).lean() : [],
+    canManage ? db().select({ _id: Department._id, name: Department.name }).from(Department).where(eq(Department.active, true)).orderBy(asc(Department.name)) : [],
   ]);
 
   const today = todayKey();
   const active = asset.status !== "retired" && asset.status !== "lost";
-  const warranty = active ? warrantyState(asset.warrantyUntil, today) : null;
-  const service = active ? serviceState(asset.nextServiceDate, today) : null;
+  const warranty = active ? warrantyState(asset.warrantyUntil ?? undefined, today) : null;
+  const service = active ? serviceState(asset.nextServiceDate ?? undefined, today) : null;
   const history = [...asset.history].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
   const since = holder ? history.find((h) => h.action === "issued" || h.action === "transferred")?.at : undefined;
 
-  const holderIsViewer = holder?._id.toString() === user.id;
+  const holderIsViewer = holder?._id === user.id;
 
   return (
     <PageBody>
@@ -79,7 +78,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                 condition={asset.condition}
                 holder={holder?.name}
                 people={people}
-                departments={departments.map((d) => ({ id: d._id.toString(), name: d.name }))}
+                departments={departments.map((d) => ({ id: d._id, name: d.name }))}
                 today={today}
               />
             </>
@@ -150,7 +149,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                 <Timeline
                   empty="No history recorded yet."
                   items={history.map((h, i) => ({
-                    id: h._id?.toString() ?? String(i),
+                    id: h._id ?? String(i),
                     title: (
                       <>
                         {HISTORY_ACTIONS[h.action]?.label ?? titleCase(h.action)}
@@ -174,7 +173,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             <CardBody className="flex flex-col gap-3">
               {holder ? (
                 <>
-                  <PersonCell name={holder.name} photo={holder.photo} sub={holder.employeeId} />
+                  <PersonCell name={holder.name} photo={holder.photo ?? undefined} sub={holder.employeeId} />
                   <p className="text-[13px] text-muted">
                     {holderIsViewer ? "This item is issued to you" : "Currently holding this asset"}
                     {since ? ` since ${fmtDate(since)}` : ""}.
@@ -193,7 +192,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             <Card>
               <CardHeader title="Documents" />
               <CardBody>
-                <AttachmentList files={asset.documents.map((d) => ({ file: d.file.toString(), name: d.name, size: d.size }))} empty="No documents attached." />
+                <AttachmentList files={asset.documents.map((d) => ({ file: d.file, name: d.name, size: d.size }))} empty="No documents attached." />
               </CardBody>
             </Card>
           )}

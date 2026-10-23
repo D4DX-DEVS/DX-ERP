@@ -1,11 +1,13 @@
 import "server-only";
-import type { Types } from "mongoose";
-import { connectDB } from "@/lib/db";
-import { Client, Invoice, Payment } from "@/lib/models";
+import { and, asc, eq, gt, gte, lt, lte, or, sql, type SQL } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { Client, Invoice, Payment, type Id } from "@/lib/models";
 import type { InvoiceStatus } from "@/lib/models";
-import { dateParam, idParam, param, searchRegex, type SearchParams } from "@/lib/query";
+import { dateParam, idParam, param, type SearchParams } from "@/lib/query";
+import { inList, searchAny } from "@/lib/sql";
 import { diffDays, monthKey, zonedDateTime } from "@/lib/time";
 import { fiscalYear } from "@/lib/counters";
+import { notHiddenClient } from "@/app/(app)/crm/_lib/access";
 
 export type InvoiceBucket = "draft" | "issued" | "partially_paid" | "overdue" | "paid" | "cancelled";
 
@@ -15,36 +17,35 @@ export function isBucket(value: string): value is InvoiceBucket {
   return (INVOICE_BUCKETS as string[]).includes(value);
 }
 
-/** Mongo filter for a displayed status. Overdue includes unpaid invoices past due that the job has not flagged yet. */
-export function bucketFilter(bucket: InvoiceBucket, today: string): Record<string, unknown> {
+/** SQL condition for a displayed status. Overdue includes unpaid invoices past due that the job has not flagged yet. */
+export function bucketFilter(bucket: InvoiceBucket, today: string): SQL | undefined {
   switch (bucket) {
     case "overdue":
-      return { $or: [{ status: "overdue" }, { status: { $in: ["issued", "partially_paid"] }, dueDate: { $lt: today } }] };
+      return or(eq(Invoice.status, "overdue"), and(inList(Invoice.status, ["issued", "partially_paid"]), lt(Invoice.dueDate, today)));
     case "issued":
     case "partially_paid":
-      return { status: bucket, dueDate: { $gte: today } };
+      return and(eq(Invoice.status, bucket), gte(Invoice.dueDate, today));
     default:
-      return { status: bucket };
+      return eq(Invoice.status, bucket);
   }
 }
 
 /** Invoice list filter from the URL (status chip, client, project, issue-date range, search); `hidden` = restricted clients the viewer may not see. */
-export function invoiceFilter(sp: SearchParams, today: string, hidden: Types.ObjectId[] = []): Record<string, unknown> {
-  const and: Record<string, unknown>[] = [];
-  if (hidden.length) and.push({ client: { $nin: hidden } });
+export function invoiceFilter(sp: SearchParams, today: string, hidden: Id[] = []): SQL | undefined {
   const status = param(sp, "status");
-  if (isBucket(status)) and.push(bucketFilter(status, today));
   const client = idParam(sp, "client");
-  if (client) and.push({ client });
   const project = idParam(sp, "project");
-  if (project) and.push({ project });
   const from = dateParam(sp, "from");
   const to = dateParam(sp, "to");
-  if (from) and.push({ issueDate: { $gte: from } });
-  if (to) and.push({ issueDate: { $lte: to } });
-  const q = searchRegex(param(sp, "q"));
-  if (q) and.push({ $or: [{ invoiceNo: q }, { draftNo: q }] });
-  return and.length ? { $and: and } : {};
+  return and(
+    notHiddenClient(hidden, Invoice.client),
+    isBucket(status) ? bucketFilter(status, today) : undefined,
+    client ? eq(Invoice.client, client) : undefined,
+    project ? eq(Invoice.project, project) : undefined,
+    from ? gte(Invoice.issueDate, from) : undefined,
+    to ? lte(Invoice.issueDate, to) : undefined,
+    searchAny(param(sp, "q"), Invoice.invoiceNo, Invoice.draftNo),
+  );
 }
 
 /** First and last day of the fiscal year (April–March) containing today, e.g. 2026-04-01 … 2027-03-31. */
@@ -94,21 +95,29 @@ export interface Receivable {
 }
 
 /** Issued, partially paid and overdue invoices with money still owed. */
-export async function loadReceivables(today: string, extra: Record<string, unknown> = {}): Promise<Receivable[]> {
-  await connectDB();
-  const rows = await Invoice.find(
-    { status: { $in: ["issued", "partially_paid", "overdue"] }, balance: { $gt: 0 }, ...extra },
-    { invoiceNo: 1, client: 1, project: 1, issueDate: 1, dueDate: 1, total: 1, balance: 1, status: 1 },
-  )
-    .sort({ dueDate: 1 })
-    .lean();
+export async function loadReceivables(today: string, extra?: SQL): Promise<Receivable[]> {
+  const rows = await db()
+    .select({
+      _id: Invoice._id,
+      invoiceNo: Invoice.invoiceNo,
+      client: Invoice.client,
+      project: Invoice.project,
+      issueDate: Invoice.issueDate,
+      dueDate: Invoice.dueDate,
+      total: Invoice.total,
+      balance: Invoice.balance,
+      status: Invoice.status,
+    })
+    .from(Invoice)
+    .where(and(inList(Invoice.status, ["issued", "partially_paid", "overdue"]), gt(Invoice.balance, 0), extra))
+    .orderBy(asc(Invoice.dueDate));
   return rows.map((r) => {
     const daysPastDue = diffDays(r.dueDate, today);
     return {
-      id: r._id.toString(),
+      id: r._id,
       invoiceNo: r.invoiceNo ?? "",
-      client: r.client.toString(),
-      project: r.project?.toString(),
+      client: r.client,
+      project: r.project ?? undefined,
       issueDate: r.issueDate,
       dueDate: r.dueDate,
       total: r.total,
@@ -123,29 +132,27 @@ export async function loadReceivables(today: string, extra: Record<string, unkno
 export async function clientNames(ids: string[]): Promise<Map<string, { name: string; clientNo: string }>> {
   const unique = [...new Set(ids)];
   if (unique.length === 0) return new Map();
-  await connectDB();
-  const rows = await Client.find({ _id: { $in: unique } }, { name: 1, clientNo: 1 }).lean();
-  return new Map(rows.map((c) => [c._id.toString(), { name: c.name, clientNo: c.clientNo }]));
+  const rows = await db().select({ _id: Client._id, name: Client.name, clientNo: Client.clientNo }).from(Client).where(inList(Client._id, unique));
+  return new Map(rows.map((c) => [c._id, { name: c.name, clientNo: c.clientNo }]));
 }
 
 /** Invoiced totals (issued, partially paid, paid, overdue — not drafts or cancelled) with issue date in a range. */
-export async function invoicedBetween(from: string, to: string, extra: Record<string, unknown> = {}): Promise<{ amount: number; count: number }> {
-  await connectDB();
-  const [row] = await Invoice.aggregate<{ amount: number; count: number }>([
-    { $match: { status: { $in: ["issued", "partially_paid", "paid", "overdue"] }, issueDate: { $gte: from, $lte: to }, ...extra } },
-    { $group: { _id: null, amount: { $sum: "$total" }, count: { $sum: 1 } } },
-  ]);
+export async function invoicedBetween(from: string, to: string, extra?: SQL): Promise<{ amount: number; count: number }> {
+  const [row] = await db()
+    .select({ amount: sql<number>`coalesce(sum(${Invoice.total}), 0)`.mapWith(Number), count: sql<number>`count(*)`.mapWith(Number) })
+    .from(Invoice)
+    .where(and(inList(Invoice.status, ["issued", "partially_paid", "paid", "overdue"]), gte(Invoice.issueDate, from), lte(Invoice.issueDate, to), extra));
   return { amount: row?.amount ?? 0, count: row?.count ?? 0 };
 }
 
 /** Money received in a date range: payments minus refunds (adjustments are write-offs, not receipts). */
-export async function receivedBetween(from: string, to: string, extra: Record<string, unknown> = {}): Promise<{ amount: number; count: number }> {
-  await connectDB();
-  const rows = await Payment.aggregate<{ _id: string; amount: number; count: number }>([
-    { $match: { type: { $in: ["payment", "refund"] }, date: { $gte: from, $lte: to }, ...extra } },
-    { $group: { _id: "$type", amount: { $sum: "$amount" }, count: { $sum: 1 } } },
-  ]);
-  const paid = rows.find((r) => r._id === "payment");
-  const refunded = rows.find((r) => r._id === "refund");
+export async function receivedBetween(from: string, to: string, extra?: SQL): Promise<{ amount: number; count: number }> {
+  const rows = await db()
+    .select({ type: Payment.type, amount: sql<number>`coalesce(sum(${Payment.amount}), 0)`.mapWith(Number), count: sql<number>`count(*)`.mapWith(Number) })
+    .from(Payment)
+    .where(and(inList(Payment.type, ["payment", "refund"]), gte(Payment.date, from), lte(Payment.date, to), extra))
+    .groupBy(Payment.type);
+  const paid = rows.find((r) => r.type === "payment");
+  const refunded = rows.find((r) => r.type === "refund");
   return { amount: (paid?.amount ?? 0) - (refunded?.amount ?? 0), count: paid?.count ?? 0 };
 }

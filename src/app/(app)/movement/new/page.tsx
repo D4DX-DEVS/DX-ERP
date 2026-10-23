@@ -1,12 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { forbidden, redirect } from "next/navigation";
+import { and, asc, desc, eq, gte, or } from "drizzle-orm";
 import { can, isStaff, requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Attendance, Client, Movement, Project, User } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
 import { peopleOptions } from "@/lib/people";
 import { param, type SearchParams } from "@/lib/query";
+import { notInList } from "@/lib/sql";
+import { projectFilter } from "@/lib/work-access";
 import { fmtDate, fmtLongDate, fmtTime, formatDuration, todayKey, weekStart } from "@/lib/time";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { PageBody, PageHeader } from "@/components/ui/page";
@@ -24,34 +27,40 @@ export default async function NewMovementPage({ searchParams }: { searchParams: 
   const staff = isStaff(user);
   if (!staff && !canManage) forbidden();
 
-  await connectDB();
   const settings = await getSettings();
   const today = todayKey();
 
   if (mode === "live" && staff) {
-    const open = await Movement.findOne({ user: user._id, status: "out" }, { _id: 1 }).lean();
+    const [open] = await db().select({ _id: Movement._id }).from(Movement).where(and(eq(Movement.user, user._id), eq(Movement.status, "out"))).limit(1);
     if (open) redirect(`/movement/${open._id}`);
   }
 
-  const projectFilter: Record<string, unknown> = can(user, "projects.view_all")
-    ? {}
-    : { $or: [{ manager: user._id }, { "team.user": user._id }] };
   const doneStatuses = settings.projectStatuses.filter((s) => s.category === "completed" || s.category === "cancelled").map((s) => s.key);
 
-  const [projects, clients, people, me, attToday, recent] = await Promise.all([
-    Project.find({ ...projectFilter, status: { $nin: doneStatuses } }, { projectNo: 1, title: 1 }).sort({ updatedAt: -1 }).limit(200).lean(),
+  const [projects, clients, people, me, [attToday], recent] = await Promise.all([
+    db()
+      .select({ _id: Project._id, projectNo: Project.projectNo, title: Project.title })
+      .from(Project)
+      .where(and(projectFilter(user), notInList(Project.status, doneStatuses)))
+      .orderBy(desc(Project.updatedAt))
+      .limit(200),
     can(user, "crm.view")
-      ? Client.find(can(user, "crm.confidential") ? { status: { $ne: "lost" } } : { status: { $ne: "lost" }, $or: [{ confidential: false }, { owner: user._id }] }, { clientNo: 1, name: 1 })
-          .sort({ name: 1 })
+      ? db()
+          .select({ _id: Client._id, clientNo: Client.clientNo, name: Client.name })
+          .from(Client)
+          .where(and(notInList(Client.status, ["lost"]), can(user, "crm.confidential") ? undefined : or(eq(Client.confidential, false), eq(Client.owner, user._id))))
+          .orderBy(asc(Client.name))
           .limit(300)
-          .lean()
       : Promise.resolve([]),
     canManage ? peopleOptions() : Promise.resolve(undefined),
-    User.findById(user._id, { reportingManager: 1 }).lean(),
-    staff ? Attendance.findOne({ user: user._id, date: today }, { checkIn: 1 }).lean() : Promise.resolve(null),
-    staff ? Movement.find({ user: user._id, date: { $gte: weekStart(today) } }).sort({ outTime: -1 }).limit(6).lean() : Promise.resolve([]),
+    db().select({ reportingManager: User.reportingManager }).from(User).where(eq(User._id, user._id)).limit(1),
+    staff ? db().select({ checkIn: Attendance.checkIn }).from(Attendance).where(and(eq(Attendance.user, user._id), eq(Attendance.date, today))).limit(1) : Promise.resolve([]),
+    staff
+      ? db().select().from(Movement).where(and(eq(Movement.user, user._id), gte(Movement.date, weekStart(today)))).orderBy(desc(Movement.outTime)).limit(6)
+      : Promise.resolve([]),
   ]);
-  const manager = me?.reportingManager ? await User.findById(me.reportingManager, { name: 1 }).lean() : null;
+  const myManager = me[0]?.reportingManager;
+  const [manager] = myManager ? await db().select({ name: User.name }).from(User).where(eq(User._id, myManager)).limit(1) : [];
   const weekMinutes = recent.reduce((s, m) => s + (m.durationMinutes ?? 0), 0);
 
   return (
@@ -71,8 +80,8 @@ export default async function NewMovementPage({ searchParams }: { searchParams: 
             <MovementForm
               mode={mode}
               categories={settings.movement.categories.filter((c) => c.active)}
-              projects={projects.map((p) => ({ id: p._id.toString(), label: `${p.projectNo} · ${p.title}` }))}
-              clients={clients.map((c) => ({ id: c._id.toString(), label: `${c.clientNo} · ${c.name}` }))}
+              projects={projects.map((p) => ({ id: p._id, label: `${p.projectNo} · ${p.title}` }))}
+              clients={clients.map((c) => ({ id: c._id, label: `${c.clientNo} · ${c.name}` }))}
               people={people?.map((p) => ({ id: p.id, name: p.name, employeeId: p.employeeId, designation: p.designation, photo: p.photo }))}
               personLabel={staff ? `${user.name} · ${user.employeeId}` : "Choose a person"}
               dateLabel={fmtLongDate(new Date())}
@@ -89,7 +98,7 @@ export default async function NewMovementPage({ searchParams }: { searchParams: 
               <CardBody className="flex flex-col divide-y divide-line-soft pt-0">
                 {recent.length === 0 && <p className="py-3 text-[13px] text-muted">No movements this week.</p>}
                 {recent.map((m) => (
-                  <Link key={m._id.toString()} href={`/movement/${m._id}`} className="flex items-center justify-between gap-3 py-2.5 hover:text-brand-600">
+                  <Link key={m._id} href={`/movement/${m._id}`} className="flex items-center justify-between gap-3 py-2.5 hover:text-brand-600">
                     <span className="flex min-w-0 flex-col">
                       <span className="truncate text-[13px] font-semibold">
                         {m.categoryLabel} · {m.purpose}

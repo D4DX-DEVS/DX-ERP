@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { forbidden, notFound } from "next/navigation";
 import { Pencil } from "lucide-react";
+import { and, eq } from "drizzle-orm";
 import { can, requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Client, Department, Expense, PayrollRun, Payslip, Project, User } from "@/lib/models";
+import { inList, jsonHas } from "@/lib/sql";
 import { inr } from "@/lib/format";
 import { fmtDate, fmtDateTime, todayKey } from "@/lib/time";
 import { isObjectId } from "@/lib/validation";
@@ -32,11 +34,10 @@ export default async function ExpenseDetailPage({ params }: { params: Promise<{ 
   const user = await requireUser();
   const { id } = await params;
   if (!isObjectId(id)) notFound();
-  await connectDB();
-  const e = await Expense.findById(id).lean();
+  const [e] = await db().select().from(Expense).where(eq(Expense._id, id)).limit(1);
   if (!e) notFound();
 
-  const owner = e.user.toString() === user.id;
+  const owner = e.user === user.id;
   const viewAll = can(user, "expenses.view_all");
   const approve = can(user, "expenses.approve");
   const pay = can(user, "expenses.pay");
@@ -44,15 +45,23 @@ export default async function ExpenseDetailPage({ params }: { params: Promise<{ 
   const inQueue = (approve && e.status !== "draft") || (pay && (e.status === "approved" || e.status === "paid"));
   if (!owner && !viewAll && !inQueue) forbidden();
 
-  const [person, project, client, department, slips] = await Promise.all([
-    User.findById(e.user, { name: 1, employeeId: 1, photo: 1 }).lean(),
-    e.project ? Project.findById(e.project, { projectNo: 1, title: 1 }).lean() : null,
-    e.client && can(user, "crm.view") ? Client.findById(e.client, { name: 1, clientNo: 1, confidential: 1 }).lean() : null,
-    e.department ? Department.findById(e.department, { name: 1 }).lean() : null,
-    e.status === "approved" ? Payslip.find({ reimbursedExpenses: e._id }, { run: 1 }).lean() : [],
+  const [[person], [project], [client], [department], [run]] = await Promise.all([
+    db().select({ name: User.name, employeeId: User.employeeId, photo: User.photo }).from(User).where(eq(User._id, e.user)).limit(1),
+    e.project ? db().select({ _id: Project._id, projectNo: Project.projectNo, title: Project.title }).from(Project).where(eq(Project._id, e.project)).limit(1) : [],
+    e.client && can(user, "crm.view")
+      ? db().select({ name: Client.name, clientNo: Client.clientNo, confidential: Client.confidential }).from(Client).where(eq(Client._id, e.client)).limit(1)
+      : [],
+    e.department ? db().select({ name: Department.name }).from(Department).where(eq(Department._id, e.department)).limit(1) : [],
+    // An approved claim that is part of an unfinished payroll run is paid through that run.
+    e.status === "approved"
+      ? db()
+          .select({ runNo: PayrollRun.runNo })
+          .from(Payslip)
+          .innerJoin(PayrollRun, eq(PayrollRun._id, Payslip.run))
+          .where(and(jsonHas(Payslip.reimbursedExpenses, e._id), inList(PayrollRun.status, ["draft", "verified", "approved"])))
+          .limit(1)
+      : [],
   ]);
-  // An approved claim that is part of an unfinished payroll run is paid through that run.
-  const run = slips.length ? await PayrollRun.findOne({ _id: { $in: slips.map((s) => s.run) }, status: { $in: ["draft", "verified", "approved"] } }, { runNo: 1 }).lean() : null;
 
   const today = todayKey();
   const editable = owner && (e.status === "draft" || e.status === "rejected");
@@ -141,7 +150,7 @@ export default async function ExpenseDetailPage({ params }: { params: Promise<{ 
           <Card>
             <CardHeader title="Receipts" subtitle={e.receipts.length ? undefined : "Nothing attached"} />
             <CardBody>
-              <AttachmentList files={e.receipts.map((r) => ({ file: r.file.toString(), name: r.name, size: r.size }))} empty="No receipts attached." />
+              <AttachmentList files={e.receipts.map((r) => ({ file: r.file, name: r.name, size: r.size }))} empty="No receipts attached." />
             </CardBody>
           </Card>
         </div>
@@ -149,7 +158,7 @@ export default async function ExpenseDetailPage({ params }: { params: Promise<{ 
         <aside className="flex min-w-0 flex-col gap-4">
           <Card>
             <CardHeader title="Submitted by" />
-            <CardBody>{person ? <PersonCell name={person.name} photo={person.photo} sub={person.employeeId} /> : <span className="text-sm text-muted">Unknown person</span>}</CardBody>
+            <CardBody>{person ? <PersonCell name={person.name} photo={person.photo ?? undefined} sub={person.employeeId} /> : <span className="text-sm text-muted">Unknown person</span>}</CardBody>
           </Card>
 
           {(e.decidedAt || e.payment?.date) && (

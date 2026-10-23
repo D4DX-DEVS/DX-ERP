@@ -1,6 +1,7 @@
 import { forbidden } from "next/navigation";
+import { asc } from "drizzle-orm";
 import { can, requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Client } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
 import { statusLabel } from "@/lib/status";
@@ -35,9 +36,8 @@ export default async function EditProposalPage({ params }: { params: Promise<{ i
     );
   }
 
-  await connectDB();
   const settings = await getSettings();
-  const clients = await Client.find(clientScope(user), { name: 1, clientNo: 1 }).sort({ name: 1 }).limit(1000).lean();
+  const clients = await db().select({ _id: Client._id, name: Client.name, clientNo: Client.clientNo }).from(Client).where(clientScope(user)).orderBy(asc(Client.name)).limit(1000);
   const defaultTax = settings.taxes.find((t) => t.rate === 18)?.rate ?? settings.taxes[0]?.rate ?? 0;
 
   return (
@@ -45,7 +45,7 @@ export default async function EditProposalPage({ params }: { params: Promise<{ i
       {header}
       <ProposalForm
         mode="edit"
-        clients={clients.map((c) => ({ id: c._id.toString(), name: c.name, clientNo: c.clientNo }))}
+        clients={clients.map((c) => ({ id: c._id, name: c.name, clientNo: c.clientNo }))}
         taxes={settings.taxes}
         defaultTaxRate={defaultTax}
         clientLocked={p.status !== "draft" || Boolean(p.lead)}
@@ -54,8 +54,8 @@ export default async function EditProposalPage({ params }: { params: Promise<{ i
           id,
           kind: p.kind,
           title: p.title,
-          client: p.client.toString(),
-          lead: p.lead?.toString() ?? "",
+          client: p.client,
+          lead: p.lead ?? "",
           summary: p.summary ?? "",
           scope: p.scope ?? "",
           deliverables: p.deliverables.join("\n"),

@@ -1,7 +1,7 @@
 import "server-only";
-import { Types } from "mongoose";
+import { and, asc, eq, gte, isNull, lte, ne, or, sql, type Column, type SQL } from "drizzle-orm";
 import { can, type CurrentUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import {
   Attendance,
   Client,
@@ -12,17 +12,17 @@ import {
   Project,
   User,
   type IAttendance,
+  type Id,
 } from "@/lib/models";
 import type { AppSettings } from "@/lib/config-defaults";
 import { getSettings } from "@/lib/settings";
 import { workCalendar, type WorkCalendar } from "@/lib/domain/calendar";
+import { inList, notInList } from "@/lib/sql";
 import { addDays, diffDays, endOfDay, monthKey, startOfDay, todayKey } from "@/lib/time";
 import type { ReportFilterDef, ReportFilters } from "./types";
 
 /** Longest date range a report may cover (keeps day-by-day reports bounded). */
 export const MAX_RANGE_DAYS = 400;
-
-export const oid = (id: string) => new Types.ObjectId(id);
 
 /* ------------------------------------------------------------------ filters */
 
@@ -90,42 +90,41 @@ export interface PersonInfo {
   joiningDate?: string;
 }
 
-const PERSON_PROJECTION = { name: 1, employeeId: 1, personType: 1, department: 1, designation: 1, status: 1, joiningDate: 1 } as const;
-
-async function nameMaps(): Promise<{ departments: Map<string, string>; designations: Map<string, string> }> {
-  const [departments, designations] = await Promise.all([Department.find({}, { name: 1 }).lean(), Designation.find({}, { name: 1 }).lean()]);
-  return {
-    departments: new Map(departments.map((d) => [d._id.toString(), d.name])),
-    designations: new Map(designations.map((d) => [d._id.toString(), d.name])),
-  };
+/** One query for the people columns plus department / designation names (instead of separate name lookups). */
+function personQuery() {
+  return db()
+    .select({
+      id: User._id,
+      name: User.name,
+      employeeId: User.employeeId,
+      personType: User.personType,
+      status: User.status,
+      joiningDate: User.joiningDate,
+      department: Department.name,
+      designation: Designation.name,
+    })
+    .from(User)
+    .leftJoin(Department, eq(Department._id, User.department))
+    .leftJoin(Designation, eq(Designation._id, User.designation));
 }
+
+type PersonRow = Awaited<ReturnType<typeof personQuery>>[number];
 
 export async function departmentNames(): Promise<Map<string, string>> {
-  await connectDB();
-  return (await nameMaps()).departments;
+  const departments = await db().select({ id: Department._id, name: Department.name }).from(Department);
+  return new Map(departments.map((d) => [d.id, d.name]));
 }
 
-type PersonDoc = {
-  _id: Types.ObjectId;
-  name: string;
-  employeeId: string;
-  personType: string;
-  department?: Types.ObjectId;
-  designation?: Types.ObjectId;
-  status: string;
-  joiningDate?: string;
-};
-
-function toPerson(u: PersonDoc, maps: { departments: Map<string, string>; designations: Map<string, string> }): PersonInfo {
+function toPerson(u: PersonRow): PersonInfo {
   return {
-    id: u._id.toString(),
+    id: u.id,
     name: u.name,
     employeeId: u.employeeId,
     personType: u.personType,
-    department: u.department ? (maps.departments.get(u.department.toString()) ?? "") : "",
-    designation: u.designation ? (maps.designations.get(u.designation.toString()) ?? "") : "",
+    department: u.department ?? "",
+    designation: u.designation ?? "",
     status: u.status,
-    joiningDate: u.joiningDate,
+    joiningDate: u.joiningDate ?? undefined,
   };
 }
 
@@ -133,30 +132,25 @@ function toPerson(u: PersonDoc, maps: { departments: Map<string, string>; design
 export async function peopleMap(ids: Iterable<unknown>): Promise<Map<string, PersonInfo>> {
   const unique = [...new Set([...ids].filter(Boolean).map(String))];
   if (unique.length === 0) return new Map();
-  await connectDB();
-  const [users, maps] = await Promise.all([User.find({ _id: { $in: unique } }, PERSON_PROJECTION).lean(), nameMaps()]);
-  return new Map(users.map((u) => [u._id.toString(), toPerson(u, maps)]));
+  const users = await personQuery().where(inList(User._id, unique));
+  return new Map(users.map((u) => [u.id, toPerson(u)]));
 }
 
 /** Staff (employees, trainees, interns — never the super admin) matching the department / person filters. */
-export async function loadStaff(f: ReportFilters, extra: Record<string, unknown> = {}): Promise<PersonInfo[]> {
-  await connectDB();
-  const filter: Record<string, unknown> = { personType: { $in: PERSON_TYPES }, ...extra };
-  if (f.department) filter.department = f.department;
-  if (f.person) filter._id = f.person;
-  const [users, maps] = await Promise.all([User.find(filter, PERSON_PROJECTION).sort({ name: 1 }).lean(), nameMaps()]);
-  return users.map((u) => toPerson(u, maps));
+export async function loadStaff(f: ReportFilters, extra?: SQL): Promise<PersonInfo[]> {
+  const users = await personQuery()
+    .where(and(inList(User.personType, PERSON_TYPES), f.department ? eq(User.department, f.department) : undefined, f.person ? eq(User._id, f.person) : undefined, extra))
+    .orderBy(asc(User.name));
+  return users.map(toPerson);
 }
 
-/** Mongo filter on a `user` field from the department / person filters (empty when neither is set). */
-export async function userScope(f: ReportFilters, field = "user"): Promise<Record<string, unknown>> {
-  if (f.person) return { [field]: f.person };
+/** Condition on a `user` column (pass e.g. `Attendance.user`) from the department / person filters (`undefined` when neither is set). */
+export function userScope(f: ReportFilters, column: Column): SQL | undefined {
+  if (f.person) return eq(column, f.person);
   if (f.department) {
-    await connectDB();
-    const ids = await User.distinct("_id", { department: f.department, personType: { $in: PERSON_TYPES } });
-    return { [field]: { $in: ids } };
+    return sql`${column} in (select ${User._id} from ${User} where ${and(eq(User.department, f.department), inList(User.personType, PERSON_TYPES))})`;
   }
-  return {};
+  return undefined;
 }
 
 /* --------------------------------------------------------------- attendance */
@@ -191,43 +185,44 @@ export interface AttendanceContext {
 
 /** Attendance records, approved leave and the work calendar for a set of people over a day range. */
 export async function loadAttendance(userIds: string[], from: string, to: string): Promise<AttendanceContext> {
-  await connectDB();
   const settings = await getSettings();
   const [cal, docs, leaves] = await Promise.all([
     workCalendar(settings, from, to),
     userIds.length
-      ? Attendance.find(
-          { user: { $in: userIds }, date: { $gte: from, $lte: to } },
-          {
-            user: 1,
-            date: 1,
-            checkIn: 1,
-            checkOut: 1,
-            workMinutes: 1,
-            breakMinutes: 1,
-            movementMinutes: 1,
-            status: 1,
-            late: 1,
-            lateMinutes: 1,
-            earlyDeparture: 1,
-            earlyMinutes: 1,
-            missingCheckout: 1,
-            source: 1,
-            remarks: 1,
-          },
-        ).lean()
+      ? db()
+          .select({
+            user: Attendance.user,
+            date: Attendance.date,
+            checkIn: Attendance.checkIn,
+            checkOut: Attendance.checkOut,
+            workMinutes: Attendance.workMinutes,
+            breakMinutes: Attendance.breakMinutes,
+            movementMinutes: Attendance.movementMinutes,
+            status: Attendance.status,
+            late: Attendance.late,
+            lateMinutes: Attendance.lateMinutes,
+            earlyDeparture: Attendance.earlyDeparture,
+            earlyMinutes: Attendance.earlyMinutes,
+            missingCheckout: Attendance.missingCheckout,
+            source: Attendance.source,
+            remarks: Attendance.remarks,
+          })
+          .from(Attendance)
+          .where(and(inList(Attendance.user, userIds), gte(Attendance.date, from), lte(Attendance.date, to)))
       : [],
     userIds.length
-      ? LeaveRequest.find({ user: { $in: userIds }, status: "approved", startDate: { $lte: to }, endDate: { $gte: from } }, { user: 1, startDate: 1, endDate: 1, halfDay: 1 }).lean()
+      ? db()
+          .select({ user: LeaveRequest.user, startDate: LeaveRequest.startDate, endDate: LeaveRequest.endDate, halfDay: LeaveRequest.halfDay })
+          .from(LeaveRequest)
+          .where(and(inList(LeaveRequest.user, userIds), eq(LeaveRequest.status, "approved"), lte(LeaveRequest.startDate, to), gte(LeaveRequest.endDate, from)))
       : [],
   ]);
-  const att = new Map<string, AttendanceRow>(docs.map((d) => [`${d.user.toString()}|${d.date}`, d]));
+  const att = new Map<string, AttendanceRow>(docs.map((d) => [`${d.user}|${d.date}`, d]));
   const leaveByUser = new Map<string, { start: string; end: string; half: boolean }[]>();
   for (const l of leaves) {
-    const key = l.user.toString();
-    const list = leaveByUser.get(key) ?? [];
+    const list = leaveByUser.get(l.user) ?? [];
     list.push({ start: l.startDate, end: l.endDate, half: l.halfDay });
-    leaveByUser.set(key, list);
+    leaveByUser.set(l.user, list);
   }
   return {
     settings,
@@ -250,21 +245,23 @@ export async function loadAttendance(userIds: string[], from: string, to: string
 /* -------------------------------------------------------- confidential data */
 
 /** Ids of restricted clients the user may not see (restricted = `confidential` unless owner / `crm.confidential`). */
-export async function hiddenClientIds(user: CurrentUser): Promise<Types.ObjectId[]> {
+export async function hiddenClientIds(user: CurrentUser): Promise<Id[]> {
   if (can(user, "crm.confidential")) return [];
-  await connectDB();
-  const rows = await Client.find({ confidential: true, owner: { $ne: user._id } }, { _id: 1 }).lean();
-  return rows.map((r) => r._id);
+  const rows = await db()
+    .select({ id: Client._id })
+    .from(Client)
+    .where(and(eq(Client.confidential, true), or(isNull(Client.owner), ne(Client.owner, user._id))));
+  return rows.map((r) => r.id);
 }
 
 /** Client names for display; restricted clients the user cannot see appear as "Restricted client". */
 export async function clientNames(ids: Iterable<unknown>, user: CurrentUser): Promise<Map<string, string>> {
   const unique = [...new Set([...ids].filter(Boolean).map(String))];
   if (unique.length === 0) return new Map();
-  await connectDB();
-  const [rows, hidden] = await Promise.all([Client.find({ _id: { $in: unique } }, { name: 1 }).lean(), hiddenClientIds(user)]);
-  const hide = new Set(hidden.map(String));
-  return new Map(rows.map((c) => [c._id.toString(), hide.has(c._id.toString()) ? "Restricted client" : c.name]));
+  const rows = await db().select({ id: Client._id, name: Client.name, confidential: Client.confidential, owner: Client.owner }).from(Client).where(inList(Client._id, unique));
+  const seeRestricted = can(user, "crm.confidential");
+  // Same rule as `hiddenClientIds`: restricted unless the viewer holds `crm.confidential` or owns the client.
+  return new Map(rows.map((c) => [c.id, !seeRestricted && c.confidential && c.owner !== user._id ? "Restricted client" : c.name]));
 }
 
 export interface ProjectInfo {
@@ -278,11 +275,18 @@ export interface ProjectInfo {
 export async function projectMap(ids: Iterable<unknown>): Promise<Map<string, ProjectInfo>> {
   const unique = [...new Set([...ids].filter(Boolean).map(String))];
   if (unique.length === 0) return new Map();
-  await connectDB();
-  const rows = await Project.find({ _id: { $in: unique } }, { projectNo: 1, title: 1, client: 1, manager: 1 }).lean();
-  return new Map(
-    rows.map((p) => [p._id.toString(), { id: p._id.toString(), projectNo: p.projectNo, title: p.title, client: p.client?.toString(), manager: p.manager?.toString() }]),
-  );
+  const rows = await db()
+    .select({ id: Project._id, projectNo: Project.projectNo, title: Project.title, client: Project.client, manager: Project.manager })
+    .from(Project)
+    .where(inList(Project._id, unique));
+  return new Map(rows.map((p) => [p.id, { id: p.id, projectNo: p.projectNo, title: p.title, client: p.client ?? undefined, manager: p.manager ?? undefined }]));
+}
+
+/* ------------------------------------------------------------- aggregation */
+
+/** `coalesce(sum(expr), 0)` as a number (Mongo's `$sum` of nothing is 0; SQL's is NULL). */
+export function sumOf(expr: Column | SQL) {
+  return sql<number>`coalesce(sum(${expr}), 0)`.mapWith(Number);
 }
 
 /* ----------------------------------------------------------------- formatting */
@@ -298,10 +302,10 @@ export function joinParts(parts: (string | null | undefined | false)[], sep = " 
 }
 
 /**
- * Mongo condition on a client reference that honours the `client` filter and hides restricted
- * clients the viewer may not see (pass the result of `hiddenClientIds`).
+ * Condition on a client reference column (pass e.g. `Invoice.client`) that honours the `client` filter and hides
+ * restricted clients the viewer may not see (pass the result of `hiddenClientIds`). `undefined` means no restriction.
  */
-export function clientScope(f: ReportFilters, hidden: Types.ObjectId[], field = "client"): Record<string, unknown> {
-  if (f.client) return hidden.some((h) => h.toString() === f.client) ? { [field]: { $in: [] } } : { [field]: f.client };
-  return hidden.length ? { [field]: { $nin: hidden } } : {};
+export function clientScope(f: ReportFilters, hidden: Id[], column: Column): SQL | undefined {
+  if (f.client) return hidden.includes(f.client) ? inList(column, []) : eq(column, f.client);
+  return hidden.length ? notInList(column, hidden) : undefined;
 }

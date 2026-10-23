@@ -1,5 +1,6 @@
+import { eq } from "drizzle-orm";
 import { can, getCurrentUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Designation, User } from "@/lib/models";
 import { createDoc, finalize, PDF_COLORS, pdfResponse, pdfText } from "@/lib/pdf/base";
 import { getSettings } from "@/lib/settings";
@@ -17,16 +18,22 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   if (!isObjectId(id)) return new Response("Not found", { status: 404 });
 
-  await connectDB();
-  const person = await User.findById(id, { name: 1, personType: 1, designation: 1, internship: 1 }).lean();
+  const [person] = await db()
+    .select({ name: User.name, personType: User.personType, designation: User.designation, internship: User.internship })
+    .from(User)
+    .where(eq(User._id, id))
+    .limit(1);
   if (!person || (person.personType !== "intern" && person.personType !== "trainee") || !person.internship) return new Response("Not found", { status: 404 });
 
-  const allowed = user.id === id || person.internship.mentor?.toString() === user.id || can(user, "interns.manage");
+  const allowed = user.id === id || person.internship.mentor === user.id || can(user, "interns.manage");
   if (!allowed) return new Response("You don't have access to this certificate.", { status: 403 });
   const internship = person.internship;
   if (internship.certificateStatus !== "issued" || !internship.certificateNo) return new Response("The certificate has not been issued yet.", { status: 409 });
 
-  const [settings, designation] = await Promise.all([getSettings(), person.designation ? Designation.findById(person.designation, { name: 1 }).lean() : null]);
+  const [settings, [designation]] = await Promise.all([
+    getSettings(),
+    person.designation ? db().select({ name: Designation.name }).from(Designation).where(eq(Designation._id, person.designation)).limit(1) : [],
+  ]);
   const company = settings.company;
   const companyName = company.legalName || company.name;
   const first = person.name.trim().split(/\s+/)[0] ?? person.name;

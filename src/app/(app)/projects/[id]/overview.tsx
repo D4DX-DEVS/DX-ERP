@@ -1,7 +1,10 @@
 import Link from "next/link";
-import { Expense, Invoice, Issue, Payment, Task, TimesheetEntry, type IProject, type ObjectId } from "@/lib/models";
+import { and, asc, count, desc, eq, gte, isNotNull, isNull, lt, lte, ne, sql } from "drizzle-orm";
+import { Expense, Invoice, Issue, Payment, Task, TimesheetEntry, type IProject } from "@/lib/models";
 import { can, type CurrentUser } from "@/lib/auth/session";
 import type { AppSettings } from "@/lib/config-defaults";
+import { db } from "@/lib/db";
+import { inList, notInList } from "@/lib/sql";
 import { inr, inrCompact } from "@/lib/format";
 import { statusLabel, statusTone, TONE_CLASSES } from "@/lib/status";
 import { diffDays, fmtDate, formatHours, monthKey, monthRange, todayKey } from "@/lib/time";
@@ -50,75 +53,107 @@ export async function Overview({
   const closedTaskKeys = keysInCategories(settings.taskStatuses, TASK_CLOSED_CATEGORIES);
   const visibleTasks = await taskFilter(user);
   // Task titles follow the task visibility rules (FRS §11.4): `projects.view_all` alone does not show other people's tasks.
-  const scope: Filter = caps.restricted || !can(user, "tasks.view_all") ? { $and: [{ project: project._id }, visibleTasks] } : { project: project._id };
+  const scope: Filter = caps.restricted || !can(user, "tasks.view_all") ? and(eq(Task.project, project._id), visibleTasks) : eq(Task.project, project._id);
   const month = monthRange(monthKey());
   const projectId = project._id;
-  const issueScope: Filter = caps.restricted ? { $and: [{ project: projectId }, await issueFilter(user)] } : { project: projectId };
+  const issueScope: Filter = caps.restricted ? and(eq(Issue.project, projectId), await issueFilter(user)) : eq(Issue.project, projectId);
+  const overdueFilter = and(scope, notInList(Task.status, closedTaskKeys), lt(Task.dueDate, today));
+  const minutesSum = sql<number>`coalesce(sum(${TimesheetEntry.minutes}), 0)`.mapWith(Number);
 
-  const [statusRows, overdueTasks, overdueCount, openByPerson, loggedThisMonth, loggedTotal, loggedByTask, issueRows] = await Promise.all([
-    Task.aggregate<{ _id: string; n: number }>([{ $match: { ...scope, parent: null } }, { $group: { _id: "$status", n: { $sum: 1 } } }]),
-    Task.find({ ...scope, status: { $nin: closedTaskKeys }, dueDate: { $lt: today } }, { taskNo: 1, title: 1, status: 1, dueDate: 1 }).sort({ dueDate: 1 }).limit(6).lean(),
-    Task.countDocuments({ ...scope, status: { $nin: closedTaskKeys }, dueDate: { $lt: today } }),
+  const [statusRows, overdueTasks, overdueCount, openTaskRows, loggedThisMonth, loggedTotal, loggedByTaskRows, issueRows] = await Promise.all([
+    db().select({ status: Task.status, n: count() }).from(Task).where(and(scope, isNull(Task.parent))).groupBy(Task.status),
+    db()
+      .select({ _id: Task._id, taskNo: Task.taskNo, title: Task.title, status: Task.status, dueDate: Task.dueDate })
+      .from(Task)
+      .where(overdueFilter)
+      .orderBy(asc(Task.dueDate))
+      .limit(6),
+    db().$count(Task, overdueFilter),
     caps.restricted
       ? []
-      : Task.aggregate<{ _id: ObjectId; open: number; estimate: number }>([
-          { $match: { project: projectId, status: { $nin: closedTaskKeys } } },
-          { $unwind: "$assignees" },
-          { $group: { _id: "$assignees", open: { $sum: 1 }, estimate: { $sum: "$estimateHours" } } },
-        ]),
+      : db()
+          .select({ assignees: Task.assignees, estimateHours: Task.estimateHours })
+          .from(Task)
+          .where(and(eq(Task.project, projectId), notInList(Task.status, closedTaskKeys))),
     caps.restricted
       ? []
-      : TimesheetEntry.aggregate<{ _id: ObjectId; minutes: number }>([
-          { $match: { project: projectId, date: { $gte: month.from, $lte: month.to }, status: { $ne: "rejected" } } },
-          { $group: { _id: "$user", minutes: { $sum: "$minutes" } } },
-        ]),
-    caps.restricted ? [] : TimesheetEntry.aggregate<{ _id: null; minutes: number }>([{ $match: { project: projectId, status: { $ne: "rejected" } } }, { $group: { _id: null, minutes: { $sum: "$minutes" } } }]),
+      : db()
+          .select({ user: TimesheetEntry.user, minutes: minutesSum })
+          .from(TimesheetEntry)
+          .where(and(eq(TimesheetEntry.project, projectId), gte(TimesheetEntry.date, month.from), lte(TimesheetEntry.date, month.to), ne(TimesheetEntry.status, "rejected")))
+          .groupBy(TimesheetEntry.user),
+    caps.restricted ? [] : db().select({ minutes: minutesSum }).from(TimesheetEntry).where(and(eq(TimesheetEntry.project, projectId), ne(TimesheetEntry.status, "rejected"))),
     caps.restricted
       ? []
-      : TimesheetEntry.aggregate<{ _id: ObjectId; minutes: number }>([
-          { $match: { project: projectId, task: { $ne: null }, status: { $ne: "rejected" } } },
-          { $group: { _id: "$task", minutes: { $sum: "$minutes" } } },
-          { $sort: { minutes: -1 } },
-          { $limit: 8 },
-        ]),
-    Issue.aggregate<{ _id: string; n: number }>([{ $match: { ...issueScope, status: { $nin: ISSUE_RESOLVED_STATUSES } } }, { $group: { _id: "$severity", n: { $sum: 1 } } }]),
+      : db()
+          .select({ task: TimesheetEntry.task, minutes: minutesSum })
+          .from(TimesheetEntry)
+          .where(and(eq(TimesheetEntry.project, projectId), isNotNull(TimesheetEntry.task), ne(TimesheetEntry.status, "rejected")))
+          .groupBy(TimesheetEntry.task)
+          .orderBy(desc(minutesSum))
+          .limit(8),
+    db().select({ severity: Issue.severity, n: count() }).from(Issue).where(and(issueScope, notInList(Issue.status, ISSUE_RESOLVED_STATUSES))).groupBy(Issue.severity),
   ]);
+  const loggedByTask = loggedByTaskRows.flatMap((r) => (r.task ? [{ task: r.task, minutes: r.minutes }] : []));
+  // Open tasks and estimated hours per assignee (a task counts once for each of its assignees).
+  const openByPersonMap = new Map<string, { user: string; open: number; estimate: number }>();
+  for (const t of openTaskRows) {
+    for (const a of t.assignees) {
+      const row = openByPersonMap.get(a) ?? { user: a, open: 0, estimate: 0 };
+      row.open += 1;
+      row.estimate += t.estimateHours;
+      openByPersonMap.set(a, row);
+    }
+  }
+  const openByPerson = [...openByPersonMap.values()];
 
-  const perTaskDocs = loggedByTask.length ? await Task.find({ _id: { $in: loggedByTask.map((r) => r._id) } }, { taskNo: 1, title: 1, estimateHours: 1 }).lean() : [];
-  const perTask = new Map(perTaskDocs.map((t) => [t._id.toString(), t]));
+  const perTaskDocs = loggedByTask.length
+    ? await db().select({ _id: Task._id, taskNo: Task.taskNo, title: Task.title, estimateHours: Task.estimateHours }).from(Task).where(inList(Task._id, loggedByTask.map((r) => r.task)))
+    : [];
+  const perTask = new Map(perTaskDocs.map((t) => [t._id, t]));
 
-  const workloadIds = [project.manager, ...project.team.map((m) => m.user), ...openByPerson.map((r) => r._id)];
+  const workloadIds = [project.manager, ...project.team.map((m) => m.user), ...openByPerson.map((r) => r.user)];
   const people = await peopleMap(workloadIds);
-  const openMap = new Map(openByPerson.map((r) => [r._id.toString(), r]));
-  const loggedMap = new Map(loggedThisMonth.map((r) => [r._id.toString(), r.minutes]));
-  const memberIds = [...new Set([...project.team.map((m) => m.user.toString()), ...openByPerson.map((r) => r._id.toString())])];
-  const roleOf = new Map(project.team.map((m) => [m.user.toString(), `${m.role || "Member"} · ${m.allocation}%`]));
+  const openMap = new Map(openByPerson.map((r) => [r.user, r]));
+  const loggedMap = new Map(loggedThisMonth.map((r) => [r.user, r.minutes]));
+  const memberIds = [...new Set([...project.team.map((m) => m.user), ...openByPerson.map((r) => r.user)])];
+  const roleOf = new Map(project.team.map((m) => [m.user, `${m.role || "Member"} · ${m.allocation}%`]));
 
   const totalHours = (loggedTotal[0]?.minutes ?? 0) / 60;
   const estimate = project.estimatedHours;
   const openIssues = issueRows.reduce((s, r) => s + r.n, 0);
-  const criticalIssues = issueRows.find((r) => r._id === "critical")?.n ?? 0;
-  const majorIssues = issueRows.find((r) => r._id === "major")?.n ?? 0;
-  const statusCounts = new Map(statusRows.map((r) => [r._id, r.n]));
+  const criticalIssues = issueRows.find((r) => r.severity === "critical")?.n ?? 0;
+  const majorIssues = issueRows.find((r) => r.severity === "major")?.n ?? 0;
+  const statusCounts = new Map(statusRows.map((r) => [r.status, r.n]));
   const statusTotal = statusRows.reduce((s, r) => s + r.n, 0);
 
   // Billing (restricted to users with `projects.financials`)
   let billing: { invoiced: number; received: number; expenses: number; invoices: Map<string, { number: string; status: string }> } | null = null;
   if (caps.financials) {
-    const invoiceIds = project.milestones.map((m) => m.invoice).filter((x): x is ObjectId => Boolean(x));
+    const invoiceIds = project.milestones.map((m) => m.invoice).filter((x): x is string => Boolean(x));
     const [invoiceTotals, payments, expenseTotals, invoiceDocs] = await Promise.all([
-      Invoice.aggregate<{ _id: null; total: number }>([{ $match: { project: projectId, status: { $nin: ["cancelled", "draft"] } } }, { $group: { _id: null, total: { $sum: "$total" } } }]),
-      Payment.aggregate<{ _id: string; total: number }>([{ $match: { project: projectId } }, { $group: { _id: "$type", total: { $sum: "$amount" } } }]),
-      Expense.aggregate<{ _id: null; total: number }>([{ $match: { project: projectId, status: { $in: ["approved", "paid"] } } }, { $group: { _id: null, total: { $sum: "$amount" } } }]),
-      invoiceIds.length ? Invoice.find({ _id: { $in: invoiceIds } }, { invoiceNo: 1, draftNo: 1, status: 1 }).lean() : [],
+      db()
+        .select({ total: sql<number>`coalesce(sum(${Invoice.total}), 0)`.mapWith(Number) })
+        .from(Invoice)
+        .where(and(eq(Invoice.project, projectId), notInList(Invoice.status, ["cancelled", "draft"]))),
+      db()
+        .select({ type: Payment.type, total: sql<number>`coalesce(sum(${Payment.amount}), 0)`.mapWith(Number) })
+        .from(Payment)
+        .where(eq(Payment.project, projectId))
+        .groupBy(Payment.type),
+      db()
+        .select({ total: sql<number>`coalesce(sum(${Expense.amount}), 0)`.mapWith(Number) })
+        .from(Expense)
+        .where(and(eq(Expense.project, projectId), inList(Expense.status, ["approved", "paid"]))),
+      invoiceIds.length ? db().select({ _id: Invoice._id, invoiceNo: Invoice.invoiceNo, draftNo: Invoice.draftNo, status: Invoice.status }).from(Invoice).where(inList(Invoice._id, invoiceIds)) : [],
     ]);
-    const paid = payments.find((p) => p._id === "payment")?.total ?? 0;
-    const refunded = payments.find((p) => p._id === "refund")?.total ?? 0;
+    const paid = payments.find((p) => p.type === "payment")?.total ?? 0;
+    const refunded = payments.find((p) => p.type === "refund")?.total ?? 0;
     billing = {
       invoiced: invoiceTotals[0]?.total ?? 0,
       received: paid - refunded,
       expenses: expenseTotals[0]?.total ?? 0,
-      invoices: new Map(invoiceDocs.map((i) => [i._id.toString(), { number: i.invoiceNo ?? i.draftNo, status: i.status }])),
+      invoices: new Map(invoiceDocs.map((i) => [i._id, { number: i.invoiceNo ?? i.draftNo, status: i.status }])),
     };
   }
 
@@ -208,7 +243,7 @@ export async function Overview({
                 const overdue = milestoneOverdue(m, today);
                 const display = overdue ? "delayed" : m.status;
                 return (
-                  <li key={m._id.toString()} className="flex flex-col gap-2 pr-3">
+                  <li key={m._id} className="flex flex-col gap-2 pr-3">
                     <div className="flex items-center">
                       <Dot done={m.status === "delivered"} now={i === currentIndex} overdue={overdue} />
                       <span className={cn("ml-1 h-[3px] flex-1 rounded-sm", i === milestones.length - 1 ? "bg-transparent" : m.status === "delivered" ? "bg-chart-3" : "bg-line")} aria-hidden />
@@ -262,7 +297,7 @@ export async function Overview({
               ) : (
                 <ul className="flex flex-col gap-1.5">
                   {overdueTasks.map((t) => (
-                    <li key={t._id.toString()}>
+                    <li key={t._id}>
                       <Link href={`/tasks/${t._id}`} className="flex items-center justify-between gap-3 text-[13px] hover:text-brand-600">
                         <span className="min-w-0 break-words">
                           <span className="mr-1.5 font-mono text-[11px] text-muted">{t.taskNo}</span>
@@ -331,11 +366,11 @@ export async function Overview({
             {loggedByTask.length > 0 && (
               <div className="grid gap-x-8 gap-y-3 border-t border-line-soft pt-4 sm:grid-cols-2">
                 {loggedByTask.map((r) => {
-                  const t = perTask.get(r._id.toString());
+                  const t = perTask.get(r.task);
                   if (!t) return null;
                   const actual = r.minutes / 60;
                   return (
-                    <div key={r._id.toString()} className="flex flex-col gap-1.5">
+                    <div key={r.task} className="flex flex-col gap-1.5">
                       <div className="flex items-center justify-between gap-3 text-[13px]">
                         <Link href={`/tasks/${t._id}`} className="min-w-0 font-medium break-words hover:text-brand-600">
                           <span className="mr-1.5 font-mono text-[11px] text-muted">{t.taskNo}</span>
@@ -379,9 +414,9 @@ export async function Overview({
                 {milestones
                   .filter((m) => m.amount)
                   .map((m) => {
-                    const inv = m.invoice ? billing.invoices.get(m.invoice.toString()) : undefined;
+                    const inv = m.invoice ? billing.invoices.get(m.invoice) : undefined;
                     return (
-                      <li key={m._id.toString()} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-[13px]">
+                      <li key={m._id} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-[13px]">
                         <span>
                           <span className="block font-semibold">{m.title}</span>
                           <span className="block text-xs text-muted">{inv ? inv.number : m.invoiced ? "Invoiced" : "Bill on milestone"}</span>

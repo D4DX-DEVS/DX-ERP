@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Laptop } from "lucide-react";
+import { and, asc, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Asset, Department, Designation, User } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
 import { statusTone } from "@/lib/status";
@@ -26,8 +27,33 @@ export const metadata: Metadata = { title: "My profile" };
 
 export default async function ProfilePage() {
   const user = await requireUser();
-  await connectDB();
-  const me = await User.findById(user._id).select("-salary -salaryHistory -bank -googleSub").lean();
+  // Never the confidential columns (salary, bank) nor the big history columns the page doesn't render.
+  const [me] = await db()
+    .select({
+      _id: User._id,
+      employeeId: User.employeeId,
+      name: User.name,
+      email: User.email,
+      phone: User.phone,
+      personalEmail: User.personalEmail,
+      photo: User.photo,
+      personType: User.personType,
+      department: User.department,
+      designation: User.designation,
+      employmentType: User.employmentType,
+      joiningDate: User.joiningDate,
+      status: User.status,
+      accountActive: User.accountActive,
+      reportingManager: User.reportingManager,
+      team: User.team,
+      address: User.address,
+      emergencyContact: User.emergencyContact,
+      internship: User.internship,
+      lastLoginAt: User.lastLoginAt,
+    })
+    .from(User)
+    .where(eq(User._id, user._id))
+    .limit(1);
   if (!me) notFound();
   const sessions = await loadSessions(user._id, user.sid);
   const sessionsCard = (
@@ -49,7 +75,7 @@ export default async function ProfilePage() {
             <CardHeader title="Account" />
             <CardBody className="flex flex-col gap-4">
               <div className="flex items-center gap-4">
-                <PhotoUpload userId={user.id} name={me.name} photo={me.photo} canEdit size="lg" />
+                <PhotoUpload userId={user.id} name={me.name} photo={me.photo ?? undefined} canEdit size="lg" />
                 <div className="min-w-0">
                   <div className="truncate font-display text-lg font-semibold text-ink">{me.name}</div>
                   <Tag tone="gray">Super Admin</Tag>
@@ -73,12 +99,18 @@ export default async function ProfilePage() {
 
   const settings = await getSettings();
   const today = todayKey();
+  const personRow = (userId: string) =>
+    db().select({ name: User.name, photo: User.photo, employeeId: User.employeeId }).from(User).where(eq(User._id, userId)).limit(1).then((r) => r[0]);
   const [department, designation, manager, mentor, assets, docs] = await Promise.all([
-    me.department ? Department.findById(me.department, { name: 1 }).lean() : null,
-    me.designation ? Designation.findById(me.designation, { name: 1 }).lean() : null,
-    me.reportingManager ? User.findById(me.reportingManager, { name: 1, photo: 1, employeeId: 1 }).lean() : null,
-    me.internship?.mentor ? User.findById(me.internship.mentor, { name: 1, photo: 1, employeeId: 1 }).lean() : null,
-    Asset.find({ assignedTo: me._id, status: "assigned" }, { assetNo: 1, name: 1, condition: 1, history: 1 }).sort({ name: 1 }).lean(),
+    me.department ? db().select({ name: Department.name }).from(Department).where(eq(Department._id, me.department)).limit(1).then((r) => r[0]) : undefined,
+    me.designation ? db().select({ name: Designation.name }).from(Designation).where(eq(Designation._id, me.designation)).limit(1).then((r) => r[0]) : undefined,
+    me.reportingManager ? personRow(me.reportingManager) : undefined,
+    me.internship?.mentor ? personRow(me.internship.mentor) : undefined,
+    db()
+      .select({ _id: Asset._id, assetNo: Asset.assetNo, name: Asset.name, condition: Asset.condition, history: Asset.history })
+      .from(Asset)
+      .where(and(eq(Asset.assignedTo, me._id), eq(Asset.status, "assigned")))
+      .orderBy(asc(Asset.name)),
     loadDocuments({ personId: user.id, personType: me.personType, includeConfidential: true, settings, today }),
   ]);
   const tenure = tenureLabel(me.joiningDate, today);
@@ -90,7 +122,7 @@ export default async function ProfilePage() {
       <PageHeader overline="Account" title="My profile" />
       <Card className="p-5 sm:p-6">
         <div className="flex flex-wrap items-center gap-5">
-          <PhotoUpload userId={user.id} name={me.name} photo={me.photo} canEdit />
+          <PhotoUpload userId={user.id} name={me.name} photo={me.photo ?? undefined} canEdit />
           <div className="flex min-w-0 flex-1 basis-64 flex-col gap-2">
             <div className="flex flex-wrap items-center gap-2.5">
               <h2 className="font-display text-[22px] leading-tight font-semibold text-ink">{me.name}</h2>
@@ -112,8 +144,8 @@ export default async function ProfilePage() {
         <div className="flex min-w-0 flex-col gap-4 lg:col-span-2">
           <ProfileForm
             defaults={{
-              phone: me.phone,
-              personalEmail: me.personalEmail,
+              phone: me.phone ?? undefined,
+              personalEmail: me.personalEmail ?? undefined,
               addrLine1: me.address?.line1,
               addrLine2: me.address?.line2,
               city: me.address?.city,
@@ -169,9 +201,9 @@ export default async function ProfilePage() {
               ) : (
                 <ul className="flex flex-col">
                   {assets.map((a) => {
-                    const issued = [...(a.history ?? [])].reverse().find((h) => h.user?.toString() === user.id);
+                    const issued = [...(a.history ?? [])].reverse().find((h) => h.user === user.id);
                     return (
-                      <li key={a._id.toString()} className="flex items-start gap-3 border-t border-line-soft py-2.5 first:border-t-0 first:pt-0">
+                      <li key={a._id} className="flex items-start gap-3 border-t border-line-soft py-2.5 first:border-t-0 first:pt-0">
                         <Laptop className="mt-0.5 size-[18px] shrink-0 text-muted" aria-hidden />
                         <div className="min-w-0 flex-1">
                           <span className="block truncate text-sm font-semibold text-ink">{a.name}</span>

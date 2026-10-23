@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, ClipboardCheck } from "lucide-react";
+import { and, asc, desc, eq, gte, lt, ne, or, sql } from "drizzle-orm";
 import { isStaff, requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Project, Task, TimesheetEntry } from "@/lib/models";
 import { dateParam, idParam, type SearchParams } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
+import { inList, jsonHas, notInList } from "@/lib/sql";
 import { addDays, eachDay, fmtDate, fmtDateTime, formatDuration, todayKey, weekStart } from "@/lib/time";
 import { keysInCategories, loggableProjectIds, taskFilter, timesheetScope } from "@/lib/work-access";
 import { ButtonLink } from "@/components/ui/button";
@@ -29,7 +31,6 @@ function weekState(statuses: string[]): string | undefined {
 export default async function TimesheetPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
   const sp = await searchParams;
-  await connectDB();
 
   if (!isStaff(user)) {
     const scope = await timesheetScope(user);
@@ -61,53 +62,87 @@ export default async function TimesheetPage({ searchParams }: { searchParams: Pr
   const prefillTaskId = idParam(sp, "task");
 
   const [entries, loggable, previous, reviewScope] = await Promise.all([
-    TimesheetEntry.find({ user: user._id, weekStart: week }).sort({ date: 1, createdAt: 1 }).lean(),
+    db()
+      .select({
+        _id: TimesheetEntry._id,
+        date: TimesheetEntry.date,
+        project: TimesheetEntry.project,
+        task: TimesheetEntry.task,
+        minutes: TimesheetEntry.minutes,
+        description: TimesheetEntry.description,
+        billable: TimesheetEntry.billable,
+        status: TimesheetEntry.status,
+        reviewNote: TimesheetEntry.reviewNote,
+        reviewerName: TimesheetEntry.reviewerName,
+        reviewedAt: TimesheetEntry.reviewedAt,
+        history: TimesheetEntry.history,
+      })
+      .from(TimesheetEntry)
+      .where(and(eq(TimesheetEntry.user, user._id), eq(TimesheetEntry.weekStart, week)))
+      .orderBy(asc(TimesheetEntry.date), asc(TimesheetEntry.createdAt)),
     loggableProjectIds(user),
-    TimesheetEntry.aggregate<{ _id: { week: string; status: string }; minutes: number }>([
-      { $match: { user: user._id, weekStart: { $lt: currentWeek, $gte: addDays(currentWeek, -7 * 6) } } },
-      { $group: { _id: { week: "$weekStart", status: "$status" }, minutes: { $sum: "$minutes" } } },
-    ]),
+    db()
+      .select({ week: TimesheetEntry.weekStart, status: TimesheetEntry.status, minutes: sql<number>`coalesce(sum(${TimesheetEntry.minutes}), 0)`.mapWith(Number) })
+      .from(TimesheetEntry)
+      .where(and(eq(TimesheetEntry.user, user._id), lt(TimesheetEntry.weekStart, currentWeek), gte(TimesheetEntry.weekStart, addDays(currentWeek, -7 * 6))))
+      .groupBy(TimesheetEntry.weekStart, TimesheetEntry.status),
     timesheetScope(user, "view"),
   ]);
 
-  const projectDocs = await Project.find({ _id: { $in: loggable } }, { projectNo: 1, title: 1, status: 1, manager: 1, team: 1 }).sort({ projectNo: -1 }).lean();
-  const taskDocs = await Task.find(
-    { $and: [visibleTasks, { status: { $nin: cancelledTaskKeys } }, { $or: [{ project: { $in: loggable } }, { assignees: user._id }, { sharedWith: user._id }, ...(prefillTaskId ? [{ _id: prefillTaskId }] : [])] }] },
-    { taskNo: 1, title: 1, project: 1, estimateHours: 1 },
-  )
-    .sort({ updatedAt: -1 })
-    .limit(500)
-    .lean();
-
-  const projectLabel = new Map(projectDocs.map((p) => [p._id.toString(), `${p.projectNo} · ${p.title}`]));
-  const taskInfo = new Map(taskDocs.map((t) => [t._id.toString(), t]));
-  // Entries may reference projects / tasks the user can no longer pick (e.g. removed from the team): resolve their labels too.
-  const missingProjects = entries.map((e) => e.project?.toString()).filter((id): id is string => Boolean(id) && !projectLabel.has(id!));
-  const missingTasks = entries.map((e) => e.task?.toString()).filter((id): id is string => Boolean(id) && !taskInfo.has(id!));
-  const [extraProjects, extraTasks] = await Promise.all([
-    missingProjects.length ? Project.find({ _id: { $in: missingProjects } }, { projectNo: 1, title: 1 }).lean() : [],
-    missingTasks.length ? Task.find({ _id: { $in: missingTasks } }, { taskNo: 1, title: 1, project: 1, estimateHours: 1 }).lean() : [],
+  const taskCols = { _id: Task._id, taskNo: Task.taskNo, title: Task.title, project: Task.project, estimateHours: Task.estimateHours };
+  const [projectDocs, taskDocs] = await Promise.all([
+    db()
+      .select({ _id: Project._id, projectNo: Project.projectNo, title: Project.title, status: Project.status })
+      .from(Project)
+      .where(inList(Project._id, loggable))
+      .orderBy(desc(Project.projectNo)),
+    db()
+      .select(taskCols)
+      .from(Task)
+      .where(
+        and(
+          visibleTasks,
+          notInList(Task.status, cancelledTaskKeys),
+          or(inList(Task.project, loggable), jsonHas(Task.assignees, user._id), jsonHas(Task.sharedWith, user._id), prefillTaskId ? eq(Task._id, prefillTaskId) : undefined),
+        ),
+      )
+      .orderBy(desc(Task.updatedAt))
+      .limit(500),
   ]);
-  for (const p of extraProjects) projectLabel.set(p._id.toString(), `${p.projectNo} · ${p.title}`);
-  for (const t of extraTasks) taskInfo.set(t._id.toString(), t);
+
+  const projectLabel = new Map(projectDocs.map((p) => [p._id, `${p.projectNo} · ${p.title}`]));
+  const taskInfo = new Map(taskDocs.map((t) => [t._id, t]));
+  // Entries may reference projects / tasks the user can no longer pick (e.g. removed from the team): resolve their labels too.
+  const missingProjects = entries.map((e) => e.project).filter((id): id is string => Boolean(id) && !projectLabel.has(id!));
+  const missingTasks = entries.map((e) => e.task).filter((id): id is string => Boolean(id) && !taskInfo.has(id!));
+  const [extraProjects, extraTasks] = await Promise.all([
+    missingProjects.length ? db().select({ _id: Project._id, projectNo: Project.projectNo, title: Project.title }).from(Project).where(inList(Project._id, missingProjects)) : [],
+    missingTasks.length ? db().select(taskCols).from(Task).where(inList(Task._id, missingTasks)) : [],
+  ]);
+  for (const p of extraProjects) projectLabel.set(p._id, `${p.projectNo} · ${p.title}`);
+  for (const t of extraTasks) taskInfo.set(t._id, t);
 
   const projectOptions: ProjectOption[] = projectDocs
     .filter((p) => !["cancelled"].includes(settings.projectStatuses.find((s) => s.key === p.status)?.category ?? ""))
-    .map((p) => ({ id: p._id.toString(), label: projectLabel.get(p._id.toString())! }));
-  const taskOptions: TaskOption[] = taskDocs.map((t) => ({ id: t._id.toString(), label: `${t.taskNo} · ${t.title}`, project: t.project?.toString() ?? "" }));
+    .map((p) => ({ id: p._id, label: projectLabel.get(p._id)! }));
+  const taskOptions: TaskOption[] = taskDocs.map((t) => ({ id: t._id, label: `${t.taskNo} · ${t.title}`, project: t.project ?? "" }));
 
   // Time logged against the week's tasks, over all weeks, for the estimated-vs-actual card.
-  const weekTaskIds = [...new Set(entries.map((e) => e.task).filter(Boolean))];
+  const weekTaskIds = [...new Set(entries.map((e) => e.task).filter((t): t is string => Boolean(t)))];
   const taskTotals = weekTaskIds.length
-    ? await TimesheetEntry.aggregate<{ _id: unknown; minutes: number }>([{ $match: { task: { $in: weekTaskIds }, status: { $ne: "rejected" } } }, { $group: { _id: "$task", minutes: { $sum: "$minutes" } } }])
+    ? await db()
+        .select({ task: TimesheetEntry.task, minutes: sql<number>`coalesce(sum(${TimesheetEntry.minutes}), 0)`.mapWith(Number) })
+        .from(TimesheetEntry)
+        .where(and(inList(TimesheetEntry.task, weekTaskIds), ne(TimesheetEntry.status, "rejected")))
+        .groupBy(TimesheetEntry.task)
     : [];
 
   const prefillTask = prefillTaskId ? taskInfo.get(prefillTaskId) : undefined;
   const defaultDate = week === currentWeek ? today : maxDate;
   const blank: EntryInitial = {
     date: defaultDate,
-    project: prefillTask?.project?.toString() ?? "",
-    task: prefillTask?._id.toString() ?? "",
+    project: prefillTask?.project ?? "",
+    task: prefillTask?._id ?? "",
     duration: "",
     description: "",
     billable: Boolean(prefillTask?.project),
@@ -122,19 +157,19 @@ export default async function TimesheetPage({ searchParams }: { searchParams: Pr
 
   const prevWeeks = new Map<string, { minutes: number; statuses: string[] }>();
   for (const r of previous) {
-    const cur = prevWeeks.get(r._id.week) ?? { minutes: 0, statuses: [] };
+    const cur = prevWeeks.get(r.week) ?? { minutes: 0, statuses: [] };
     cur.minutes += r.minutes;
-    cur.statuses.push(r._id.status);
-    prevWeeks.set(r._id.week, cur);
+    cur.statuses.push(r.status);
+    prevWeeks.set(r.week, cur);
   }
   const prevList = [...prevWeeks.entries()].sort((a, b) => b[0].localeCompare(a[0]));
 
   const formProps = { projects: projectOptions, tasks: taskOptions, minDate: week, maxDate };
   const entryInitial = (e: (typeof entries)[number]): EntryInitial => ({
-    id: e._id.toString(),
+    id: e._id,
     date: e.date,
-    project: e.project?.toString() ?? "",
-    task: e.task?.toString() ?? "",
+    project: e.project ?? "",
+    task: e.task ?? "",
     duration: durationInput(e.minutes),
     description: e.description,
     billable: e.billable,
@@ -203,23 +238,23 @@ export default async function TimesheetPage({ searchParams }: { searchParams: Pr
               ) : (
                 <ul className="divide-y divide-line-soft border-t border-line-soft">
                   {list.map((e) => {
-                    const task = e.task ? taskInfo.get(e.task.toString()) : undefined;
+                    const task = e.task ? taskInfo.get(e.task) : undefined;
                     const locked = e.status === "submitted" || e.status === "approved";
                     return (
-                      <li key={e._id.toString()} className="flex flex-col gap-2 px-5 py-3">
+                      <li key={e._id} className="flex flex-col gap-2 px-5 py-3">
                         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
                           <div className="min-w-0 flex-1">
                             <div className="truncate text-[13px] font-semibold">
                               {task ? `${task.taskNo} · ${task.title}` : e.project ? "General work" : "Internal"}
                             </div>
-                            <div className="truncate text-xs text-muted">{e.project ? projectLabel.get(e.project.toString()) : "No project"}</div>
+                            <div className="truncate text-xs text-muted">{e.project ? projectLabel.get(e.project) : "No project"}</div>
                             <p className="mt-1 text-sm text-ink-2">{e.description}</p>
                           </div>
                           <div className="flex items-center gap-2">
                             <Tag tone={e.billable ? "green" : "gray"}>{e.billable ? "Billable" : "Non-billable"}</Tag>
                             <StatusChip domain="timesheet" value={e.status} size="sm" />
                             <span className="w-16 text-right text-sm font-semibold tabular">{formatDuration(e.minutes)}</span>
-                            {!locked && <EntryActions entryId={e._id.toString()} initial={entryInitial(e)} {...formProps} />}
+                            {!locked && <EntryActions entryId={e._id} initial={entryInitial(e)} {...formProps} />}
                           </div>
                         </div>
                         {e.status === "rejected" && e.reviewNote && (
@@ -257,11 +292,11 @@ export default async function TimesheetPage({ searchParams }: { searchParams: Pr
           <CardBody className="flex flex-col gap-4">
             {taskTotals.length === 0 && <p className="text-[13px] text-muted">Log time against tasks to compare with their estimates.</p>}
             {taskTotals.map((r) => {
-              const t = taskInfo.get(String(r._id));
+              const t = r.task ? taskInfo.get(r.task) : undefined;
               if (!t) return null;
               const actual = r.minutes / 60;
               return (
-                <div key={String(r._id)} className="flex flex-col gap-1.5">
+                <div key={r.task} className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between gap-3 text-[13px]">
                     <Link href={`/tasks/${t._id}`} className="min-w-0 truncate font-semibold hover:text-brand-600">
                       {t.taskNo} · {t.title}

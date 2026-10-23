@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { and, eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Issue, Project, Task } from "@/lib/models";
 import { peopleOptions } from "@/lib/people";
 import { param, type SearchParams } from "@/lib/query";
@@ -38,15 +39,25 @@ export default async function IssuePage({ params, searchParams }: { params: Prom
   if (!isObjectId(id)) notFound();
   const sp = await searchParams;
   const user = await requireUser();
-  await connectDB();
-  const issue = await Issue.findOne({ $and: [{ _id: id }, await issueFilter(user)] }).lean();
+  const [issue] = await db().select().from(Issue).where(and(eq(Issue._id, id), await issueFilter(user))).limit(1);
   if (!issue) notFound();
 
-  const project = await Project.findById(issue.project, { projectNo: 1, title: 1, manager: 1, team: 1 }).lean();
+  const [project] = await db()
+    .select({ _id: Project._id, projectNo: Project.projectNo, title: Project.title, manager: Project.manager, team: Project.team })
+    .from(Project)
+    .where(eq(Project._id, issue.project))
+    .limit(1);
   const caps = issueCaps(user, issue, project?.manager);
   const canOpenProject = project ? projectCaps(user, project).view : false;
   const [task, people, options] = await Promise.all([
-    issue.task ? Task.findOne({ $and: [{ _id: issue.task }, await taskFilter(user)] }, { taskNo: 1, title: 1 }).lean() : null,
+    issue.task
+      ? db()
+          .select({ _id: Task._id, taskNo: Task.taskNo })
+          .from(Task)
+          .where(and(eq(Task._id, issue.task), await taskFilter(user)))
+          .limit(1)
+          .then((r) => r[0])
+      : undefined,
     peopleMap([issue.reporter, issue.assignee, issue.verifiedBy]),
     caps.manage ? peopleOptions() : [],
   ]);
@@ -56,7 +67,7 @@ export default async function IssuePage({ params, searchParams }: { params: Prom
   const working = ["open", "assigned", "in_progress", "reopened"].includes(issue.status);
   const late = Boolean(issue.targetDate && issue.targetDate < today && working);
   const tabHref = (t: string) => `/qa/${id}${t === "comments" ? "" : `?tab=${t}`}`;
-  const person = (pid?: { toString(): string } | null) => (pid ? (people.get(pid.toString())?.name ?? "Unknown") : undefined);
+  const person = (pid?: string | null) => (pid ? (people.get(pid)?.name ?? "Unknown") : undefined);
 
   return (
     <PageBody>
@@ -101,7 +112,7 @@ export default async function IssuePage({ params, searchParams }: { params: Prom
               )}
               <section aria-label="Attachments" className="flex flex-col gap-2">
                 <h2 className="font-sans text-[13px] font-semibold">Screenshots and files</h2>
-                <AttachmentList files={issue.attachments.map((a) => ({ file: a.file.toString(), name: a.name, size: a.size }))} empty="No files attached" />
+                <AttachmentList files={issue.attachments.map((a) => ({ file: a.file, name: a.name, size: a.size }))} empty="No files attached" />
                 {(caps.manage || caps.isReporter || caps.isAssignee) && <AttachFiles issueId={id} />}
               </section>
             </CardBody>
@@ -178,7 +189,7 @@ export default async function IssuePage({ params, searchParams }: { params: Prom
                     <TriageDialog
                       issueId={id}
                       people={options}
-                      initial={{ severity: issue.severity, priority: issue.priority, targetDate: issue.targetDate ?? "", assignee: issue.assignee?.toString() ?? "" }}
+                      initial={{ severity: issue.severity, priority: issue.priority, targetDate: issue.targetDate ?? "", assignee: issue.assignee ?? "" }}
                     />
                   )}
                 </div>

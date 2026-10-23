@@ -1,122 +1,171 @@
 import "server-only";
-import { connectDB } from "@/lib/db";
+import { and, eq, gt, gte, isNull, lt, lte } from "drizzle-orm";
+import { db } from "@/lib/db";
 import { Client, Expense, Invoice, PayrollRun, User } from "@/lib/models";
-import { notify, usersWithPermission } from "@/lib/notify";
+import { usersWithPermission } from "@/lib/notify";
 import { inr } from "@/lib/format";
+import { inList } from "@/lib/sql";
 import { addDays, diffDays, fmtDate, todayKey } from "@/lib/time";
 import { KIND_LABEL, periodLabel } from "@/lib/payroll/constants";
+import { notifyBatch } from "./batch";
 import type { Job } from "./registry";
 
 const DAY_MS = 86_400_000;
 
+interface ClientInfo {
+  name: string;
+  owner?: string;
+  confidential: boolean;
+}
+
 /** Client names and owners; an owner is only kept when they may open invoices (otherwise the link would be a 403). */
-async function clientNameAndOwner(clientIds: string[]): Promise<Map<string, { name: string; owner?: string; confidential: boolean }>> {
-  const [rows, viewers] = await Promise.all([Client.find({ _id: { $in: clientIds } }, { name: 1, owner: 1, confidential: 1 }).lean(), usersWithPermission("invoices.view")]);
+async function clientNameAndOwner(clientIds: string[]): Promise<Map<string, ClientInfo>> {
+  const [rows, viewers] = await Promise.all([
+    db()
+      .select({ id: Client._id, name: Client.name, owner: Client.owner, confidential: Client.confidential })
+      .from(Client)
+      .where(inList(Client._id, [...new Set(clientIds)])),
+    usersWithPermission("invoices.view"),
+  ]);
   const allowed = new Set(viewers);
-  return new Map(rows.map((c) => [c._id.toString(), { name: c.name, owner: c.owner && allowed.has(c.owner.toString()) ? c.owner.toString() : undefined, confidential: Boolean(c.confidential) }]));
+  return new Map(rows.map((c) => [c.id, { name: c.name, owner: c.owner && allowed.has(c.owner) ? c.owner : undefined, confidential: c.confidential }]));
 }
 
 /** Invoice reminders for a restricted client (FRS §3.2) go only to managers who may see it, plus its owner. */
-async function invoiceRecipients(managers: string[], client?: { owner?: string; confidential: boolean }): Promise<(string | undefined)[]> {
-  if (!client?.confidential) return [...managers, client?.owner];
-  const privileged = new Set(await usersWithPermission("crm.confidential"));
-  return [...managers.filter((m) => privileged.has(m)), client.owner];
+async function invoiceRecipients(managers: string[], clients: Map<string, ClientInfo>): Promise<(client?: ClientInfo) => (string | undefined)[]> {
+  const privileged = new Set([...clients.values()].some((c) => c.confidential) ? await usersWithPermission("crm.confidential") : []);
+  return (client) => (client?.confidential ? [...managers.filter((m) => privileged.has(m)), client.owner] : [...managers, client?.owner]);
 }
 
 /** Issued / partially paid invoices past their due date become "overdue"; finance and the client owner hear once. */
 async function flagOverdueInvoices(): Promise<string> {
-  await connectDB();
   const today = todayKey();
-  const late = await Invoice.find({ status: { $in: ["issued", "partially_paid"] }, dueDate: { $lt: today }, balance: { $gt: 0 } }, { invoiceNo: 1, draftNo: 1, client: 1, balance: 1, dueDate: 1, overdueNotifiedAt: 1 }).lean();
+  const late = await db()
+    .select({ id: Invoice._id, invoiceNo: Invoice.invoiceNo, draftNo: Invoice.draftNo, client: Invoice.client, balance: Invoice.balance, dueDate: Invoice.dueDate, overdueNotifiedAt: Invoice.overdueNotifiedAt })
+    .from(Invoice)
+    .where(and(inList(Invoice.status, ["issued", "partially_paid"]), lt(Invoice.dueDate, today), gt(Invoice.balance, 0)));
   if (late.length === 0) return "no overdue invoices";
-  await Invoice.updateMany({ _id: { $in: late.map((i) => i._id) }, status: { $in: ["issued", "partially_paid"] } }, { $set: { status: "overdue" } });
+  await db()
+    .update(Invoice)
+    .set({ status: "overdue" })
+    .where(and(inList(Invoice._id, late.map((i) => i.id)), inList(Invoice.status, ["issued", "partially_paid"])));
 
   const toNotify = late.filter((i) => !i.overdueNotifiedAt);
   if (toNotify.length === 0) return `${late.length} overdue, none new`;
-  const [managers, clients] = await Promise.all([usersWithPermission("invoices.manage"), clientNameAndOwner(toNotify.map((i) => i.client.toString()))]);
-  for (const inv of toNotify) {
-    const client = clients.get(inv.client.toString());
-    const no = inv.invoiceNo ?? inv.draftNo;
-    await notify(await invoiceRecipients(managers, client), {
-      type: "invoice",
-      title: `Invoice ${no} is overdue`,
-      body: `${client?.name ?? "Client"} · ${inr(inv.balance, true)} was due on ${fmtDate(inv.dueDate)} (${diffDays(inv.dueDate, today)} days ago)`,
-      link: `/invoices/${inv._id}`,
-      priority: "high",
-      dedupeKey: `invoice-overdue:${inv._id}`,
-    });
-    await Invoice.updateOne({ _id: inv._id, overdueNotifiedAt: null }, { $set: { overdueNotifiedAt: new Date() } });
-  }
+  const [managers, clients] = await Promise.all([usersWithPermission("invoices.manage"), clientNameAndOwner(toNotify.map((i) => i.client))]);
+  const recipientsOf = await invoiceRecipients(managers, clients);
+  await notifyBatch(
+    toNotify.map((inv) => {
+      const client = clients.get(inv.client);
+      const no = inv.invoiceNo ?? inv.draftNo;
+      return {
+        recipients: recipientsOf(client),
+        input: {
+          type: "invoice",
+          title: `Invoice ${no} is overdue`,
+          body: `${client?.name ?? "Client"} · ${inr(inv.balance, true)} was due on ${fmtDate(inv.dueDate)} (${diffDays(inv.dueDate, today)} days ago)`,
+          link: `/invoices/${inv.id}`,
+          priority: "high" as const,
+          dedupeKey: `invoice-overdue:${inv.id}`,
+        },
+      };
+    }),
+  );
+  await db()
+    .update(Invoice)
+    .set({ overdueNotifiedAt: new Date() })
+    .where(and(inList(Invoice._id, toNotify.map((i) => i.id)), isNull(Invoice.overdueNotifiedAt)));
   return `${late.length} overdue, ${toNotify.length} notified`;
 }
 
 /** Invoices falling due within three days get one reminder. */
 async function remindInvoicesDueSoon(): Promise<string> {
-  await connectDB();
   const today = todayKey();
-  const soon = await Invoice.find(
-    { status: { $in: ["issued", "partially_paid"] }, balance: { $gt: 0 }, dueDate: { $gte: today, $lte: addDays(today, 3) }, dueReminderSentAt: null },
-    { invoiceNo: 1, draftNo: 1, client: 1, balance: 1, dueDate: 1 },
-  ).lean();
+  const soon = await db()
+    .select({ id: Invoice._id, invoiceNo: Invoice.invoiceNo, draftNo: Invoice.draftNo, client: Invoice.client, balance: Invoice.balance, dueDate: Invoice.dueDate })
+    .from(Invoice)
+    .where(and(inList(Invoice.status, ["issued", "partially_paid"]), gt(Invoice.balance, 0), gte(Invoice.dueDate, today), lte(Invoice.dueDate, addDays(today, 3)), isNull(Invoice.dueReminderSentAt)));
   if (soon.length === 0) return "none due soon";
-  const [managers, clients] = await Promise.all([usersWithPermission("invoices.manage"), clientNameAndOwner(soon.map((i) => i.client.toString()))]);
-  for (const inv of soon) {
-    const client = clients.get(inv.client.toString());
-    const days = diffDays(today, inv.dueDate);
-    await notify(await invoiceRecipients(managers, client), {
-      type: "invoice",
-      title: `Invoice ${inv.invoiceNo ?? inv.draftNo} is due ${days === 0 ? "today" : `in ${days} ${days === 1 ? "day" : "days"}`}`,
-      body: `${client?.name ?? "Client"} · balance ${inr(inv.balance, true)} · due ${fmtDate(inv.dueDate)}`,
-      link: `/invoices/${inv._id}`,
-      dedupeKey: `invoice-due:${inv._id}`,
-    });
-    await Invoice.updateOne({ _id: inv._id, dueReminderSentAt: null }, { $set: { dueReminderSentAt: new Date() } });
-  }
+  const [managers, clients] = await Promise.all([usersWithPermission("invoices.manage"), clientNameAndOwner(soon.map((i) => i.client))]);
+  const recipientsOf = await invoiceRecipients(managers, clients);
+  await notifyBatch(
+    soon.map((inv) => {
+      const client = clients.get(inv.client);
+      const days = diffDays(today, inv.dueDate);
+      return {
+        recipients: recipientsOf(client),
+        input: {
+          type: "invoice",
+          title: `Invoice ${inv.invoiceNo ?? inv.draftNo} is due ${days === 0 ? "today" : `in ${days} ${days === 1 ? "day" : "days"}`}`,
+          body: `${client?.name ?? "Client"} · balance ${inr(inv.balance, true)} · due ${fmtDate(inv.dueDate)}`,
+          link: `/invoices/${inv.id}`,
+          dedupeKey: `invoice-due:${inv.id}`,
+        },
+      };
+    }),
+  );
+  await db()
+    .update(Invoice)
+    .set({ dueReminderSentAt: new Date() })
+    .where(and(inList(Invoice._id, soon.map((i) => i.id)), isNull(Invoice.dueReminderSentAt)));
   return `${soon.length} reminders`;
 }
 
 /** Expenses that have waited more than two days for a decision are pushed to the approvers (once per expense). */
 async function remindStaleExpenses(): Promise<string> {
-  await connectDB();
-  const stale = await Expense.find({ status: "submitted", submittedAt: { $lt: new Date(Date.now() - 2 * DAY_MS) } }, { expenseNo: 1, user: 1, amount: 1, category: 1 }).lean();
+  const stale = await db()
+    .select({ id: Expense._id, expenseNo: Expense.expenseNo, user: Expense.user, amount: Expense.amount, category: Expense.category })
+    .from(Expense)
+    .where(and(eq(Expense.status, "submitted"), lt(Expense.submittedAt, new Date(Date.now() - 2 * DAY_MS))));
   if (stale.length === 0) return "no stale expenses";
-  const [approvers, people] = await Promise.all([usersWithPermission("expenses.approve"), User.find({ _id: { $in: stale.map((e) => e.user) } }, { name: 1 }).lean()]);
-  const names = new Map(people.map((p) => [p._id.toString(), p.name]));
-  for (const e of stale) {
-    await notify(
-      approvers,
-      {
+  const [approvers, people] = await Promise.all([
+    usersWithPermission("expenses.approve"),
+    db()
+      .select({ id: User._id, name: User.name })
+      .from(User)
+      .where(inList(User._id, [...new Set(stale.map((e) => e.user))])),
+  ]);
+  const names = new Map(people.map((p) => [p.id, p.name]));
+  await notifyBatch(
+    stale.map((e) => ({
+      recipients: approvers,
+      exclude: [e.user],
+      input: {
         type: "expense",
         title: `Expense ${e.expenseNo} has been waiting for approval`,
-        body: `${names.get(e.user.toString()) ?? "Someone"} · ${inr(e.amount, true)} · ${e.category}`,
-        link: `/expenses/${e._id}`,
+        body: `${names.get(e.user) ?? "Someone"} · ${inr(e.amount, true)} · ${e.category}`,
+        link: `/expenses/${e.id}`,
         actionable: true,
-        dedupeKey: `expense-stale:${e._id}`,
+        dedupeKey: `expense-stale:${e.id}`,
       },
-      [e.user],
-    );
-  }
+    })),
+  );
   return `${stale.length} expenses`;
 }
 
 /** A run verified more than a day ago and still not approved is flagged to approvers, at most once a day. */
 async function remindStalePayroll(): Promise<string> {
-  await connectDB();
   const today = todayKey();
-  const stale = await PayrollRun.find({ status: "verified", verifiedAt: { $lt: new Date(Date.now() - DAY_MS) } }, { runNo: 1, kind: 1, period: 1, totals: 1 }).lean();
+  const stale = await db()
+    .select({ id: PayrollRun._id, runNo: PayrollRun.runNo, kind: PayrollRun.kind, period: PayrollRun.period, totals: PayrollRun.totals })
+    .from(PayrollRun)
+    .where(and(eq(PayrollRun.status, "verified"), lt(PayrollRun.verifiedAt, new Date(Date.now() - DAY_MS))));
   if (stale.length === 0) return "no runs waiting";
   const approvers = await usersWithPermission("payroll.approve");
-  for (const run of stale) {
-    await notify(approvers, {
-      type: "payroll",
-      title: `${KIND_LABEL[run.kind]} run for ${periodLabel(run.period)} is still waiting for approval`,
-      body: `${run.runNo} · ${run.totals.count} payslips · net ${inr(run.totals.net)}`,
-      link: `/payroll/${run._id}`,
-      actionable: true,
-      priority: "high",
-      dedupeKey: `payroll-approval:${run._id}:${today}`,
-    });
-  }
+  await notifyBatch(
+    stale.map((run) => ({
+      recipients: approvers,
+      input: {
+        type: "payroll",
+        title: `${KIND_LABEL[run.kind]} run for ${periodLabel(run.period)} is still waiting for approval`,
+        body: `${run.runNo} · ${run.totals.count} payslips · net ${inr(run.totals.net)}`,
+        link: `/payroll/${run.id}`,
+        actionable: true,
+        priority: "high" as const,
+        dedupeKey: `payroll-approval:${run.id}:${today}`,
+      },
+    })),
+  );
   return `${stale.length} runs`;
 }
 

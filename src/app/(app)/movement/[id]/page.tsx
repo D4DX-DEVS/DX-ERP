@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { forbidden, notFound } from "next/navigation";
+import { eq } from "drizzle-orm";
 import { can, requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Client, Movement, Project, User } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
 import { canApproveMovement, canViewMovement, displayStatus, managesUser, personalDetailsVisible, withinSelfCancelWindow } from "@/lib/movement/access";
@@ -30,26 +31,31 @@ export default async function MovementDetailPage({ params }: { params: Promise<{
   const { id } = await params;
   if (!isObjectId(id)) notFound();
   const user = await requireUser();
-  await connectDB();
-  const m = await Movement.findById(id).lean();
+  const [m] = await db().select().from(Movement).where(eq(Movement._id, id)).limit(1);
   if (!m) notFound();
   if (!(await canViewMovement(user, m))) forbidden();
 
   const settings = await getSettings();
   const today = todayKey();
-  const own = m.user.toString() === user.id;
+  const own = m.user === user.id;
   const isManager = own ? false : await managesUser(user.id, m.user);
   const showDetails = personalDetailsVisible(user, m, isManager);
   const canApprove = await canApproveMovement(user, m);
   const canManage = can(user, "movement.manage");
   const status = displayStatus(m, settings, today);
 
-  const [person, project, client] = await Promise.all([
-    User.findById(m.user, { name: 1, employeeId: 1, photo: 1 }).lean(),
-    m.project ? Project.findById(m.project, { projectNo: 1, title: 1 }).lean() : null,
-    m.client ? Client.findById(m.client, { clientNo: 1, name: 1, confidential: 1, owner: 1 }).lean() : null,
+  const [[person], [project], [client]] = await Promise.all([
+    db().select({ _id: User._id, name: User.name, employeeId: User.employeeId, photo: User.photo }).from(User).where(eq(User._id, m.user)).limit(1),
+    m.project ? db().select({ _id: Project._id, projectNo: Project.projectNo, title: Project.title }).from(Project).where(eq(Project._id, m.project)).limit(1) : [],
+    m.client
+      ? db()
+          .select({ clientNo: Client.clientNo, name: Client.name, confidential: Client.confidential, owner: Client.owner })
+          .from(Client)
+          .where(eq(Client._id, m.client))
+          .limit(1)
+      : [],
   ]);
-  const clientVisible = client && (!client.confidential || can(user, "crm.confidential") || client.owner?.toString() === user.id);
+  const clientVisible = client && (!client.confidential || can(user, "crm.confidential") || client.owner === user.id);
   const pendingCorrection = m.corrections.find((c) => c.status === "pending");
   const late = m.inTime && m.expectedReturn && m.inTime.getTime() > m.expectedReturn.getTime() ? minutesBetween(m.expectedReturn, m.inTime) : 0;
 
@@ -114,7 +120,7 @@ export default async function MovementDetailPage({ params }: { params: Promise<{
             <CardBody>
               <DetailList
                 items={[
-                  { label: "Person", value: person ? <PersonCell name={person.name} sub={person.employeeId} photo={person.photo} href={can(user, "staff.view") ? `/staff/${person._id}` : undefined} /> : "—" },
+                  { label: "Person", value: person ? <PersonCell name={person.name} sub={person.employeeId} photo={person.photo ?? undefined} href={can(user, "staff.view") ? `/staff/${person._id}` : undefined} /> : "—" },
                   { label: "Category", value: <span className="flex items-center gap-2">{m.categoryLabel} <Tag tone={m.official ? "blue" : "orange"}>{m.official ? "Official" : "Personal"}</Tag></span> },
                   { label: "Out-Time", value: fmtDateTime(m.outTime) },
                   { label: "Expected return", value: fmtDateTime(m.expectedReturn) },
@@ -140,7 +146,7 @@ export default async function MovementDetailPage({ params }: { params: Promise<{
                     value:
                       m.entryMode === "alternative"
                         ? `Late entry by ${m.enteredByName ?? "—"}${m.alternativeReason && showDetails ? ` — ${m.alternativeReason}` : ""}`
-                        : m.enteredBy && m.enteredBy.toString() !== m.user.toString()
+                        : m.enteredBy && m.enteredBy !== m.user
                           ? `Recorded on behalf by ${m.enteredByName}`
                           : "Recorded live",
                     full: true,
@@ -159,7 +165,7 @@ export default async function MovementDetailPage({ params }: { params: Promise<{
                 .slice()
                 .reverse()
                 .map((c) => (
-                  <div key={c._id?.toString()} className="rounded-xl border border-line p-3.5">
+                  <div key={c._id} className="rounded-xl border border-line p-3.5">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="text-[13px]">
                         <div className="font-semibold text-ink">
@@ -183,7 +189,7 @@ export default async function MovementDetailPage({ params }: { params: Promise<{
                     </div>
                     {c.status === "pending" && canApprove && (
                       <div className="mt-3 flex justify-end">
-                        <CorrectionDecision id={id} correctionId={c._id!.toString()} />
+                        <CorrectionDecision id={id} correctionId={c._id!} />
                       </div>
                     )}
                   </div>

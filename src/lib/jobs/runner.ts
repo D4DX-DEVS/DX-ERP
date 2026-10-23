@@ -6,9 +6,9 @@ import { JOBS } from "./registry";
 
 /**
  * Scheduled automation (reminders, overdue flags, retention, backups — FRS §1.1 item 8, §18).
- * Triggered by the cron endpoint (/api/cron) and opportunistically from page loads, so it
- * works even where no external scheduler is configured. Each job is throttled by its interval
- * and guarded by a short DB lock so concurrent instances never run the same job twice.
+ * Triggered by the cron endpoint (/api/cron), which a Cloudflare Cron Trigger calls every 15 minutes
+ * (cloudflare/worker.ts). Each job is throttled by its interval and guarded by a short DB lock so
+ * concurrent instances never run the same job twice.
  */
 async function acquire(name: string, intervalMinutes: number, force: boolean): Promise<boolean> {
   const now = new Date();
@@ -33,10 +33,29 @@ async function release(name: string, result: string): Promise<void> {
     .where(eq(SystemJob._id, name));
 }
 
-export async function runJobs(opts: { force?: boolean; only?: string[] } = {}): Promise<Record<string, string>> {
+export interface JobRunResult {
+  results: Record<string, string>;
+  /** Due jobs left for a later call because this call reached `maxJobs`. */
+  pending: number;
+}
+
+/**
+ * Runs the due jobs (all of them with `force`), at most `maxJobs` per call. On the Workers Free plan a request
+ * may make 50 D1 queries, so the cron trigger runs a few jobs per request and calls again while `pending > 0`
+ * (see cloudflare/worker.ts). Job state is read in one query; each job then costs a lock + release query plus its own work.
+ */
+export async function runJobs(opts: { force?: boolean; only?: string[]; maxJobs?: number } = {}): Promise<JobRunResult> {
   const results: Record<string, string> = {};
-  for (const job of JOBS) {
-    if (opts.only && !opts.only.includes(job.name)) continue;
+  const now = Date.now();
+  const state = new Map((await db().select().from(SystemJob)).map((j) => [j._id, j]));
+  const due = JOBS.filter((job) => {
+    if (opts.only && !opts.only.includes(job.name)) return false;
+    const s = state.get(job.name);
+    if (s?.lockedUntil && s.lockedUntil.getTime() > now) return false;
+    return opts.force || !s?.lastRunAt || s.lastRunAt.getTime() < now - job.intervalMinutes * 60_000;
+  });
+  const batch = due.slice(0, opts.maxJobs ?? due.length);
+  for (const job of batch) {
     if (!(await acquire(job.name, job.intervalMinutes, Boolean(opts.force)))) {
       results[job.name] = "skipped";
       continue;
@@ -51,18 +70,5 @@ export async function runJobs(opts: { force?: boolean; only?: string[] } = {}): 
       await release(job.name, results[job.name]);
     }
   }
-  return results;
-}
-
-let lastOpportunistic = 0;
-
-/** Cheap check called after page renders; runs due jobs at most once a minute per instance. */
-export async function maybeRunJobs(): Promise<void> {
-  if (Date.now() - lastOpportunistic < 60_000) return;
-  lastOpportunistic = Date.now();
-  try {
-    await runJobs();
-  } catch (error) {
-    console.error("[jobs] opportunistic run failed", error);
-  }
+  return { results, pending: due.length - batch.length };
 }

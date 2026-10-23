@@ -1,11 +1,13 @@
 import Link from "next/link";
+import { and, desc, eq, gte, lte, ne } from "drizzle-orm";
 import { Card } from "@/components/ui/card";
 import { Chip } from "@/components/ui/chip";
 import { Progress } from "@/components/ui/page";
 import type { Tone } from "@/lib/config-defaults";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Attendance, Holiday, LeaveRequest, Movement } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
+import { inList } from "@/lib/sql";
 import { addDays, fmtDate, fmtTime, formatDuration, hmToMinutes, minutesBetween, todayKey, weekStart, weekday } from "@/lib/time";
 import { LiveDuration } from "./_components/live-duration";
 import { TodayActions, type TodayState } from "./_components/today-actions";
@@ -22,7 +24,6 @@ function minutesToHm(total: number): string {
  * daily target, the check-in / break / check-out buttons, and a compact "This week" bar list.
  */
 export async function TodayAttendanceCard({ userId }: { userId: string }) {
-  await connectDB();
   const settings = await getSettings();
   const a = settings.attendance;
   const now = currentTime();
@@ -30,16 +31,59 @@ export async function TodayAttendanceCard({ userId }: { userId: string }) {
   const from = weekStart(today);
   const to = addDays(from, 6);
 
-  const [att, openMovement, leave, holiday, weekAtt, weekMoves] = await Promise.all([
-    Attendance.findOne({ user: userId, date: today }).lean(),
-    Movement.findOne({ user: userId, status: "out" }, { categoryLabel: 1, official: 1, outTime: 1 }).sort({ outTime: -1 }).lean(),
-    LeaveRequest.findOne({ user: userId, status: "approved", startDate: { $lte: today }, endDate: { $gte: today } }, { halfDay: 1 }).lean(),
-    Holiday.exists({ date: today, optional: false }),
-    Attendance.find({ user: userId, date: { $gte: from, $lte: to } }).lean(),
-    Movement.find(
-      { user: userId, date: { $gte: from, $lte: to }, status: { $in: ["out", "returned"] }, approvalStatus: { $ne: "rejected" } },
-      { date: 1, status: 1, official: 1, durationMinutes: 1, outTime: 1 },
-    ).lean(),
+  const [[att], [openMovement], [leave], [holiday], weekAtt, weekMoves] = await Promise.all([
+    db()
+      .select({
+        checkIn: Attendance.checkIn,
+        checkOut: Attendance.checkOut,
+        breaks: Attendance.breaks,
+        workMinutes: Attendance.workMinutes,
+        status: Attendance.status,
+        late: Attendance.late,
+        lateMinutes: Attendance.lateMinutes,
+        earlyDeparture: Attendance.earlyDeparture,
+      })
+      .from(Attendance)
+      .where(and(eq(Attendance.user, userId), eq(Attendance.date, today)))
+      .limit(1),
+    db()
+      .select({ _id: Movement._id, categoryLabel: Movement.categoryLabel, official: Movement.official, outTime: Movement.outTime })
+      .from(Movement)
+      .where(and(eq(Movement.user, userId), eq(Movement.status, "out")))
+      .orderBy(desc(Movement.outTime))
+      .limit(1),
+    db()
+      .select({ halfDay: LeaveRequest.halfDay })
+      .from(LeaveRequest)
+      .where(and(eq(LeaveRequest.user, userId), eq(LeaveRequest.status, "approved"), lte(LeaveRequest.startDate, today), gte(LeaveRequest.endDate, today)))
+      .limit(1),
+    db()
+      .select({ id: Holiday._id })
+      .from(Holiday)
+      .where(and(eq(Holiday.date, today), eq(Holiday.optional, false)))
+      .limit(1),
+    db()
+      .select({ date: Attendance.date, checkIn: Attendance.checkIn, checkOut: Attendance.checkOut, workMinutes: Attendance.workMinutes })
+      .from(Attendance)
+      .where(and(eq(Attendance.user, userId), gte(Attendance.date, from), lte(Attendance.date, to))),
+    db()
+      .select({
+        date: Movement.date,
+        status: Movement.status,
+        official: Movement.official,
+        durationMinutes: Movement.durationMinutes,
+        outTime: Movement.outTime,
+      })
+      .from(Movement)
+      .where(
+        and(
+          eq(Movement.user, userId),
+          gte(Movement.date, from),
+          lte(Movement.date, to),
+          inList(Movement.status, ["out", "returned"]),
+          ne(Movement.approvalStatus, "rejected"),
+        ),
+      ),
   ]);
 
   // Leave only counts on days that are leave days (working days, unless weekends count).
@@ -144,7 +188,7 @@ export async function TodayAttendanceCard({ userId }: { userId: string }) {
           </div>
         )}
 
-        <TodayActions state={state} openMovementId={openMovement?._id.toString()} unavailableNote={note} />
+        <TodayActions state={state} openMovementId={openMovement?._id} unavailableNote={note} />
         {state === "can_check_in" && (holiday || cls.key === "weekend") && <p className="text-xs text-muted">Today is a {holiday ? "holiday" : "weekend"}. Check in only if you are working.</p>}
       </div>
 

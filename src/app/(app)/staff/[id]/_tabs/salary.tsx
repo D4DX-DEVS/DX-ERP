@@ -1,6 +1,7 @@
 import { Lock } from "lucide-react";
+import { eq } from "drizzle-orm";
 import { can } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { inr } from "@/lib/format";
 import { User } from "@/lib/models";
 import { fmtDate } from "@/lib/time";
@@ -23,15 +24,18 @@ function Line({ label, value, strong, muted }: { label: string; value: string; s
 
 /** Salary structure + revision history (and stipend for interns). Only rendered for staff.confidential. */
 export async function SalaryTab({ user, person, access, today }: TabProps) {
-  await connectDB();
-  const data = await User.findById(person._id, { salary: 1, salaryHistory: 1, "internship.stipend": 1, "internship.stipendHistory": 1 }).lean();
+  const [data] = await db()
+    .select({ salary: User.salary, salaryHistory: User.salaryHistory, internship: User.internship })
+    .from(User)
+    .where(eq(User._id, person._id))
+    .limit(1);
   const salary = data?.salary;
   const history = [...(data?.salaryHistory ?? [])].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
   const stipend = data?.internship?.stipend;
   const stipendHistory = [...(data?.internship?.stipendHistory ?? [])].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
   const canRevise = can(user, "staff.edit");
   const canReviseStipend = canRevise || can(user, "interns.manage");
-  const id = person._id.toString();
+  const id = person._id;
   const totals = salary ? salaryTotals(salary) : null;
 
   return (
@@ -87,7 +91,7 @@ export async function SalaryTab({ user, person, access, today }: TabProps) {
               {history.map((h, i) => {
                 const t = salaryTotals(h);
                 return (
-                  <Tr key={h._id?.toString() ?? i}>
+                  <Tr key={h._id ?? i}>
                     <Td className="whitespace-nowrap">{fmtDate(h.effectiveFrom ?? h.at)}</Td>
                     <Td align="right">{inr(h.basic)}</Td>
                     <Td align="right">{inr(t.gross)}</Td>
@@ -138,7 +142,7 @@ export async function SalaryTab({ user, person, access, today }: TabProps) {
               <tbody>
                 {stipendHistory.length === 0 && <EmptyRow colSpan={4}>No stipend revisions recorded.</EmptyRow>}
                 {stipendHistory.map((h, i) => (
-                  <Tr key={h._id?.toString() ?? i}>
+                  <Tr key={h._id ?? i}>
                     <Td className="whitespace-nowrap">{fmtDate(h.effectiveFrom ?? h.at)}</Td>
                     <Td align="right">{inr(h.amount)}</Td>
                     <Td className="text-ink-2">{h.note ?? "—"}</Td>

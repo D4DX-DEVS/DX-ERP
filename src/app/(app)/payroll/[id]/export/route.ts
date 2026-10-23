@@ -1,6 +1,8 @@
+import { asc, eq } from "drizzle-orm";
 import { can, getCurrentUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { PayrollRun, Payslip, User, type PayLine } from "@/lib/models";
+import { inList, jsonPath } from "@/lib/sql";
 import { audit } from "@/lib/audit";
 import { exportResponse, isExportFormat } from "@/lib/export";
 import { round2 } from "@/lib/format";
@@ -29,10 +31,9 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
   const type = url.searchParams.get("type") ?? "register";
   if (type !== "register" && type !== "bank" && type !== "summary") return new Response("Unsupported export type", { status: 400 });
 
-  await connectDB();
-  const run = await PayrollRun.findById(id).lean();
+  const [run] = await db().select().from(PayrollRun).where(eq(PayrollRun._id, id)).limit(1);
   if (!run) return new Response("Not found", { status: 404 });
-  const payslips = await Payslip.find({ run: run._id }).sort({ "snapshot.name": 1 }).lean();
+  const payslips = await db().select().from(Payslip).where(eq(Payslip.run, run._id)).orderBy(asc(jsonPath(Payslip.snapshot, "name")));
   const label = `${KIND_LABEL[run.kind]} ${periodLabel(run.period)}`;
   const subtitle = `${label} · ${run.runNo} · ${statusLabel("payrollRun", run.status)}`;
   const filename = `${run.kind === "salary" ? "payroll" : "stipends"}-${run.period}`;
@@ -45,8 +46,8 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
     const pending = payslips.filter((p) => p.status === "approved");
     const list = (pending.length > 0 ? pending : payslips.filter((p) => p.status === "paid")).filter((p) => p.net > 0);
     // The approved snapshot is what was signed off; today's bank record only fills gaps (a change after approval must not redirect the payment).
-    const users = await User.find({ _id: { $in: list.map((p) => p.user) } }, { bank: 1 }).lean();
-    const bank = new Map(users.map((u) => [u._id.toString(), u.bank]));
+    const users = await db().select({ _id: User._id, bank: User.bank }).from(User).where(inList(User._id, list.map((p) => p.user)));
+    const bank = new Map(users.map((u) => [u._id, u.bank]));
     return exportResponse({
       title: `Bank transfer file · ${label}`,
       filename: `bank-${filename}`,
@@ -55,13 +56,13 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
       rows: list,
       columns: [
         { header: "Employee ID", value: (p) => p.snapshot.employeeId },
-        { header: "Account holder", value: (p) => (p.snapshot.bankAccount ? p.snapshot.name : bank.get(p.user.toString())?.accountName || p.snapshot.name), width: 28 },
-        { header: "Account number", value: (p) => p.snapshot.bankAccount || bank.get(p.user.toString())?.accountNumber || "", width: 22 },
-        { header: "IFSC", value: (p) => p.snapshot.ifsc || bank.get(p.user.toString())?.ifsc || "" },
-        { header: "Bank", value: (p) => p.snapshot.bankName || bank.get(p.user.toString())?.bankName || "", width: 22 },
+        { header: "Account holder", value: (p) => (p.snapshot.bankAccount ? p.snapshot.name : bank.get(p.user)?.accountName || p.snapshot.name), width: 28 },
+        { header: "Account number", value: (p) => p.snapshot.bankAccount || bank.get(p.user)?.accountNumber || "", width: 22 },
+        { header: "IFSC", value: (p) => p.snapshot.ifsc || bank.get(p.user)?.ifsc || "" },
+        { header: "Bank", value: (p) => p.snapshot.bankName || bank.get(p.user)?.bankName || "", width: 22 },
         { header: "Net amount", value: (p) => p.net, type: "money" },
         { header: "Narration", value: () => `${KIND_LABEL[run.kind]} ${periodLabel(run.period)}`, width: 24 },
-        { header: "Check", value: (p) => (bank.get(p.user.toString())?.accountNumber || p.snapshot.bankAccount ? "" : "Missing bank details") },
+        { header: "Check", value: (p) => (bank.get(p.user)?.accountNumber || p.snapshot.bankAccount ? "" : "Missing bank details") },
       ],
     });
   }

@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { forbidden } from "next/navigation";
 import { Download } from "lucide-react";
+import { desc, eq } from "drizzle-orm";
 import { requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
-import { Payment } from "@/lib/models";
+import { db } from "@/lib/db";
+import { Invoice, Payment } from "@/lib/models";
 import { idParam, type SearchParams } from "@/lib/query";
 import { inr, plural } from "@/lib/format";
 import { fmtDate, todayKey } from "@/lib/time";
@@ -24,13 +25,12 @@ export const metadata = { title: "Receivables" };
 export default async function ReceivablesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePagePermission("invoices.view");
   const sp = await searchParams;
-  await connectDB();
   const today = todayKey();
   const selected = idParam(sp, "client");
   const hidden = await hiddenClientIds(user);
-  if (selected && hidden.some((h) => h.toString() === selected)) forbidden();
+  if (selected && hidden.includes(selected)) forbidden();
 
-  const receivables = await loadReceivables(today, notHiddenClient(hidden));
+  const receivables = await loadReceivables(today, notHiddenClient(hidden, Invoice.client));
   const names = await clientNames(receivables.map((r) => r.client).concat(selected ? [selected] : []));
 
   const byClient = new Map<string, { client: string; count: number; total: number; oldest: number; buckets: Record<AgingKey, number> }>();
@@ -50,7 +50,7 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
 
   // Drill-down for one client: open invoices and the full payment history.
   const clientInvoices = selected ? receivables.filter((r) => r.client === selected) : [];
-  const history = selected ? await Payment.find({ client: selected }).sort({ date: -1, createdAt: -1 }).limit(100).lean() : [];
+  const history = selected ? await db().select().from(Payment).where(eq(Payment.client, selected)).orderBy(desc(Payment.date), desc(Payment.createdAt)).limit(100) : [];
 
   const exportItems = (["csv", "xlsx", "pdf"] as const).map((f) => ({ label: f === "csv" ? "CSV" : f === "xlsx" ? "Excel" : "PDF", href: `/invoices/export?type=receivables&format=${f}`, external: true }));
 
@@ -183,7 +183,7 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
               <tbody>
                 {history.length === 0 && <EmptyRow colSpan={4}>No payments recorded for this client yet.</EmptyRow>}
                 {history.map((p) => (
-                  <Tr key={p._id.toString()}>
+                  <Tr key={p._id}>
                     <Td className="whitespace-nowrap">{fmtDate(p.date)}</Td>
                     <Td>
                       <StatusChip domain="payment" value={p.type} size="sm" />

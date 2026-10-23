@@ -1,13 +1,16 @@
 import "server-only";
+import { asc, desc, eq } from "drizzle-orm";
 import { can, type CurrentUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Client, LeaveType, Project } from "@/lib/models";
 import { leaveYearOf } from "@/lib/domain/leave-balance";
 import { peopleOptions } from "@/lib/people";
 import { getSettings } from "@/lib/settings";
 import { param, type SearchParams } from "@/lib/query";
+import { notInList } from "@/lib/sql";
 import { todayKey } from "@/lib/time";
 import { isObjectId } from "@/lib/validation";
+import { projectFilter } from "@/lib/work-access";
 import { departmentNames, hiddenClientIds } from "./shared";
 import type { FilterOption, OptionSource, ReportDefinition, ReportFilterDef, ReportFilters } from "./types";
 
@@ -92,9 +95,8 @@ async function sourceOptions(source: OptionSource): Promise<FilterOption[]> {
     case "employmentStatuses":
       return settings.employmentStatuses.map((s) => ({ value: s.key, label: s.label }));
     case "leaveTypes": {
-      await connectDB();
-      const types = await LeaveType.find({ active: true }, { name: 1 }).sort({ order: 1, name: 1 }).lean();
-      return types.map((t) => ({ value: t._id.toString(), label: t.name }));
+      const types = await db().select({ id: LeaveType._id, name: LeaveType.name }).from(LeaveType).where(eq(LeaveType.active, true)).orderBy(asc(LeaveType.order), asc(LeaveType.name));
+      return types.map((t) => ({ value: t.id, label: t.name }));
     }
     case "leaveYears": {
       const current = leaveYearOf(todayKey(), settings);
@@ -105,20 +107,23 @@ async function sourceOptions(source: OptionSource): Promise<FilterOption[]> {
 
 /** Option lists for the filter form: pickers load reference data, selects use static or configured options. */
 export async function resolveFilters(def: ReportDefinition, values: ReportFilters, user: CurrentUser): Promise<ResolvedFilter[]> {
-  await connectDB();
   const needs = (type: ReportFilterDef["type"]) => def.filters.some((f) => f.type === type);
   const [people, departments, projects, clients] = await Promise.all([
     needs("person") ? peopleOptions({ includeExited: true }) : Promise.resolve([]),
     needs("department") ? departmentNames() : Promise.resolve(new Map<string, string>()),
     // Project and client pickers only list what the viewer may open.
     needs("project")
-      ? Project.find(can(user, "projects.view_all") ? {} : { $or: [{ manager: user._id }, { "team.user": user._id }] }, { projectNo: 1, title: 1 })
-          .sort({ createdAt: -1 })
-          .limit(500)
-          .lean()
+      ? db().select({ id: Project._id, projectNo: Project.projectNo, title: Project.title }).from(Project).where(projectFilter(user)).orderBy(desc(Project.createdAt)).limit(500)
       : Promise.resolve([]),
     needs("client") && can(user, "crm.view")
-      ? hiddenClientIds(user).then((hidden) => Client.find(hidden.length ? { _id: { $nin: hidden } } : {}, { name: 1 }).sort({ name: 1 }).limit(500).lean())
+      ? hiddenClientIds(user).then((hidden) =>
+          db()
+            .select({ id: Client._id, name: Client.name })
+            .from(Client)
+            .where(hidden.length ? notInList(Client._id, hidden) : undefined)
+            .orderBy(asc(Client.name))
+            .limit(500),
+        )
       : Promise.resolve([]),
   ]);
 
@@ -128,8 +133,8 @@ export async function resolveFilters(def: ReportDefinition, values: ReportFilter
     if (filter.type === "select") options = filter.options ?? (filter.optionsFrom ? await sourceOptions(filter.optionsFrom) : []);
     if (filter.type === "person") options = people.map((p) => ({ value: p.id, label: `${p.name} (${p.employeeId})` }));
     if (filter.type === "department") options = [...departments].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
-    if (filter.type === "project") options = projects.map((p) => ({ value: p._id.toString(), label: `${p.projectNo} · ${p.title}` }));
-    if (filter.type === "client") options = clients.map((c) => ({ value: c._id.toString(), label: c.name }));
+    if (filter.type === "project") options = projects.map((p) => ({ value: p.id, label: `${p.projectNo} · ${p.title}` }));
+    if (filter.type === "client") options = clients.map((c) => ({ value: c.id, label: c.name }));
     resolved.push({ def: filter, value: values[filter.key] ?? "", options });
   }
   return resolved;

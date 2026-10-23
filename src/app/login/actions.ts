@@ -1,9 +1,11 @@
 "use server";
 
 import { cookies } from "next/headers";
-import { connectDB } from "@/lib/db";
+import { and, eq, gte } from "drizzle-orm";
+import { db } from "@/lib/db";
 import { env } from "@/lib/env";
-import { LoginAttempt, User } from "@/lib/models";
+import { LoginAttempt, User, type Id } from "@/lib/models";
+import { inList, isUniqueViolation } from "@/lib/sql";
 import { createSession, requestMeta } from "@/lib/auth/session";
 import { safeEqual, verifyPasswordHash, verifyTotp } from "@/lib/auth/password";
 import { PENDING_2FA_COOKIE, signToken, verifyToken } from "@/lib/auth/token";
@@ -21,35 +23,51 @@ function safeNext(next: unknown): string {
 
 async function tooManyAttempts(keys: string[]): Promise<boolean> {
   const since = new Date(Date.now() - WINDOW_MS);
-  const count = await LoginAttempt.countDocuments({ key: { $in: keys }, at: { $gte: since } });
+  // Rows are never expired by the database: only attempts inside the window count.
+  const count = await db().$count(LoginAttempt, and(inList(LoginAttempt.key, keys), gte(LoginAttempt.at, since)));
   return count >= MAX_ATTEMPTS;
 }
 
 /** Creates or updates the single Super Admin account from the environment configuration. */
-async function upsertSuperAdmin() {
+async function upsertSuperAdmin(): Promise<{ _id: Id; name: string }> {
   const email = env.superAdmin.email;
-  const clash = await User.findOne({ email, isSuperAdmin: { $ne: true } }, { _id: 1 }).lean();
+  const [clash] = await db()
+    .select({ id: User._id })
+    .from(User)
+    .where(and(eq(User.email, email), eq(User.isSuperAdmin, false)))
+    .limit(1);
   if (clash) throw new Error("SUPER_ADMIN_EMAIL is already used by a staff account. Use a different email for the Super Admin.");
-  const existing = await User.findOne({ isSuperAdmin: true });
+  const findExisting = async () =>
+    (await db().select({ _id: User._id, email: User.email, name: User.name }).from(User).where(eq(User.isSuperAdmin, true)).limit(1))[0];
+  const existing = await findExisting();
   if (existing) {
     if (existing.email !== email || existing.name !== env.superAdmin.name) {
-      existing.email = email;
-      existing.name = env.superAdmin.name;
-      await existing.save();
+      await db().update(User).set({ email, name: env.superAdmin.name }).where(eq(User._id, existing._id));
     }
-    return existing;
+    return { _id: existing._id, name: env.superAdmin.name };
   }
-  return User.create({
-    employeeId: "ADM-0001",
-    name: env.superAdmin.name,
-    email,
-    personType: "admin",
-    role: "super_admin",
-    isSuperAdmin: true,
-    accountActive: true,
-    status: "active",
-    employmentType: "full_time",
-  });
+  try {
+    const [created] = await db()
+      .insert(User)
+      .values({
+        employeeId: "ADM-0001",
+        name: env.superAdmin.name,
+        email,
+        personType: "admin",
+        role: "super_admin",
+        isSuperAdmin: true,
+        accountActive: true,
+        status: "active",
+        employmentType: "full_time",
+      })
+      .returning({ _id: User._id, name: User.name });
+    return created;
+  } catch (error) {
+    // Two first sign-ins racing: the unique `users_single_super_admin` index lets only one create the row.
+    const raced = isUniqueViolation(error) ? await findExisting() : undefined;
+    if (!raced) throw error;
+    return raced;
+  }
 }
 
 async function completeLogin(remember: boolean): Promise<void> {
@@ -61,7 +79,6 @@ async function completeLogin(remember: boolean): Promise<void> {
 
 export async function superAdminSignIn(input: Record<string, unknown>): Promise<ActionResult<{ next: string }>> {
   try {
-    await connectDB();
     const email = String(input.email ?? "").trim().toLowerCase();
     const password = String(input.password ?? "");
     const remember = input.remember === "on" || input.remember === true;
@@ -90,7 +107,7 @@ export async function superAdminSignIn(input: Record<string, unknown>): Promise<
     if (!configured) return { ok: false, error: "Super Admin sign-in is not configured on the server." };
 
     if (!validPassword) {
-      await LoginAttempt.insertMany(keys.map((key) => ({ key })));
+      await db().insert(LoginAttempt).values(keys.map((key) => ({ key })));
       await audit(null, { action: "login_failed", entity: "auth", summary: `Failed Super Admin sign-in for ${email}` });
       return { ok: false, error: "Incorrect email or password." };
     }
@@ -111,7 +128,6 @@ export async function superAdminSignIn(input: Record<string, unknown>): Promise<
 
 export async function verifySuperAdminCode(input: Record<string, unknown>): Promise<ActionResult<{ next: string }>> {
   try {
-    await connectDB();
     const jar = await cookies();
     const pending = await verifyToken<{ email: string; remember: boolean }>(jar.get(PENDING_2FA_COOKIE)?.value, "2fa");
     if (!pending) return { ok: false, error: "Your verification window expired. Sign in again." };
@@ -123,12 +139,16 @@ export async function verifySuperAdminCode(input: Record<string, unknown>): Prom
     const code = String(input.code ?? "").replace(/\s+/g, "");
     // A code is single-use: replaying it inside its validity window is refused.
     const usedKey = `totp-used:${pending.email}:${code}`;
-    const replay = await LoginAttempt.exists({ key: usedKey, at: { $gte: new Date(Date.now() - 3 * 60_000) } });
+    const [replay] = await db()
+      .select({ id: LoginAttempt._id })
+      .from(LoginAttempt)
+      .where(and(eq(LoginAttempt.key, usedKey), gte(LoginAttempt.at, new Date(Date.now() - 3 * 60_000))))
+      .limit(1);
     if (replay || !verifyTotp(env.superAdmin.totpSecret, code)) {
-      await LoginAttempt.insertMany(keys.map((key) => ({ key })));
+      await db().insert(LoginAttempt).values(keys.map((key) => ({ key })));
       return { ok: false, error: "That code is not valid. Check your authenticator app.", fieldErrors: { code: "Invalid code" } };
     }
-    await LoginAttempt.create({ key: usedKey });
+    await db().insert(LoginAttempt).values({ key: usedKey });
     jar.delete(PENDING_2FA_COOKIE);
     await completeLogin(Boolean(pending.remember));
     return { ok: true, data: { next: safeNext(input.next) } };

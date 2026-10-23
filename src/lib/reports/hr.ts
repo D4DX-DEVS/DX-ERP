@@ -1,5 +1,6 @@
 import "server-only";
-import { connectDB } from "@/lib/db";
+import { and, asc, desc, eq, gte, isNull, lte, ne, or } from "drizzle-orm";
+import { db } from "@/lib/db";
 import {
   Attendance,
   AttendanceCorrection,
@@ -13,7 +14,10 @@ import {
   StoredFile,
   Task,
   User,
+  type LeaveStatus,
+  type PersonType,
 } from "@/lib/models";
+import { inList, jsonHasAny, jsonPath } from "@/lib/sql";
 import type { ExportColumn } from "@/lib/export";
 import { accruedFor, leaveYearOf, leaveYearRange } from "@/lib/domain/leave-balance";
 import { getSettings } from "@/lib/settings";
@@ -37,7 +41,7 @@ import {
   yesNo,
   type PersonInfo,
 } from "./shared";
-import { defineReport, type ReportFilterDef } from "./types";
+import { defineReport, type ReportFilterDef, type ReportFilters } from "./types";
 
 const HR = ["reports.view", "reports.hr"] as const;
 const FINANCE_PAYROLL = ["reports.view", "reports.financial", "payroll.view"] as const;
@@ -78,29 +82,32 @@ const employeeDirectory = defineReport<DirectoryRow>({
     { key: "status", label: "Status", type: "select", optionsFrom: "employmentStatuses" },
   ],
   async run(f) {
-    await connectDB();
     const settings = await getSettings();
-    const filter: Record<string, unknown> = { personType: f.type ? f.type : { $in: PERSON_TYPES } };
-    if (f.department) filter.department = f.department;
-    if (f.status) filter.status = f.status;
-    const users = await User.find(filter, {
-      employeeId: 1,
-      name: 1,
-      personType: 1,
-      department: 1,
-      designation: 1,
-      employmentType: 1,
-      status: 1,
-      joiningDate: 1,
-      reportingManager: 1,
-      email: 1,
-      phone: 1,
-    })
-      .sort({ name: 1 })
-      .lean();
-    const people = await peopleMap([...users.map((u) => u._id), ...users.map((u) => u.reportingManager)]);
+    const users = await db()
+      .select({
+        id: User._id,
+        employeeId: User.employeeId,
+        name: User.name,
+        personType: User.personType,
+        employmentType: User.employmentType,
+        status: User.status,
+        joiningDate: User.joiningDate,
+        reportingManager: User.reportingManager,
+        email: User.email,
+        phone: User.phone,
+      })
+      .from(User)
+      .where(
+        and(
+          f.type ? eq(User.personType, f.type as PersonType) : inList(User.personType, PERSON_TYPES),
+          f.department ? eq(User.department, f.department) : undefined,
+          f.status ? eq(User.status, f.status) : undefined,
+        ),
+      )
+      .orderBy(asc(User.name));
+    const people = await peopleMap([...users.map((u) => u.id), ...users.map((u) => u.reportingManager)]);
     const rows: DirectoryRow[] = users.map((u) => {
-      const p = people.get(u._id.toString());
+      const p = people.get(u.id);
       return {
         employeeId: u.employeeId,
         name: u.name,
@@ -110,7 +117,7 @@ const employeeDirectory = defineReport<DirectoryRow>({
         employmentType: titleCase(u.employmentType),
         status: settings.employmentStatuses.find((s) => s.key === u.status)?.label ?? titleCase(u.status),
         joiningDate: fmtDate(u.joiningDate),
-        manager: u.reportingManager ? (people.get(u.reportingManager.toString())?.name ?? "") : "",
+        manager: u.reportingManager ? (people.get(u.reportingManager)?.name ?? "") : "",
         email: u.email,
         phone: u.phone ?? "",
       };
@@ -350,19 +357,28 @@ const attendanceLateEarly = defineReport<LateRow>({
     PERSON_FILTER,
   ],
   async run(f) {
-    await connectDB();
     const { from, to } = rangeOf(f);
-    const flags = f.kind === "late" ? [{ late: true }] : f.kind === "early" ? [{ earlyDeparture: true }] : [{ late: true }, { earlyDeparture: true }];
-    const docs = await Attendance.find(
-      { date: { $gte: from, $lte: to }, ...(await userScope(f)), $or: flags },
-      { user: 1, date: 1, checkIn: 1, checkOut: 1, late: 1, lateMinutes: 1, earlyDeparture: 1, earlyMinutes: 1, workMinutes: 1, remarks: 1 },
-    )
-      .sort({ date: -1 })
-      .limit(20_000)
-      .lean();
+    const flags = f.kind === "late" ? [eq(Attendance.late, true)] : f.kind === "early" ? [eq(Attendance.earlyDeparture, true)] : [eq(Attendance.late, true), eq(Attendance.earlyDeparture, true)];
+    const docs = await db()
+      .select({
+        user: Attendance.user,
+        date: Attendance.date,
+        checkIn: Attendance.checkIn,
+        checkOut: Attendance.checkOut,
+        late: Attendance.late,
+        lateMinutes: Attendance.lateMinutes,
+        earlyDeparture: Attendance.earlyDeparture,
+        earlyMinutes: Attendance.earlyMinutes,
+        workMinutes: Attendance.workMinutes,
+        remarks: Attendance.remarks,
+      })
+      .from(Attendance)
+      .where(and(gte(Attendance.date, from), lte(Attendance.date, to), userScope(f, Attendance.user), or(...flags)))
+      .orderBy(desc(Attendance.date))
+      .limit(20_000);
     const people = await peopleMap(docs.map((d) => d.user));
     const rows: LateRow[] = docs.flatMap((d) => {
-      const person = people.get(d.user.toString());
+      const person = people.get(d.user);
       if (!person) return [];
       return [
         {
@@ -593,16 +609,37 @@ const attendanceCorrections = defineReport<CorrectionRow>({
     PERSON_FILTER,
   ],
   async run(f) {
-    await connectDB();
     const { from, to } = rangeOf(f);
     const { start, end } = instantRange(from, to);
-    const filter: Record<string, unknown> = { createdAt: { $gte: start, $lte: end }, ...(await userScope(f)) };
-    if (f.status) filter.status = f.status;
-    const docs = await AttendanceCorrection.find(filter).sort({ createdAt: -1 }).limit(20_000).lean();
+    const docs = await db()
+      .select({
+        user: AttendanceCorrection.user,
+        date: AttendanceCorrection.date,
+        createdAt: AttendanceCorrection.createdAt,
+        original: AttendanceCorrection.original,
+        requestedCheckIn: AttendanceCorrection.requestedCheckIn,
+        requestedCheckOut: AttendanceCorrection.requestedCheckOut,
+        reason: AttendanceCorrection.reason,
+        status: AttendanceCorrection.status,
+        reviewerName: AttendanceCorrection.reviewerName,
+        reviewedAt: AttendanceCorrection.reviewedAt,
+        reviewNote: AttendanceCorrection.reviewNote,
+      })
+      .from(AttendanceCorrection)
+      .where(
+        and(
+          gte(AttendanceCorrection.createdAt, start),
+          lte(AttendanceCorrection.createdAt, end),
+          userScope(f, AttendanceCorrection.user),
+          f.status ? eq(AttendanceCorrection.status, f.status as "pending" | "approved" | "rejected" | "cancelled") : undefined,
+        ),
+      )
+      .orderBy(desc(AttendanceCorrection.createdAt))
+      .limit(20_000);
     const people = await peopleMap(docs.map((d) => d.user));
-    const range = (a?: Date, b?: Date) => `${fmtTime(a)} – ${fmtTime(b)}`;
+    const range = (a?: Date | null, b?: Date | null) => `${fmtTime(a)} – ${fmtTime(b)}`;
     const rows: CorrectionRow[] = docs.flatMap((d) => {
-      const person = people.get(d.user.toString());
+      const person = people.get(d.user);
       if (!person) return [];
       return [
         {
@@ -666,7 +703,6 @@ const leaveUsage = defineReport<LeaveBalanceReportRow>({
   permissions: [...HR],
   filters: [{ key: "year", label: "Leave year", type: "select", optionsFrom: "leaveYears" }, DEPARTMENT_FILTER, PERSON_FILTER],
   async run(f) {
-    await connectDB();
     const settings = await getSettings();
     const today = todayKey();
     const year = Number(f.year) || leaveYearOf(today, settings);
@@ -674,17 +710,27 @@ const leaveUsage = defineReport<LeaveBalanceReportRow>({
     const staff = await loadStaff(f);
     const ids = staff.map((p) => p.id);
     const [types, balances, requests] = await Promise.all([
-      LeaveType.find({ active: true }).sort({ order: 1, name: 1 }).lean(),
-      LeaveBalance.find({ user: { $in: ids }, year }).lean(),
-      LeaveRequest.find(
-        { user: { $in: ids }, status: { $in: ["approved", "pending_manager", "pending_hr"] }, startDate: { $lte: to }, endDate: { $gte: from } },
-        { user: 1, leaveType: 1, days: 1, status: 1 },
-      ).lean(),
+      db().select().from(LeaveType).where(eq(LeaveType.active, true)).orderBy(asc(LeaveType.order), asc(LeaveType.name)),
+      db()
+        .select({ user: LeaveBalance.user, leaveType: LeaveBalance.leaveType, carriedForward: LeaveBalance.carriedForward, adjustment: LeaveBalance.adjustment, quotaOverride: LeaveBalance.quotaOverride })
+        .from(LeaveBalance)
+        .where(and(inList(LeaveBalance.user, ids), eq(LeaveBalance.year, year))),
+      db()
+        .select({ user: LeaveRequest.user, leaveType: LeaveRequest.leaveType, days: LeaveRequest.days, status: LeaveRequest.status })
+        .from(LeaveRequest)
+        .where(
+          and(
+            inList(LeaveRequest.user, ids),
+            inList(LeaveRequest.status, ["approved", "pending_manager", "pending_hr"]),
+            lte(LeaveRequest.startDate, to),
+            gte(LeaveRequest.endDate, from),
+          ),
+        ),
     ]);
-    const balanceOf = new Map(balances.map((b) => [`${b.user.toString()}|${b.leaveType.toString()}`, b]));
+    const balanceOf = new Map(balances.map((b) => [`${b.user}|${b.leaveType}`, b]));
     const usage = new Map<string, { used: number; pending: number }>();
     for (const r of requests) {
-      const key = `${r.user.toString()}|${r.leaveType.toString()}`;
+      const key = `${r.user}|${r.leaveType}`;
       const cur = usage.get(key) ?? { used: 0, pending: 0 };
       if (r.status === "approved") cur.used += r.days;
       else cur.pending += r.days;
@@ -694,7 +740,7 @@ const leaveUsage = defineReport<LeaveBalanceReportRow>({
     for (const person of staff) {
       for (const t of types) {
         if (!t.applicableTo.includes(person.personType)) continue;
-        const key = `${person.id}|${t._id.toString()}`;
+        const key = `${person.id}|${t._id}`;
         const b = balanceOf.get(key);
         const u = usage.get(key) ?? { used: 0, pending: 0 };
         const quota = b?.quotaOverride ?? t.annualQuota;
@@ -768,15 +814,36 @@ const leaveByEmployee = defineReport<LeaveRow>({
     PERSON_FILTER,
   ],
   async run(f) {
-    await connectDB();
     const { from, to } = rangeOf(f);
-    const filter: Record<string, unknown> = { startDate: { $lte: to }, endDate: { $gte: from }, ...(await userScope(f)) };
-    if (f.status) filter.status = f.status;
-    if (/^[a-f0-9]{24}$/i.test(f.leaveType ?? "")) filter.leaveType = f.leaveType;
-    const docs = await LeaveRequest.find(filter).sort({ startDate: -1 }).limit(20_000).lean();
+    const docs = await db()
+      .select({
+        user: LeaveRequest.user,
+        requestNo: LeaveRequest.requestNo,
+        leaveTypeName: LeaveRequest.leaveTypeName,
+        startDate: LeaveRequest.startDate,
+        endDate: LeaveRequest.endDate,
+        days: LeaveRequest.days,
+        halfDay: LeaveRequest.halfDay,
+        status: LeaveRequest.status,
+        reason: LeaveRequest.reason,
+        createdAt: LeaveRequest.createdAt,
+        approvals: LeaveRequest.approvals,
+      })
+      .from(LeaveRequest)
+      .where(
+        and(
+          lte(LeaveRequest.startDate, to),
+          gte(LeaveRequest.endDate, from),
+          userScope(f, LeaveRequest.user),
+          f.status ? eq(LeaveRequest.status, f.status as LeaveStatus) : undefined,
+          /^[a-f0-9]{24}$/i.test(f.leaveType ?? "") ? eq(LeaveRequest.leaveType, f.leaveType) : undefined,
+        ),
+      )
+      .orderBy(desc(LeaveRequest.startDate))
+      .limit(20_000);
     const people = await peopleMap(docs.map((d) => d.user));
     const rows: LeaveRow[] = docs.flatMap((d) => {
-      const person = people.get(d.user.toString());
+      const person = people.get(d.user);
       if (!person) return [];
       const last = d.approvals[d.approvals.length - 1];
       return [
@@ -860,11 +927,22 @@ const payrollSummary = defineReport<RunRow>({
     },
   ],
   async run(f) {
-    await connectDB();
     const { from, to } = monthRangeOf(f);
-    const filter: Record<string, unknown> = { period: { $gte: from, $lte: to }, status: { $ne: "cancelled" } };
-    if (f.kind) filter.kind = f.kind;
-    const runs = await PayrollRun.find(filter).sort({ period: -1, kind: 1 }).lean();
+    const runs = await db()
+      .select({
+        period: PayrollRun.period,
+        runNo: PayrollRun.runNo,
+        kind: PayrollRun.kind,
+        status: PayrollRun.status,
+        totals: PayrollRun.totals,
+        workingDays: PayrollRun.workingDays,
+        verifiedByName: PayrollRun.verifiedByName,
+        approvedByName: PayrollRun.approvedByName,
+        paidAt: PayrollRun.paidAt,
+      })
+      .from(PayrollRun)
+      .where(and(gte(PayrollRun.period, from), lte(PayrollRun.period, to), ne(PayrollRun.status, "cancelled"), f.kind ? eq(PayrollRun.kind, f.kind as "salary" | "stipend") : undefined))
+      .orderBy(desc(PayrollRun.period), asc(PayrollRun.kind));
     const rows: RunRow[] = runs.map((r) => ({
       period: r.period,
       runNo: r.runNo,
@@ -934,14 +1012,34 @@ const stipendSummary = defineReport<StipendRow>({
     PERSON_FILTER,
   ],
   async run(f) {
-    await connectDB();
     const { from, to } = monthRangeOf(f);
-    const filter: Record<string, unknown> = { kind: "stipend", period: { $gte: from, $lte: to }, ...(await userScope(f)) };
-    if (f.status) filter.status = f.status;
-    const slips = await Payslip.find(filter, { user: 1, period: 1, payableDays: 1, lopDays: 1, gross: 1, totalDeductions: 1, net: 1, status: 1, payment: 1 }).sort({ period: -1 }).limit(20_000).lean();
+    const slips = await db()
+      .select({
+        user: Payslip.user,
+        period: Payslip.period,
+        payableDays: Payslip.payableDays,
+        lopDays: Payslip.lopDays,
+        gross: Payslip.gross,
+        totalDeductions: Payslip.totalDeductions,
+        net: Payslip.net,
+        status: Payslip.status,
+        payment: Payslip.payment,
+      })
+      .from(Payslip)
+      .where(
+        and(
+          eq(Payslip.kind, "stipend"),
+          gte(Payslip.period, from),
+          lte(Payslip.period, to),
+          userScope(f, Payslip.user),
+          f.status ? eq(Payslip.status, f.status as "draft" | "approved" | "paid" | "on_hold") : undefined,
+        ),
+      )
+      .orderBy(desc(Payslip.period))
+      .limit(20_000);
     const people = await peopleMap(slips.map((s) => s.user));
     const rows: StipendRow[] = slips.flatMap((s) => {
-      const person = people.get(s.user.toString());
+      const person = people.get(s.user);
       if (!person) return [];
       return [
         {
@@ -1004,6 +1102,22 @@ interface InternRow {
 
 const INTERN_STATUSES = ["registered", "active", "extended", "completed", "terminated"];
 
+/** Interns and trainees matching the department / person / internship-status filters, ordered by name. */
+function internUsers(f: ReportFilters) {
+  return db()
+    .select({ id: User._id, internship: User.internship })
+    .from(User)
+    .where(
+      and(
+        inList(User.personType, ["intern", "trainee"]),
+        f.department ? eq(User.department, f.department) : undefined,
+        f.person ? eq(User._id, f.person) : undefined,
+        f.status ? eq(jsonPath(User.internship, "status"), f.status) : undefined,
+      ),
+    )
+    .orderBy(asc(User.name));
+}
+
 const internRecords = defineReport<InternRow>({
   key: "intern-records",
   title: "Intern records & attendance",
@@ -1012,19 +1126,14 @@ const internRecords = defineReport<InternRow>({
   permissions: [...HR],
   filters: [MONTH_FILTER, { key: "status", label: "Internship status", type: "select", options: INTERN_STATUSES.map((s) => ({ value: s, label: statusLabel("internship", s) })) }, DEPARTMENT_FILTER, PERSON_FILTER],
   async run(f) {
-    await connectDB();
     const { from, to: monthEnd } = monthRange(f.month || DEFAULTS.thisMonth());
     const today = todayKey();
     const to = monthEnd < today ? monthEnd : today;
-    const filter: Record<string, unknown> = { personType: { $in: ["intern", "trainee"] } };
-    if (f.department) filter.department = f.department;
-    if (f.person) filter._id = f.person;
-    if (f.status) filter["internship.status"] = f.status;
-    const users = await User.find(filter, { internship: 1 }).sort({ name: 1 }).lean();
-    const people = await peopleMap([...users.map((u) => u._id), ...users.map((u) => u.internship?.mentor)]);
-    const ctx = await loadAttendance(users.map((u) => u._id.toString()), from, monthEnd);
+    const users = await internUsers(f);
+    const people = await peopleMap([...users.map((u) => u.id), ...users.map((u) => u.internship?.mentor)]);
+    const ctx = await loadAttendance(users.map((u) => u.id), from, monthEnd);
     const rows: InternRow[] = users.flatMap((u) => {
-      const person = people.get(u._id.toString());
+      const person = people.get(u.id);
       if (!person) return [];
       const i = u.internship;
       const start = [from, i?.startDate, person.joiningDate].filter((d): d is string => Boolean(d)).sort().pop() ?? from;
@@ -1034,8 +1143,8 @@ const internRecords = defineReport<InternRow>({
       let minutes = 0;
       let working = 0;
       for (const day of start > end ? [] : eachDay(start, end)) {
-        if (ctx.cal.isWorkingDay(day) && ctx.leaveOn(u._id.toString(), day) !== "full") working += 1;
-        const doc = ctx.attendanceOf(u._id.toString(), day);
+        if (ctx.cal.isWorkingDay(day) && ctx.leaveOn(u.id, day) !== "full") working += 1;
+        const doc = ctx.attendanceOf(u.id, day);
         if (doc?.checkIn) present += 1;
         if (doc?.late) late += 1;
         minutes += doc?.workMinutes ?? 0;
@@ -1044,7 +1153,7 @@ const internRecords = defineReport<InternRow>({
         {
           person,
           type: titleCase(person.personType),
-          mentor: i?.mentor ? (people.get(i.mentor.toString())?.name ?? "") : "",
+          mentor: i?.mentor ? (people.get(i.mentor)?.name ?? "") : "",
           college: i?.college ?? "",
           course: i?.course ?? "",
           startDate: i?.startDate ?? "",
@@ -1112,33 +1221,35 @@ const internshipProgress = defineReport<InternProgressRow>({
   permissions: [...HR],
   filters: [{ key: "status", label: "Internship status", type: "select", options: INTERN_STATUSES.map((s) => ({ value: s, label: statusLabel("internship", s) })) }, DEPARTMENT_FILTER, PERSON_FILTER],
   async run(f) {
-    await connectDB();
     const settings = await getSettings();
     const doneKeys = settings.taskStatuses.filter((s) => s.category === "done").map((s) => s.key);
     const closedKeys = settings.taskStatuses.filter((s) => s.category === "done" || s.category === "cancelled").map((s) => s.key);
     const today = todayKey();
-    const filter: Record<string, unknown> = { personType: { $in: ["intern", "trainee"] } };
-    if (f.department) filter.department = f.department;
-    if (f.person) filter._id = f.person;
-    if (f.status) filter["internship.status"] = f.status;
-    const users = await User.find(filter, { internship: 1 }).sort({ name: 1 }).lean();
-    const ids = users.map((u) => u._id);
+    const users = await internUsers(f);
+    const ids = users.map((u) => u.id);
     const [people, tasks, reviews] = await Promise.all([
       peopleMap(ids),
-      Task.find({ assignees: { $in: ids } }, { assignees: 1, status: 1, dueDate: 1, submissions: 1 }).lean(),
-      Review.find({ user: { $in: ids } }, { user: 1, date: 1, overall: 1, status: 1, periodLabel: 1 }).sort({ date: -1 }).lean(),
+      db()
+        .select({ assignees: Task.assignees, status: Task.status, dueDate: Task.dueDate, submissions: Task.submissions })
+        .from(Task)
+        .where(jsonHasAny(Task.assignees, ids)),
+      db()
+        .select({ user: Review.user, date: Review.date, overall: Review.overall, status: Review.status, periodLabel: Review.periodLabel })
+        .from(Review)
+        .where(inList(Review.user, ids))
+        .orderBy(desc(Review.date)),
     ]);
     const latestReview = new Map<string, (typeof reviews)[number]>();
-    for (const r of reviews) if (!latestReview.has(r.user.toString())) latestReview.set(r.user.toString(), r);
+    for (const r of reviews) if (!latestReview.has(r.user)) latestReview.set(r.user, r);
 
     const rows: InternProgressRow[] = users.flatMap((u) => {
-      const person = people.get(u._id.toString());
+      const person = people.get(u.id);
       if (!person) return [];
-      const mine = tasks.filter((t) => t.assignees.some((a) => a.toString() === u._id.toString()));
-      const subs = mine.flatMap((t) => t.submissions.filter((s) => s.submittedBy.toString() === u._id.toString()));
+      const mine = tasks.filter((t) => t.assignees.some((a) => a === u.id));
+      const subs = mine.flatMap((t) => t.submissions.filter((s) => s.submittedBy === u.id));
       const ratings = subs.map((s) => s.rating).filter((r): r is number => typeof r === "number");
       const objectives = u.internship?.objectives ?? [];
-      const review = latestReview.get(u._id.toString());
+      const review = latestReview.get(u.id);
       return [
         {
           person,
@@ -1152,7 +1263,7 @@ const internshipProgress = defineReport<InternProgressRow>({
           rating: ratings.length ? round2(ratings.reduce((s, r) => s + r, 0) / ratings.length) : undefined,
           objectives: objectives.length ? `${objectives.filter((o) => o.status === "achieved").length} of ${objectives.length} achieved` : "",
           lastReview: review ? `${review.periodLabel} · ${fmtDate(review.date)}` : "",
-          lastScore: review?.overall,
+          lastScore: review?.overall ?? undefined,
           reviewStatus: review ? statusLabel("review", review.status) : "No evaluation",
         },
       ];
@@ -1216,18 +1327,17 @@ const documentExpiry = defineReport<DocumentRow>({
     PERSON_FILTER,
   ],
   async run(f) {
-    await connectDB();
     const settings = await getSettings();
     const today = todayKey();
     const until = f.to || addDays(today, 60);
     const staff = (await loadStaff(f)).filter((p) => !EXITED_STATUSES.includes(p.status));
     const ids = staff.map((p) => p.id);
-    const files = await StoredFile.find(
-      { entityType: "user", entityId: { $in: ids }, deletedAt: null, replacedBy: null },
-      { entityId: 1, category: 1, name: 1, expiryDate: 1 },
-    ).lean();
+    const files = await db()
+      .select({ entityId: StoredFile.entityId, category: StoredFile.category, name: StoredFile.name, expiryDate: StoredFile.expiryDate })
+      .from(StoredFile)
+      .where(and(eq(StoredFile.entityType, "user"), inList(StoredFile.entityId, ids), isNull(StoredFile.deletedAt), isNull(StoredFile.replacedBy)));
     const byId = new Map(staff.map((p) => [p.id, p]));
-    const label = (key?: string) => settings.documentCategories.find((c) => c.key === key)?.label ?? titleCase(key ?? "Other");
+    const label = (key?: string | null) => settings.documentCategories.find((c) => c.key === key)?.label ?? titleCase(key ?? "Other");
     const rows: DocumentRow[] = [];
 
     if (f.kind !== "missing") {

@@ -242,7 +242,7 @@ export function BackupPanel({ backups, storageConfigured, autoBackup, retention 
       <div className="flex flex-col gap-4">
         {!storageConfigured && (
           <Alert tone="warning" title="File storage is not configured.">
-            Backups are written to DigitalOcean Spaces. Set DO_SPACES_KEY, DO_SPACES_SECRET, DO_SPACES_ENDPOINT and DO_SPACES_BUCKET on the server to create, verify, download or restore backups. Existing backup records are listed below for reference.
+            Backups are written to the private Cloudflare R2 bucket. Add the FILES (and PUBLIC_FILES) R2 bindings in wrangler.jsonc to create, verify, download or restore backups. Existing backup records are listed below for reference.
           </Alert>
         )}
         <p className="text-[13px] text-muted">

@@ -22,7 +22,7 @@ export function HistoryTab({ person, access }: TabProps) {
     .sort((a, b) => b.date.localeCompare(a.date) || new Date(b.at).getTime() - new Date(a.at).getTime());
 
   const items: TimelineItem[] = events.map((e) => ({
-    id: e._id?.toString(),
+    id: e._id,
     title: e.summary,
     meta: `${fmtDate(e.date)}${e.byName ? ` · by ${e.byName}` : ""}`,
     body: [e.from || e.to ? `${e.from ?? "—"} → ${e.to ?? "—"}` : "", access.canSeePersonal ? (e.note ?? "") : ""].filter(Boolean).join("\n") || undefined,

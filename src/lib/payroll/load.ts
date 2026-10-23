@@ -1,6 +1,6 @@
 import "server-only";
-import { Types } from "mongoose";
-import { connectDB } from "@/lib/db";
+import { and, asc, eq, getTableColumns, gte, lte, ne, or, sql, type Column, type SQL } from "drizzle-orm";
+import { db } from "@/lib/db";
 import {
   Attendance,
   Department,
@@ -12,10 +12,12 @@ import {
   Payslip,
   SalaryAdvance,
   User,
+  type Id,
   type IPayslip,
   type PayLine,
   type PayrollKind,
 } from "@/lib/models";
+import { inList, jsonHasField, jsonPath, notInList } from "@/lib/sql";
 import { getSettings } from "@/lib/settings";
 import { workCalendar } from "@/lib/domain/calendar";
 import { EXITED_STATUSES } from "@/lib/people";
@@ -64,7 +66,6 @@ const trunc = (text: string, max: number) => (text.length > max ? `${text.slice(
  * existing payslips so they survive a recalculation. `only` limits the calculation to some people.
  */
 export async function buildPayslips(opts: { period: string; kind: PayrollKind; runId?: string; manual?: Map<string, ManualLines>; only?: string[] }): Promise<BuildResult> {
-  await connectDB();
   const { period, kind } = opts;
   const { from, to } = monthRange(period);
   const today = todayKey();
@@ -83,16 +84,29 @@ export async function buildPayslips(opts: { period: string; kind: PayrollKind; r
   };
   const workingDays = countDays(emptyDays).totalDays;
 
-  const users = await User.find(
-    {
-      personType: { $in: ["employee", "trainee", "intern"] },
-      $or: [{ status: { $nin: EXITED_STATUSES } }, { "exit.lastWorkingDay": { $gte: from } }],
-      ...(opts.only ? { _id: { $in: opts.only } } : {}),
-    },
-    { name: 1, employeeId: 1, personType: 1, department: 1, designation: 1, joiningDate: 1, salary: 1, bank: 1, exit: 1, internship: 1 },
-  )
-    .sort({ name: 1 })
-    .lean();
+  const users = await db()
+    .select({
+      _id: User._id,
+      name: User.name,
+      employeeId: User.employeeId,
+      personType: User.personType,
+      department: User.department,
+      designation: User.designation,
+      joiningDate: User.joiningDate,
+      salary: User.salary,
+      bank: User.bank,
+      exit: User.exit,
+      internship: User.internship,
+    })
+    .from(User)
+    .where(
+      and(
+        inList(User.personType, ["employee", "trainee", "intern"]),
+        or(notInList(User.status, EXITED_STATUSES), gte(jsonPath(User.exit, "lastWorkingDay"), from)),
+        opts.only ? inList(User._id, opts.only) : undefined,
+      ),
+    )
+    .orderBy(asc(User.name));
 
   const skipped: SkippedPerson[] = [];
   const stipendOf = (u: (typeof users)[number]) => (u.internship?.stipend?.eligible && u.internship.stipend.amount > 0 ? u.internship.stipend : undefined);
@@ -104,7 +118,7 @@ export async function buildPayslips(opts: { period: string; kind: PayrollKind; r
     if (kind === "stipend") {
       if (!isIntern || !stipend) return false;
       if (u.internship?.status === "registered") {
-        skipped.push({ userId: u._id.toString(), name: u.name, reason: "Internship has not started" });
+        skipped.push({ userId: u._id, name: u.name, reason: "Internship has not started" });
         return false;
       }
       return true;
@@ -112,7 +126,7 @@ export async function buildPayslips(opts: { period: string; kind: PayrollKind; r
     // Salary run: employees, plus trainees / interns on a salary structure instead of a stipend.
     if (isIntern && (stipend || !(u.salary && u.salary.basic > 0))) return false;
     if (!(u.salary && u.salary.basic > 0)) {
-      skipped.push({ userId: u._id.toString(), name: u.name, reason: "No salary structure" });
+      skipped.push({ userId: u._id, name: u.name, reason: "No salary structure" });
       return false;
     }
     return true;
@@ -121,15 +135,36 @@ export async function buildPayslips(opts: { period: string; kind: PayrollKind; r
 
   const cutoff = today < to ? today : to;
   const [leaveTypes, leaves, attendance, advances, expenses, designations, departments, activeRuns, stipendRuns] = await Promise.all([
-    LeaveType.find({}, { paid: 1 }).lean(),
-    LeaveRequest.find({ user: { $in: ids }, status: "approved", startDate: { $lte: to }, endDate: { $gte: from } }, { user: 1, startDate: 1, endDate: 1, halfDay: 1, leaveType: 1 }).lean(),
-    Attendance.find({ user: { $in: ids }, date: { $gte: from, $lte: cutoff } }, { user: 1, date: 1, status: 1 }).lean(),
-    SalaryAdvance.find({ user: { $in: ids }, status: "open", date: { $lte: to } }).lean(),
-    Expense.find({ user: { $in: ids }, status: "approved", type: "reimbursable" }, { user: 1, description: 1, amount: 1 }).sort({ date: 1 }).lean(),
-    Designation.find({}, { name: 1 }).lean(),
-    Department.find({}, { name: 1 }).lean(),
-    PayrollRun.find({ status: { $in: ["draft", "verified", "approved"] }, ...(opts.runId ? { _id: { $ne: opts.runId } } : {}) }, { _id: 1 }).lean(),
-    kind === "stipend" ? PayrollRun.find({ kind: "stipend", status: { $ne: "cancelled" }, ...(opts.runId ? { _id: { $ne: opts.runId } } : {}) }, { _id: 1 }).lean() : Promise.resolve([]),
+    db().select({ _id: LeaveType._id, paid: LeaveType.paid }).from(LeaveType),
+    db()
+      .select({ user: LeaveRequest.user, startDate: LeaveRequest.startDate, endDate: LeaveRequest.endDate, halfDay: LeaveRequest.halfDay, leaveType: LeaveRequest.leaveType })
+      .from(LeaveRequest)
+      .where(and(inList(LeaveRequest.user, ids), eq(LeaveRequest.status, "approved"), lte(LeaveRequest.startDate, to), gte(LeaveRequest.endDate, from))),
+    db()
+      .select({ user: Attendance.user, date: Attendance.date, status: Attendance.status })
+      .from(Attendance)
+      .where(and(inList(Attendance.user, ids), gte(Attendance.date, from), lte(Attendance.date, cutoff))),
+    db()
+      .select()
+      .from(SalaryAdvance)
+      .where(and(inList(SalaryAdvance.user, ids), eq(SalaryAdvance.status, "open"), lte(SalaryAdvance.date, to))),
+    db()
+      .select({ _id: Expense._id, user: Expense.user, description: Expense.description, amount: Expense.amount })
+      .from(Expense)
+      .where(and(inList(Expense.user, ids), eq(Expense.status, "approved"), eq(Expense.type, "reimbursable")))
+      .orderBy(asc(Expense.date)),
+    db().select({ _id: Designation._id, name: Designation.name }).from(Designation),
+    db().select({ _id: Department._id, name: Department.name }).from(Department),
+    db()
+      .select({ _id: PayrollRun._id })
+      .from(PayrollRun)
+      .where(and(inList(PayrollRun.status, ["draft", "verified", "approved"]), opts.runId ? ne(PayrollRun._id, opts.runId) : undefined)),
+    kind === "stipend"
+      ? db()
+          .select({ _id: PayrollRun._id })
+          .from(PayrollRun)
+          .where(and(eq(PayrollRun.kind, "stipend"), ne(PayrollRun.status, "cancelled"), opts.runId ? ne(PayrollRun._id, opts.runId) : undefined))
+      : Promise.resolve([]),
   ]);
 
   // Expenses and advance recoveries already picked up by another unfinished run (they only hit the books when that
@@ -137,24 +172,30 @@ export async function buildPayslips(opts: { period: string; kind: PayrollKind; r
   const takenExpenses = new Set<string>();
   const reservedAdvance = new Map<string, number>();
   if (activeRuns.length > 0) {
-    const others = await Payslip.find({ run: { $in: activeRuns.map((r) => r._id) } }, { reimbursedExpenses: 1, advanceRecoveries: 1 }).lean();
+    const others = await db()
+      .select({ reimbursedExpenses: Payslip.reimbursedExpenses, advanceRecoveries: Payslip.advanceRecoveries })
+      .from(Payslip)
+      .where(inList(Payslip.run, activeRuns.map((r) => r._id)));
     for (const p of others) {
-      for (const e of p.reimbursedExpenses) takenExpenses.add(e.toString());
-      for (const a of p.advanceRecoveries) reservedAdvance.set(a.advance.toString(), round2((reservedAdvance.get(a.advance.toString()) ?? 0) + a.amount));
+      for (const e of p.reimbursedExpenses) takenExpenses.add(e);
+      for (const a of p.advanceRecoveries) reservedAdvance.set(a.advance, round2((reservedAdvance.get(a.advance) ?? 0) + a.amount));
     }
   }
   const paidOneTime = new Set<string>();
   if (stipendRuns.length > 0) {
-    const prior = await Payslip.find({ run: { $in: stipendRuns.map((r) => r._id) }, user: { $in: ids }, "earnings.key": "stipend" }, { user: 1 }).lean();
-    for (const p of prior) paidOneTime.add(p.user.toString());
+    const prior = await db()
+      .select({ user: Payslip.user })
+      .from(Payslip)
+      .where(and(inList(Payslip.run, stipendRuns.map((r) => r._id)), inList(Payslip.user, ids), jsonHasField(Payslip.earnings, "key", "stipend")));
+    for (const p of prior) paidOneTime.add(p.user);
   }
 
-  const paidType = new Map(leaveTypes.map((t) => [t._id.toString(), t.paid]));
-  const designationName = new Map(designations.map((d) => [d._id.toString(), d.name]));
-  const departmentName = new Map(departments.map((d) => [d._id.toString(), d.name]));
-  const group = <T extends { user: Types.ObjectId }>(rows: T[]) => {
+  const paidType = new Map(leaveTypes.map((t) => [t._id, t.paid]));
+  const designationName = new Map(designations.map((d) => [d._id, d.name]));
+  const departmentName = new Map(departments.map((d) => [d._id, d.name]));
+  const group = <T extends { user: Id }>(rows: T[]) => {
     const map = new Map<string, T[]>();
-    for (const r of rows) map.set(r.user.toString(), [...(map.get(r.user.toString()) ?? []), r]);
+    for (const r of rows) map.set(r.user, [...(map.get(r.user) ?? []), r]);
     return map;
   };
   const leavesBy = group(leaves);
@@ -164,7 +205,7 @@ export async function buildPayslips(opts: { period: string; kind: PayrollKind; r
 
   const calcs: PayslipCalc[] = [];
   for (const u of included) {
-    const id = u._id.toString();
+    const id = u._id;
     const stipend = stipendOf(u);
     if (kind === "stipend" && stipend?.period === "one_time" && paidOneTime.has(id)) continue;
 
@@ -178,18 +219,18 @@ export async function buildPayslips(opts: { period: string; kind: PayrollKind; r
       start: l.startDate,
       end: l.endDate,
       halfDay: l.halfDay,
-      paid: paidType.get(l.leaveType.toString()) ?? true,
+      paid: paidType.get(l.leaveType) ?? true,
     }));
     const attendanceMap = new Map((attendanceBy.get(id) ?? []).map((a) => [a.date, a.status]));
     const counts = countDays({ ...emptyDays, window, leaves: spans, attendance: attendanceMap });
 
     const advanceInputs: AdvanceInput[] = (advancesBy.get(id) ?? [])
-      .map((a) => ({ a, remaining: round2(a.amount - a.recovered - (reservedAdvance.get(a._id.toString()) ?? 0)) }))
+      .map((a) => ({ a, remaining: round2(a.amount - a.recovered - (reservedAdvance.get(a._id) ?? 0)) }))
       .filter(({ a, remaining }) => a.monthlyRecovery > 0 && remaining > 0 && !a.recoveries.some((r) => r.period === period))
-      .map(({ a, remaining }) => ({ id: a._id.toString(), label: `Advance recovery · ${fmtDate(a.date)}`, monthlyRecovery: a.monthlyRecovery, remaining }));
+      .map(({ a, remaining }) => ({ id: a._id, label: `Advance recovery · ${fmtDate(a.date)}`, monthlyRecovery: a.monthlyRecovery, remaining }));
     const reimbursements: ReimbursementInput[] = (expensesBy.get(id) ?? [])
-      .filter((e) => !takenExpenses.has(e._id.toString()))
-      .map((e) => ({ id: e._id.toString(), label: `Reimbursement · ${trunc(e.description, 48)}`, amount: e.amount }));
+      .filter((e) => !takenExpenses.has(e._id))
+      .map((e) => ({ id: e._id, label: `Reimbursement · ${trunc(e.description, 48)}`, amount: e.amount }));
 
     const pay = computePay({
       kind,
@@ -209,9 +250,9 @@ export async function buildPayslips(opts: { period: string; kind: PayrollKind; r
       snapshot: {
         name: u.name,
         employeeId: u.employeeId,
-        designation: u.designation ? designationName.get(u.designation.toString()) : undefined,
-        department: u.department ? departmentName.get(u.department.toString()) : undefined,
-        joiningDate: u.joiningDate,
+        designation: u.designation ? designationName.get(u.designation) : undefined,
+        department: u.department ? departmentName.get(u.department) : undefined,
+        joiningDate: u.joiningDate ?? undefined,
         bankAccount: u.bank?.accountNumber,
         ifsc: u.bank?.ifsc,
         bankName: u.bank?.bankName,
@@ -242,36 +283,52 @@ export function payslipFields(calc: PayslipCalc) {
     gross: calc.gross,
     totalDeductions: calc.totalDeductions,
     net: calc.net,
-    advanceRecoveries: calc.advanceRecoveries.map((a) => ({ advance: new Types.ObjectId(a.advance), amount: a.amount })),
-    reimbursedExpenses: calc.reimbursedExpenses.map((e) => new Types.ObjectId(e)),
+    advanceRecoveries: calc.advanceRecoveries.map((a) => ({ advance: a.advance, amount: a.amount })),
+    reimbursedExpenses: [...calc.reimbursedExpenses],
   };
 }
 
-/** Full Payslip document (without status) for a calculation. */
+/** Full Payslip row (without status) for a calculation. */
 export function payslipDoc(calc: PayslipCalc, run: { id: string; period: string; kind: PayrollKind }) {
   return {
-    run: new Types.ObjectId(run.id),
-    user: new Types.ObjectId(calc.userId),
+    run: run.id,
+    user: calc.userId,
     period: run.period,
     kind: run.kind,
     ...payslipFields(calc),
   };
 }
 
+const insertPayslips = (rows: (typeof Payslip.$inferInsert)[]) => db().insert(Payslip).values(rows);
+
+/**
+ * INSERT statements for payslip rows, split to stay under D1's 100-bound-parameter limit. Run them with
+ * `db().batch([...])` so a whole run is written in one round trip and one transaction.
+ */
+export function payslipInserts(rows: (typeof Payslip.$inferInsert)[]) {
+  const size = Math.max(1, Math.floor(100 / Object.keys(getTableColumns(Payslip)).length));
+  const statements: ReturnType<typeof insertPayslips>[] = [];
+  for (let i = 0; i < rows.length; i += size) statements.push(insertPayslips(rows.slice(i, i + size)));
+  return statements;
+}
+
+/**
+ * UPDATE that recomputes the run's headcount and money totals from its payslips. Returned as a statement so it can
+ * run inside a `db().batch` after the payslip writes it summarises.
+ */
+export function runTotalsUpdate(runId: Id, workingDays?: number) {
+  const agg = (expr: SQL) => sql`(select ${expr} from ${Payslip} where ${Payslip.run} = ${runId})`;
+  const money = (col: Column) => agg(sql`round(coalesce(sum(${col}), 0), 2)`);
+  return db()
+    .update(PayrollRun)
+    .set({
+      totals: sql`json_object('count', ${agg(sql`count(*)`)}, 'gross', ${money(Payslip.gross)}, 'deductions', ${money(Payslip.totalDeductions)}, 'net', ${money(Payslip.net)})`,
+      ...(workingDays !== undefined ? { workingDays } : {}),
+    })
+    .where(eq(PayrollRun._id, runId));
+}
+
 /** Recomputes the run's headcount and money totals from its payslips. */
-export async function refreshRunTotals(runId: string | Types.ObjectId, workingDays?: number): Promise<void> {
-  await connectDB();
-  const [agg] = await Payslip.aggregate<{ count: number; gross: number; deductions: number; net: number }>([
-    { $match: { run: new Types.ObjectId(runId.toString()) } },
-    { $group: { _id: null, count: { $sum: 1 }, gross: { $sum: "$gross" }, deductions: { $sum: "$totalDeductions" }, net: { $sum: "$net" } } },
-  ]);
-  await PayrollRun.updateOne(
-    { _id: runId },
-    {
-      $set: {
-        totals: { count: agg?.count ?? 0, gross: round2(agg?.gross ?? 0), deductions: round2(agg?.deductions ?? 0), net: round2(agg?.net ?? 0) },
-        ...(workingDays !== undefined ? { workingDays } : {}),
-      },
-    },
-  );
+export async function refreshRunTotals(runId: Id, workingDays?: number): Promise<void> {
+  await runTotalsUpdate(runId, workingDays);
 }

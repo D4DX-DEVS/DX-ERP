@@ -1,5 +1,6 @@
+import { asc } from "drizzle-orm";
 import { requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Client } from "@/lib/models";
 import { peopleOptions } from "@/lib/people";
 import { idParam, type SearchParams } from "@/lib/query";
@@ -14,15 +15,19 @@ export const metadata = { title: "New lead" };
 export default async function NewLeadPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePagePermission("crm.manage");
   const sp = await searchParams;
-  await connectDB();
   const settings = await getSettings();
   const [clients, people] = await Promise.all([
-    Client.find(clientScope(user), { name: 1, clientNo: 1, contactPerson: 1, email: 1, phone: 1 }).sort({ name: 1 }).limit(1000).lean(),
+    db()
+      .select({ _id: Client._id, name: Client.name, clientNo: Client.clientNo, contactPerson: Client.contactPerson, email: Client.email, phone: Client.phone })
+      .from(Client)
+      .where(clientScope(user))
+      .orderBy(asc(Client.name))
+      .limit(1000),
     peopleOptions(),
   ]);
   const stages = openStages(settings.pipelineStages);
   const prefill = idParam(sp, "client");
-  const preset = prefill ? clients.find((c) => c._id.toString() === prefill) : undefined;
+  const preset = prefill ? clients.find((c) => c._id === prefill) : undefined;
 
   return (
     <PageBody className="max-w-4xl">
@@ -31,7 +36,7 @@ export default async function NewLeadPage({ searchParams }: { searchParams: Prom
         mode="create"
         initial={{
           title: "",
-          client: preset?._id.toString() ?? "",
+          client: preset?._id ?? "",
           companyName: "",
           contactName: preset?.contactPerson ?? "",
           email: preset?.email ?? "",
@@ -45,7 +50,7 @@ export default async function NewLeadPage({ searchParams }: { searchParams: Prom
           nextFollowUp: "",
           expectedCloseDate: "",
         }}
-        clients={clients.map((c) => ({ id: c._id.toString(), name: c.name, clientNo: c.clientNo, contactPerson: c.contactPerson, email: c.email, phone: c.phone }))}
+        clients={clients.map((c) => ({ id: c._id, name: c.name, clientNo: c.clientNo, contactPerson: c.contactPerson ?? undefined, email: c.email ?? undefined, phone: c.phone ?? undefined }))}
         people={people}
         sources={settings.leadSources}
         stages={stages.map((s) => ({ key: s.key, label: s.label }))}

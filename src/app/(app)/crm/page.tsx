@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { Plus, Search, Users } from "lucide-react";
+import { and, desc, eq, lte, or, type SQL } from "drizzle-orm";
 import { can, requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Lead } from "@/lib/models";
 import { peopleOptions } from "@/lib/people";
-import { pageParam, PAGE_SIZE, param, searchRegex, withParams, idParam, type SearchParams } from "@/lib/query";
+import { pageParam, PAGE_SIZE, param, withParams, idParam, type SearchParams } from "@/lib/query";
+import { searchAny } from "@/lib/sql";
 import { getSettings } from "@/lib/settings";
 import { inr, inrCompact, plural } from "@/lib/format";
 import { fmtDate } from "@/lib/time";
@@ -27,17 +29,34 @@ export const metadata = { title: "Leads & pipeline" };
 
 const BOARD_CARD_LIMIT = 25;
 
+/** Lead columns the board and list need (the history / attachments JSON stays in the database). */
+const leadColumns = {
+  _id: Lead._id,
+  leadNo: Lead.leadNo,
+  title: Lead.title,
+  companyName: Lead.companyName,
+  expectedValue: Lead.expectedValue,
+  assignedTo: Lead.assignedTo,
+  stage: Lead.stage,
+  status: Lead.status,
+  source: Lead.source,
+  lostReason: Lead.lostReason,
+  nextFollowUp: Lead.nextFollowUp,
+  closedAt: Lead.closedAt,
+  createdAt: Lead.createdAt,
+  updatedAt: Lead.updatedAt,
+};
+
 export default async function PipelinePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePagePermission("crm.view");
   const sp = await searchParams;
-  await connectDB();
   const settings = await getSettings();
   const stages = settings.pipelineStages;
   const canManage = can(user, "crm.manage");
   const canProposal = can(user, "proposals.manage");
 
   const view = param(sp, "view") === "list" ? "list" : "board";
-  const status = ["open", "won", "lost"].includes(param(sp, "status")) ? param(sp, "status") : "";
+  const status = (["open", "won", "lost"].includes(param(sp, "status")) ? param(sp, "status") : "") as "" | "open" | "won" | "lost";
   const owner = idParam(sp, "owner");
   const source = param(sp, "source");
   const q = param(sp, "q");
@@ -45,27 +64,31 @@ export default async function PipelinePage({ searchParams }: { searchParams: Pro
   const page = pageParam(sp);
 
   const hidden = await hiddenClientIds(user);
-  const scope = notHiddenClient(hidden);
+  const scope = notHiddenClient(hidden, Lead.client);
 
-  const and: Record<string, unknown>[] = [scope];
-  if (owner) and.push({ assignedTo: owner });
-  if (source) and.push({ source });
-  if (status) and.push({ status });
-  else and.push({ $or: [{ status: "open" }, closedThisFiscalYear("won"), closedThisFiscalYear("lost")] });
-  if (dueOnly) and.push({ status: "open", nextFollowUp: { $lte: endOfToday() } });
-  const re = searchRegex(q);
-  if (re) and.push({ $or: [{ title: re }, { companyName: re }, { contactName: re }, { leadNo: re }] });
-  const filter = { $and: and };
+  const conds: (SQL | undefined)[] = [scope];
+  if (owner) conds.push(eq(Lead.assignedTo, owner));
+  if (source) conds.push(eq(Lead.source, source));
+  if (status) conds.push(eq(Lead.status, status));
+  else conds.push(or(eq(Lead.status, "open"), closedThisFiscalYear("won"), closedThisFiscalYear("lost")));
+  if (dueOnly) conds.push(and(eq(Lead.status, "open"), lte(Lead.nextFollowUp, endOfToday())));
+  conds.push(searchAny(q, Lead.title, Lead.companyName, Lead.contactName, Lead.leadNo));
+  const filter = and(...conds);
 
   const [metrics, dueRows, people, sources] = await Promise.all([
     pipelineMetrics(scope, stages),
-    Lead.find({ $and: [scope, { status: "open", nextFollowUp: { $lte: endOfToday() } }] }, { nextFollowUp: 1 }).lean(),
+    db()
+      .select({ nextFollowUp: Lead.nextFollowUp })
+      .from(Lead)
+      .where(and(scope, eq(Lead.status, "open"), lte(Lead.nextFollowUp, endOfToday()))),
     peopleOptions(),
-    Lead.distinct("source", scope),
+    db().selectDistinct({ source: Lead.source }).from(Lead).where(scope),
   ]);
   const dueCount = dueRows.length;
   const overdueCount = dueRows.filter((l) => isPast(l.nextFollowUp)).length;
-  const sourceOptions = [...new Set([...settings.leadSources, ...(sources as string[])])].filter(Boolean).map((s) => ({ value: s, label: s }));
+  const sourceOptions = [...new Set([...settings.leadSources, ...sources.map((r) => r.source)])]
+    .filter((s): s is string => Boolean(s))
+    .map((s) => ({ value: s, label: s }));
 
   const stageOptions: StageOption[] = stages.map((s) => ({ key: s.key, label: s.label, category: s.category }));
 
@@ -132,8 +155,8 @@ export default async function PipelinePage({ searchParams }: { searchParams: Pro
 
   if (view === "list") {
     const [rows, total] = await Promise.all([
-      Lead.find(filter).sort({ updatedAt: -1 }).skip((page - 1) * PAGE_SIZE).limit(PAGE_SIZE).lean(),
-      Lead.countDocuments(filter),
+      db().select(leadColumns).from(Lead).where(filter).orderBy(desc(Lead.updatedAt)).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
+      db().$count(Lead, filter),
     ]);
     const owners = await userCards(rows.map((r) => r.assignedTo));
     return (
@@ -156,9 +179,9 @@ export default async function PipelinePage({ searchParams }: { searchParams: Pro
               {rows.length === 0 && <EmptyRow colSpan={7}>No leads match these filters.</EmptyRow>}
               {rows.map((l) => {
                 const fu = l.status === "open" ? followUpView(l.nextFollowUp) : undefined;
-                const o = l.assignedTo ? owners.get(l.assignedTo.toString()) : undefined;
+                const o = l.assignedTo ? owners.get(l.assignedTo) : undefined;
                 return (
-                  <Tr key={l._id.toString()}>
+                  <Tr key={l._id}>
                     <Td>
                       <Link href={`/crm/leads/${l._id}`} className="font-semibold text-ink hover:text-brand-600">
                         {l.title}
@@ -198,7 +221,7 @@ export default async function PipelinePage({ searchParams }: { searchParams: Pro
   }
 
   // Board view
-  const leads = await Lead.find(filter).sort({ updatedAt: -1 }).limit(800).lean();
+  const leads = await db().select(leadColumns).from(Lead).where(filter).orderBy(desc(Lead.updatedAt)).limit(800);
   const owners = await userCards(leads.map((l) => l.assignedTo));
   const knownKeys = new Set(stages.map((s) => s.key));
   const columns = stages
@@ -208,9 +231,9 @@ export default async function PipelinePage({ searchParams }: { searchParams: Pro
   if (orphans.length > 0) columns.push({ key: "__other", label: "Other stage", probability: 0, category: "open", leads: orphans });
 
   const toCard = (l: (typeof leads)[number]): LeadCardData => {
-    const o = l.assignedTo ? owners.get(l.assignedTo.toString()) : undefined;
+    const o = l.assignedTo ? owners.get(l.assignedTo) : undefined;
     return {
-      id: l._id.toString(),
+      id: l._id,
       title: l.title,
       company: l.companyName,
       value: l.expectedValue ? inrCompact(l.expectedValue) : null,
@@ -218,10 +241,10 @@ export default async function PipelinePage({ searchParams }: { searchParams: Pro
       ownerPhoto: o?.photo,
       followUp: l.status === "open" ? followUpView(l.nextFollowUp) : undefined,
       age: ageLabel(l.createdAt),
-      source: l.source,
+      source: l.source ?? undefined,
       stage: l.stage,
       status: l.status,
-      lostReason: l.lostReason,
+      lostReason: l.lostReason ?? undefined,
     };
   };
 
@@ -269,7 +292,7 @@ export default async function PipelinePage({ searchParams }: { searchParams: Pro
                   </header>
                   {shown.length === 0 && <p className="rounded-xl border border-dashed border-line-strong px-3 py-6 text-center text-xs text-muted">No leads</p>}
                   {shown.map((l) => (
-                    <LeadCard key={l._id.toString()} lead={toCard(l)} stages={stageOptions} canManage={canManage} canCreateProposal={canProposal} />
+                    <LeadCard key={l._id} lead={toCard(l)} stages={stageOptions} canManage={canManage} canCreateProposal={canProposal} />
                   ))}
                   {c.leads.length > shown.length && (
                     <Link href={withParams("/crm", sp, { view: "list" })} className="px-1.5 py-1 text-xs font-semibold text-brand-600 hover:text-brand-800">

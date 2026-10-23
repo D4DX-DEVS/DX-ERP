@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { Bell, Megaphone, Pin } from "lucide-react";
+import { and, asc, desc, eq, ne } from "drizzle-orm";
 import type { CurrentUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { LeaveRequest, Movement, Notification, Project, TimesheetEntry } from "@/lib/models";
 import { leaveBalances, leaveYearOf } from "@/lib/domain/leave-balance";
-import { peopleMap } from "@/lib/reports/shared";
+import { namesFor } from "@/lib/people";
 import { getSettings } from "@/lib/settings";
+import { inList } from "@/lib/sql";
 import { statusLabel } from "@/lib/status";
 import { addDays, fmtDate, fmtTime, formatDuration, timeAgo, weekStart } from "@/lib/time";
 import { formatHours } from "@/lib/time";
@@ -22,16 +24,26 @@ const PRIORITY_DOT: Record<string, string> = { urgent: "bg-danger", high: "bg-ou
 
 /** The person's last five movements with duration and status. Their own personal movements show in full. */
 export async function MyMovementsCard({ userId }: { userId: string }) {
-  await connectDB();
   const settings = await getSettings();
   const { today } = getPeriods();
-  const rows = await Movement.find(
-    { user: userId, status: { $ne: "draft" } },
-    { date: 1, outTime: 1, inTime: 1, expectedReturn: 1, durationMinutes: 1, categoryLabel: 1, official: 1, purpose: 1, status: 1, approvalStatus: 1 },
-  )
-    .sort({ date: -1, outTime: -1 })
-    .limit(5)
-    .lean();
+  const rows = await db()
+    .select({
+      _id: Movement._id,
+      date: Movement.date,
+      outTime: Movement.outTime,
+      inTime: Movement.inTime,
+      expectedReturn: Movement.expectedReturn,
+      durationMinutes: Movement.durationMinutes,
+      categoryLabel: Movement.categoryLabel,
+      official: Movement.official,
+      purpose: Movement.purpose,
+      status: Movement.status,
+      approvalStatus: Movement.approvalStatus,
+    })
+    .from(Movement)
+    .where(and(eq(Movement.user, userId), ne(Movement.status, "draft")))
+    .orderBy(desc(Movement.date), desc(Movement.outTime))
+    .limit(5);
   return (
     <Card className="h-full">
       <CardHeader title="My movements" href="/movement?tab=mine" hrefLabel="History" />
@@ -44,7 +56,7 @@ export async function MyMovementsCard({ userId }: { userId: string }) {
             const missing = state === "missing_in";
             const overdue = state === "overdue";
             return (
-              <li key={m._id.toString()} className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line-soft px-5 py-3">
+              <li key={m._id} className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line-soft px-5 py-3">
                 <span className="w-16 shrink-0 text-[13px] font-semibold text-ink">{fmtDate(m.date, "EEE d MMM")}</span>
                 <span className="min-w-40 flex-1">
                   <Link href={`/movement/${m._id}`} className="block truncate text-[13px] font-medium text-ink hover:text-brand-600">
@@ -55,7 +67,7 @@ export async function MyMovementsCard({ userId }: { userId: string }) {
                     {m.inTime ? ` · In ${fmtTime(m.inTime)}` : ""}
                   </span>
                 </span>
-                <span className="w-14 shrink-0 text-[13px] text-ink-2 tabular">{m.durationMinutes !== undefined ? formatDuration(m.durationMinutes) : "—"}</span>
+                <span className="w-14 shrink-0 text-[13px] text-ink-2 tabular">{m.durationMinutes !== null ? formatDuration(m.durationMinutes) : "—"}</span>
                 <span className="flex shrink-0 flex-wrap gap-1.5">
                   {missing ? (
                     <Chip tone="purple">Missing In-Time</Chip>
@@ -77,17 +89,26 @@ export async function MyMovementsCard({ userId }: { userId: string }) {
 
 /** Leave balances for the current leave year plus requests still waiting for a decision. */
 export async function LeaveCard({ user }: { user: CurrentUser }) {
-  await connectDB();
   const settings = await getSettings();
   const { today } = getPeriods();
   const [balances, pending] = await Promise.all([
     leaveBalances(user._id, user.personType, leaveYearOf(today, settings), settings, today),
-    LeaveRequest.find({ user: user._id, status: { $in: ["pending_manager", "pending_hr"] } }, { startDate: 1, endDate: 1, days: 1, leaveTypeName: 1, status: 1, manager: 1 })
-      .sort({ startDate: 1 })
-      .limit(3)
-      .lean(),
+    db()
+      .select({
+        _id: LeaveRequest._id,
+        startDate: LeaveRequest.startDate,
+        endDate: LeaveRequest.endDate,
+        days: LeaveRequest.days,
+        leaveTypeName: LeaveRequest.leaveTypeName,
+        status: LeaveRequest.status,
+        manager: LeaveRequest.manager,
+      })
+      .from(LeaveRequest)
+      .where(and(eq(LeaveRequest.user, user._id), inList(LeaveRequest.status, ["pending_manager", "pending_hr"])))
+      .orderBy(asc(LeaveRequest.startDate))
+      .limit(3),
   ]);
-  const managers = await peopleMap(pending.map((p) => p.manager));
+  const managers = await namesFor(pending.map((p) => p.manager));
   const shown = balances.filter((b) => !b.unlimited && (b.quota > 0 || b.available !== 0 || b.pending > 0)).slice(0, 4);
   return (
     <Card className="h-full">
@@ -113,13 +134,13 @@ export async function LeaveCard({ user }: { user: CurrentUser }) {
           <div className="flex flex-col gap-2.5 border-t border-line-soft pt-3">
             <div className="text-xs font-semibold text-muted">Waiting for approval</div>
             {pending.map((r) => (
-              <Link key={r._id.toString()} href={`/leave/${r._id}`} className="flex items-center justify-between gap-3 text-[13px]">
+              <Link key={r._id} href={`/leave/${r._id}`} className="flex items-center justify-between gap-3 text-[13px]">
                 <span className="min-w-0">
                   <span className="block truncate font-semibold text-ink">
                     {r.startDate === r.endDate ? fmtDate(r.startDate, "EEE d MMM") : `${fmtDate(r.startDate, "d MMM")} – ${fmtDate(r.endDate, "d MMM")}`} · {r.leaveTypeName}
                   </span>
                   <span className="block text-xs text-muted">
-                    {r.days} day{r.days === 1 ? "" : "s"} · {r.status === "pending_hr" ? "Waiting for HR" : `Waiting for ${(r.manager && managers.get(r.manager.toString())?.name) || "your manager"}`}
+                    {r.days} day{r.days === 1 ? "" : "s"} · {r.status === "pending_hr" ? "Waiting for HR" : `Waiting for ${(r.manager && managers.get(r.manager)) || "your manager"}`}
                   </span>
                 </span>
                 <Chip tone="amber">Pending</Chip>
@@ -138,8 +159,9 @@ export async function MyTasksCard({ user }: { user: CurrentUser }) {
   const { today } = getPeriods();
   const closed = settings.taskStatuses.filter((s) => s.category === "done" || s.category === "cancelled").map((s) => s.key);
   const { tasks, total } = await loadOpenTasks(user._id, closed, 6);
-  const projectRows = await Project.find({ _id: { $in: tasks.flatMap((t) => (t.project ? [t.project] : [])) } }, { title: 1 }).lean();
-  const projects = new Map(projectRows.map((p) => [p._id.toString(), p.title]));
+  const projectIds = tasks.flatMap((t) => (t.project ? [t.project] : []));
+  const projectRows = projectIds.length ? await db().select({ _id: Project._id, title: Project.title }).from(Project).where(inList(Project._id, projectIds)) : [];
+  const projects = new Map(projectRows.map((p) => [p._id, p.title]));
   return (
     <Card className="h-full">
       <CardHeader title="My tasks" subtitle={`${total} open`} href="/tasks" hrefLabel="Task board" />
@@ -155,7 +177,7 @@ export async function MyTasksCard({ user }: { user: CurrentUser }) {
                 href={`/tasks/${t.id}`}
                 icon={<span className={cn("size-2.5 shrink-0 rounded-full", PRIORITY_DOT[t.priority] ?? "bg-subtle")} title={`${statusLabel("priority", t.priority)} priority`} />}
                 title={t.title}
-                meta={`${t.taskNo}${t.project ? ` · ${projects.get(t.project.toString()) ?? ""}` : ""}`}
+                meta={`${t.taskNo}${t.project ? ` · ${projects.get(t.project) ?? ""}` : ""}`}
                 trailing={
                   <span className="flex shrink-0 flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-3">
                     <OptionChip options={settings.taskStatuses} value={t.status} />
@@ -175,10 +197,12 @@ type SheetState = "none" | "draft" | "submitted" | "approved" | "rejected";
 
 /** This week's timesheet: hours logged against 40 h, per-day bars and the submission state. */
 export async function TimesheetWeekCard({ userId }: { userId: string }) {
-  await connectDB();
   const { today } = getPeriods();
   const start = weekStart(today);
-  const entries = await TimesheetEntry.find({ user: userId, weekStart: start }, { date: 1, minutes: 1, status: 1 }).lean();
+  const entries = await db()
+    .select({ date: TimesheetEntry.date, minutes: TimesheetEntry.minutes, status: TimesheetEntry.status })
+    .from(TimesheetEntry)
+    .where(and(eq(TimesheetEntry.user, userId), eq(TimesheetEntry.weekStart, start)));
   const days = Array.from({ length: 5 }, (_, i) => addDays(start, i));
   const byDay = new Map<string, number>();
   for (const e of entries) byDay.set(e.date, (byDay.get(e.date) ?? 0) + e.minutes);
@@ -253,10 +277,14 @@ export async function AnnouncementsCard({ user }: { user: CurrentUser }) {
 }
 
 export async function LatestNotificationsCard({ userId }: { userId: string }) {
-  await connectDB();
   const [items, unread] = await Promise.all([
-    Notification.find({ user: userId }, { title: 1, link: 1, read: 1, createdAt: 1, type: 1 }).sort({ createdAt: -1 }).limit(5).lean(),
-    Notification.countDocuments({ user: userId, read: false }),
+    db()
+      .select({ _id: Notification._id, title: Notification.title, link: Notification.link, read: Notification.read, createdAt: Notification.createdAt, type: Notification.type })
+      .from(Notification)
+      .where(eq(Notification.user, userId))
+      .orderBy(desc(Notification.createdAt))
+      .limit(5),
+    db().$count(Notification, and(eq(Notification.user, userId), eq(Notification.read, false))),
   ]);
   return (
     <Card className="h-full">
@@ -267,7 +295,7 @@ export async function LatestNotificationsCard({ userId }: { userId: string }) {
         <div>
           {items.map((n) => (
             <ListRow
-              key={n._id.toString()}
+              key={n._id}
               href={safeLink(n.link) ?? "/notifications"}
               icon={<span className={cn("size-2 shrink-0 rounded-full", n.read ? "bg-transparent" : "bg-brand-600")} role="img" aria-label={n.read ? "Read" : "Unread"} />}
               title={n.title}

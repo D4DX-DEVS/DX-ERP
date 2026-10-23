@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight, Download, Repeat } from "lucide-react";
 import Link from "next/link";
+import { and, asc, eq } from "drizzle-orm";
 import { ActionButton } from "@/components/ui/actions";
 import { PersonCell } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -9,12 +10,13 @@ import { Input, Select } from "@/components/ui/input";
 import { PageBody, PageHeader } from "@/components/ui/page";
 import { EmptyRow, TableWrap, THead, Td, Th, Tr } from "@/components/ui/table";
 import { requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { leaveYearOf, leaveYearRange } from "@/lib/domain/leave-balance";
 import { Department, User } from "@/lib/models";
 import { peopleOptions } from "@/lib/people";
-import { PAGE_SIZE, idParam, pageParam, param, searchRegex, type SearchParams } from "@/lib/query";
+import { PAGE_SIZE, idParam, pageParam, param, type SearchParams } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
+import { notInList, inList, searchAny } from "@/lib/sql";
 import { cn } from "@/lib/cn";
 import { fmtDate, todayKey } from "@/lib/time";
 import { carryForward } from "../actions";
@@ -30,7 +32,6 @@ export default async function LeaveBalancesPage({ searchParams }: { searchParams
   const user = await requirePagePermission("leave.manage");
   const access = await leaveAccess(user);
   const sp = await searchParams;
-  await connectDB();
   const settings = await getSettings();
   const today = todayKey();
   const requestedYear = Number.parseInt(param(sp, "year"), 10);
@@ -40,22 +41,28 @@ export default async function LeaveBalancesPage({ searchParams }: { searchParams
   const dept = idParam(sp, "dept");
   const page = pageParam(sp);
 
-  const and: Record<string, unknown>[] = [];
-  const rx = q ? searchRegex(q) : undefined;
-  if (rx) and.push({ $or: [{ name: rx }, { employeeId: rx }] });
-  const filter: Record<string, unknown> = { personType: { $in: STAFF_TYPES }, status: { $nin: EXITED_STATUSES } };
-  if (dept) filter.department = dept;
-  if (and.length) filter.$and = and;
+  const filter = and(
+    inList(User.personType, STAFF_TYPES),
+    notInList(User.status, EXITED_STATUSES),
+    dept ? eq(User.department, dept) : undefined,
+    q ? searchAny(q, User.name, User.employeeId) : undefined,
+  );
 
   const [total, people, departments, options] = await Promise.all([
-    User.countDocuments(filter),
-    User.find(filter, { name: 1, employeeId: 1, photo: 1, personType: 1, department: 1 }).sort({ name: 1 }).skip((page - 1) * PAGE_SIZE).limit(PAGE_SIZE).lean(),
-    Department.find({}, { name: 1 }).sort({ name: 1 }).lean(),
+    db().$count(User, filter),
+    db()
+      .select({ _id: User._id, name: User.name, employeeId: User.employeeId, photo: User.photo, personType: User.personType, department: User.department })
+      .from(User)
+      .where(filter)
+      .orderBy(asc(User.name))
+      .limit(PAGE_SIZE)
+      .offset((page - 1) * PAGE_SIZE),
+    db().select({ _id: Department._id, name: Department.name }).from(Department).orderBy(asc(Department.name)),
     peopleOptions(),
   ]);
   const asOf = today >= range.from && today <= range.to ? today : today < range.from ? range.from : range.to;
-  const { types, rows, stored } = await bulkLeaveBalances(people.map((p) => ({ id: p._id.toString(), personType: p.personType })), year, settings, asOf);
-  const deptName = new Map(departments.map((d) => [d._id.toString(), d.name]));
+  const { types, rows, stored } = await bulkLeaveBalances(people.map((p) => ({ id: p._id, personType: p.personType })), year, settings, asOf);
+  const deptName = new Map(departments.map((d) => [d._id, d.name]));
 
   const yearLink = (y: number) => {
     const p = new URLSearchParams();
@@ -101,7 +108,7 @@ export default async function LeaveBalancesPage({ searchParams }: { searchParams
         <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-4 py-3">
           <FilterBar>
             <SearchInput placeholder="Search people" />
-            <SelectFilter param="dept" label="Department" allLabel="All departments" options={departments.map((d) => ({ value: d._id.toString(), label: d.name }))} />
+            <SelectFilter param="dept" label="Department" allLabel="All departments" options={departments.map((d) => ({ value: d._id, label: d.name }))} />
             <ClearFilters keep={["year"]} />
           </FilterBar>
           <span className="ml-auto text-xs text-muted">Select a balance to adjust it</span>
@@ -110,32 +117,32 @@ export default async function LeaveBalancesPage({ searchParams }: { searchParams
           <THead>
             <Th>Person</Th>
             {types.map((t) => (
-              <Th key={t._id.toString()}>{t.name}</Th>
+              <Th key={t._id}>{t.name}</Th>
             ))}
           </THead>
           <tbody>
             {people.length === 0 && <EmptyRow colSpan={types.length + 1}>No staff match these filters.</EmptyRow>}
             {people.map((p) => {
-              const id = p._id.toString();
+              const id = p._id;
               return (
                 <Tr key={id}>
                   <Td>
-                    <PersonCell name={p.name} photo={p.photo} sub={[p.employeeId, p.department ? deptName.get(p.department.toString()) : undefined].filter(Boolean).join(" · ")} />
+                    <PersonCell name={p.name} photo={p.photo ?? undefined} sub={[p.employeeId, p.department ? deptName.get(p.department) : undefined].filter(Boolean).join(" · ")} />
                   </Td>
                   {types.map((t) => {
-                    const row = rows.get(id)?.get(t._id.toString());
-                    if (!row) return <Td key={t._id.toString()}><span className="text-muted">—</span></Td>;
-                    const s = stored.get(`${id}:${t._id.toString()}`);
+                    const row = rows.get(id)?.get(t._id);
+                    if (!row) return <Td key={t._id}><span className="text-muted">—</span></Td>;
+                    const s = stored.get(`${id}:${t._id}`);
                     const total = row.accrued + row.carriedForward + row.adjustment;
                     return (
-                      <Td key={t._id.toString()}>
+                      <Td key={t._id}>
                         <AdjustBalanceDialog
                           userId={id}
                           userName={p.name}
-                          leaveTypeId={t._id.toString()}
+                          leaveTypeId={t._id}
                           leaveTypeName={t.name}
                           year={year}
-                          summary={{ ...row, quotaOverride: s?.quotaOverride, defaultQuota: t.annualQuota }}
+                          summary={{ ...row, quotaOverride: s?.quotaOverride ?? undefined, defaultQuota: t.annualQuota }}
                           notes={(s?.notes ?? []).slice(-5).reverse().map((n) => ({ amount: n.amount, reason: n.reason, byName: n.byName, at: n.at.toISOString() }))}
                           trigger={
                             <button type="button" className="group -mx-2 flex min-w-24 flex-col rounded-lg px-2 py-1 text-left hover:bg-brand-50" aria-label={`Adjust ${t.name} balance for ${p.name}`}>
@@ -143,7 +150,7 @@ export default async function LeaveBalancesPage({ searchParams }: { searchParams
                               <span className="text-xs text-muted tabular">
                                 {row.unlimited ? "no limit" : `${row.used} used of ${total}`}
                                 {row.pending > 0 ? ` · ${row.pending} pending` : ""}
-                                {s?.quotaOverride !== undefined ? " · custom quota" : ""}
+                                {s?.quotaOverride != null ? " · custom quota" : ""}
                               </span>
                             </button>
                           }

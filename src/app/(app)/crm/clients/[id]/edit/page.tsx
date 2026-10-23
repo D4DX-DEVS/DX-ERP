@@ -43,7 +43,7 @@ export default async function EditClientPage({ params }: { params: Promise<{ id:
           postalCode: c.address?.postalCode ?? "",
           country: c.address?.country ?? "",
           leadSource: c.leadSource ?? "",
-          owner: c.owner?.toString() ?? "",
+          owner: c.owner ?? "",
           status: c.status,
           confidential: c.confidential,
           notes: c.notes ?? "",

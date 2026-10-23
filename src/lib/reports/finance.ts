@@ -1,7 +1,8 @@
 import "server-only";
-import type { Types } from "mongoose";
-import { connectDB } from "@/lib/db";
-import { Asset, Department, Expense, Invoice, Payment, Project, type IInvoice } from "@/lib/models";
+import { and, asc, count, desc, eq, gt, gte, lt, lte, ne, sql } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { Asset, Department, Expense, Invoice, Payment, Project, type AssetStatus, type ExpenseStatus, type IInvoice, type InvoiceStatus, type PaymentType } from "@/lib/models";
+import { inList, notInList } from "@/lib/sql";
 import { getSettings } from "@/lib/settings";
 import { optionLabel, statusLabel } from "@/lib/status";
 import { addDays, addMonths, diffDays, fmtDate, todayKey } from "@/lib/time";
@@ -18,8 +19,10 @@ import {
   projectMap,
   rangeOf,
   RANGE_FILTERS,
+  sumOf,
   userScope,
   type PersonInfo,
+  type ProjectInfo,
 } from "./shared";
 import { defineReport, type ReportFilterDef } from "./types";
 
@@ -62,28 +65,40 @@ const invoiceStatus = defineReport<InvoiceRow>({
     { key: "project", label: "Project", type: "project" },
   ],
   async run(f, user) {
-    await connectDB();
     const today = todayKey();
     const hidden = await hiddenClientIds(user);
     const { from, to } = rangeOf(f);
-    const filter: Record<string, unknown> = { issueDate: { $gte: from, $lte: to }, status: { $ne: "draft" }, ...clientScope(f, hidden) };
-    if (f.project) filter.project = f.project;
-    if (f.status === "overdue") {
-      filter.status = { $in: ["issued", "partially_paid", "overdue"] };
-      filter.dueDate = { $lt: today };
-      filter.balance = { $gt: 0 };
-    } else if (f.status) filter.status = f.status;
-    const docs = await Invoice.find(filter, { invoiceNo: 1, draftNo: 1, client: 1, project: 1, issueDate: 1, dueDate: 1, total: 1, amountPaid: 1, amountRefunded: 1, balance: 1, status: 1 })
-      .sort({ issueDate: -1 })
-      .limit(20_000)
-      .lean();
+    const statusCond =
+      f.status === "overdue"
+        ? and(inList(Invoice.status, ["issued", "partially_paid", "overdue"]), lt(Invoice.dueDate, today), gt(Invoice.balance, 0))
+        : f.status
+          ? eq(Invoice.status, f.status as InvoiceStatus)
+          : ne(Invoice.status, "draft");
+    const docs = await db()
+      .select({
+        invoiceNo: Invoice.invoiceNo,
+        draftNo: Invoice.draftNo,
+        client: Invoice.client,
+        project: Invoice.project,
+        issueDate: Invoice.issueDate,
+        dueDate: Invoice.dueDate,
+        total: Invoice.total,
+        amountPaid: Invoice.amountPaid,
+        amountRefunded: Invoice.amountRefunded,
+        balance: Invoice.balance,
+        status: Invoice.status,
+      })
+      .from(Invoice)
+      .where(and(gte(Invoice.issueDate, from), lte(Invoice.issueDate, to), statusCond, clientScope(f, hidden, Invoice.client), f.project ? eq(Invoice.project, f.project) : undefined))
+      .orderBy(desc(Invoice.issueDate))
+      .limit(20_000);
     const [clients, projects] = await Promise.all([clientNames(docs.map((d) => d.client), user), projectMap(docs.map((d) => d.project))]);
     const rows: InvoiceRow[] = docs.map((d) => {
       const status = effectiveInvoiceStatus(d, today);
-      const project = d.project ? projects.get(d.project.toString()) : undefined;
+      const project = d.project ? projects.get(d.project) : undefined;
       return {
         number: invoiceNumber(d),
-        client: clients.get(d.client.toString()) ?? "",
+        client: clients.get(d.client) ?? "",
         project: project ? `${project.projectNo} · ${project.title}` : "",
         issueDate: d.issueDate,
         dueDate: d.dueDate,
@@ -146,14 +161,17 @@ const receivablesAging = defineReport<AgingRow>({
   permissions: [...FIN, "invoices.view"],
   filters: [{ key: "client", label: "Client", type: "client" }],
   async run(f, user) {
-    await connectDB();
     const today = todayKey();
     const hidden = await hiddenClientIds(user);
-    const docs = await Invoice.find({ status: { $in: ["issued", "partially_paid", "overdue"] }, balance: { $gt: 0 }, ...clientScope(f, hidden) }, { client: 1, dueDate: 1, balance: 1 }).limit(50_000).lean();
+    const docs = await db()
+      .select({ client: Invoice.client, dueDate: Invoice.dueDate, balance: Invoice.balance })
+      .from(Invoice)
+      .where(and(inList(Invoice.status, ["issued", "partially_paid", "overdue"]), gt(Invoice.balance, 0), clientScope(f, hidden, Invoice.client)))
+      .limit(50_000);
     const clients = await clientNames(docs.map((d) => d.client), user);
     const map = new Map<string, AgingRow>();
     for (const d of docs) {
-      const key = d.client.toString();
+      const key = d.client;
       const row = map.get(key) ?? { client: clients.get(key) ?? "", invoices: 0, current: 0, d1: 0, d31: 0, d61: 0, d90: 0, total: 0 };
       const late = diffDays(d.dueDate, today);
       row.invoices += 1;
@@ -219,25 +237,44 @@ const clientPayments = defineReport<PaymentRow>({
     { key: "type", label: "Type", type: "select", options: ["payment", "refund", "adjustment"].map((s) => ({ value: s, label: statusLabel("payment", s) })) },
   ],
   async run(f, user) {
-    await connectDB();
     const hidden = await hiddenClientIds(user);
     const { from, to } = rangeOf(f);
-    const filter: Record<string, unknown> = { date: { $gte: from, $lte: to }, ...clientScope(f, hidden) };
-    if (f.type) filter.type = f.type;
-    const docs = await Payment.find(filter).sort({ date: -1, createdAt: -1 }).limit(20_000).lean();
-    const [clients, invoices] = await Promise.all([clientNames(docs.map((d) => d.client), user), Invoice.find({ _id: { $in: docs.map((d) => d.invoice) } }, { invoiceNo: 1, draftNo: 1 }).lean()]);
-    const invoiceNo = new Map(invoices.map((i) => [i._id.toString(), invoiceNumber(i)]));
+    const docs = await db()
+      .select({
+        date: Payment.date,
+        paymentNo: Payment.paymentNo,
+        client: Payment.client,
+        invoice: Payment.invoice,
+        type: Payment.type,
+        method: Payment.method,
+        reference: Payment.reference,
+        amount: Payment.amount,
+        recordedByName: Payment.recordedByName,
+        note: Payment.note,
+      })
+      .from(Payment)
+      .where(and(gte(Payment.date, from), lte(Payment.date, to), clientScope(f, hidden, Payment.client), f.type ? eq(Payment.type, f.type as PaymentType) : undefined))
+      .orderBy(desc(Payment.date), desc(Payment.createdAt))
+      .limit(20_000);
+    const [clients, invoices] = await Promise.all([
+      clientNames(docs.map((d) => d.client), user),
+      db()
+        .select({ id: Invoice._id, invoiceNo: Invoice.invoiceNo, draftNo: Invoice.draftNo })
+        .from(Invoice)
+        .where(inList(Invoice._id, [...new Set(docs.map((d) => d.invoice))])),
+    ]);
+    const invoiceNo = new Map(invoices.map((i) => [i.id, invoiceNumber(i)]));
     const rows: PaymentRow[] = docs.map((d) => ({
       date: d.date,
       paymentNo: d.paymentNo,
-      client: clients.get(d.client.toString()) ?? "",
-      invoice: invoiceNo.get(d.invoice.toString()) ?? "",
+      client: clients.get(d.client) ?? "",
+      invoice: invoiceNo.get(d.invoice) ?? "",
       type: statusLabel("payment", d.type),
       typeKey: d.type,
       method: titleCase(d.method),
       reference: d.reference ?? "",
       amount: d.type === "refund" ? -Math.abs(d.amount) : d.amount,
-      recordedBy: d.recordedByName,
+      recordedBy: d.recordedByName ?? "",
       note: d.note ?? "",
     }));
     const sum = (type: string) => rows.filter((r) => r.typeKey === type).reduce((s, r) => s + r.amount, 0);
@@ -290,22 +327,25 @@ const revenueMonthly = defineReport<RevenueRow>({
     { key: "to", label: "To month", type: "month", defaultValue: DEFAULTS.thisMonth },
   ],
   async run(f) {
-    await connectDB();
     const { from, to } = monthRangeOf(f);
     const lo = `${from}-01`;
     const hi = `${to}-31`;
+    const invoiceMonth = sql<string>`substr(${Invoice.issueDate}, 1, 7)`;
+    const paymentMonth = sql<string>`substr(${Payment.date}, 1, 7)`;
     const [invoiced, payments] = await Promise.all([
-      Invoice.aggregate<{ _id: string; count: number; total: number; tax: number; balance: number }>([
-        { $match: { issueDate: { $gte: lo, $lte: hi }, status: { $nin: ["draft", "cancelled"] } } },
-        { $group: { _id: { $substrBytes: ["$issueDate", 0, 7] }, count: { $sum: 1 }, total: { $sum: "$total" }, tax: { $sum: "$taxTotal" }, balance: { $sum: "$balance" } } },
-      ]),
-      Payment.aggregate<{ _id: { month: string; type: string }; amount: number }>([
-        { $match: { date: { $gte: lo, $lte: hi } } },
-        { $group: { _id: { month: { $substrBytes: ["$date", 0, 7] }, type: "$type" }, amount: { $sum: "$amount" } } },
-      ]),
+      db()
+        .select({ month: invoiceMonth, count: count(), total: sumOf(Invoice.total), tax: sumOf(Invoice.taxTotal), balance: sumOf(Invoice.balance) })
+        .from(Invoice)
+        .where(and(gte(Invoice.issueDate, lo), lte(Invoice.issueDate, hi), notInList(Invoice.status, ["draft", "cancelled"])))
+        .groupBy(invoiceMonth),
+      db()
+        .select({ month: paymentMonth, type: Payment.type, amount: sumOf(Payment.amount) })
+        .from(Payment)
+        .where(and(gte(Payment.date, lo), lte(Payment.date, hi)))
+        .groupBy(paymentMonth, Payment.type),
     ]);
-    const inv = new Map(invoiced.map((i) => [i._id, i]));
-    const paid = (month: string, type: string) => payments.find((p) => p._id.month === month && p._id.type === type)?.amount ?? 0;
+    const inv = new Map(invoiced.map((i) => [i.month, i]));
+    const paid = (month: string, type: string) => payments.find((p) => p.month === month && p.type === type)?.amount ?? 0;
     const rows: RevenueRow[] = [];
     for (let m = from; m <= to; m = addMonths(m, 1)) {
       const i = inv.get(m);
@@ -383,38 +423,55 @@ const expensesBreakdown = defineReport<ExpenseGroupRow>({
     { key: "project", label: "Project", type: "project" },
   ],
   async run(f) {
-    await connectDB();
     const { from, to } = rangeOf(f);
-    const filter: Record<string, unknown> = { date: { $gte: from, $lte: to }, status: f.status || { $in: ["approved", "paid"] } };
-    if (f.category) filter.category = f.category;
-    if (f.department) filter.department = f.department;
-    if (f.project) filter.project = f.project;
-    const docs = await Expense.find(filter, { user: 1, category: 1, department: 1, project: 1, amount: 1, taxAmount: 1, type: 1 }).limit(100_000).lean();
     const groupBy = f.groupBy || "category";
+    // Summed in SQL per grouping id; groups are then merged by display name (as the old per-document reduce did).
+    const groupColumn = groupBy === "department" ? Expense.department : groupBy === "project" ? Expense.project : groupBy === "person" ? Expense.user : Expense.category;
+    const groups = await db()
+      .select({
+        key: groupColumn,
+        count: count(),
+        amount: sumOf(Expense.amount),
+        tax: sumOf(Expense.taxAmount),
+        reimbursable: sumOf(sql`case when ${Expense.type} = 'reimbursable' then ${Expense.amount} else 0 end`),
+        company: sumOf(sql`case when ${Expense.type} = 'reimbursable' then 0 else ${Expense.amount} end`),
+      })
+      .from(Expense)
+      .where(
+        and(
+          gte(Expense.date, from),
+          lte(Expense.date, to),
+          f.status ? eq(Expense.status, f.status as ExpenseStatus) : inList(Expense.status, ["approved", "paid"]),
+          f.category ? eq(Expense.category, f.category) : undefined,
+          f.department ? eq(Expense.department, f.department) : undefined,
+          f.project ? eq(Expense.project, f.project) : undefined,
+        ),
+      )
+      .groupBy(groupColumn);
     const [departments, projects, people] = await Promise.all([
-      Department.find({}, { name: 1 }).lean(),
-      projectMap(docs.map((d) => d.project)),
-      groupBy === "person" ? peopleMap(docs.map((d) => d.user)) : Promise.resolve(new Map<string, PersonInfo>()),
+      groupBy === "department" ? db().select({ id: Department._id, name: Department.name }).from(Department) : Promise.resolve([]),
+      groupBy === "project" ? projectMap(groups.map((g) => g.key)) : Promise.resolve(new Map<string, ProjectInfo>()),
+      groupBy === "person" ? peopleMap(groups.map((g) => g.key)) : Promise.resolve(new Map<string, PersonInfo>()),
     ]);
-    const deptName = new Map(departments.map((d) => [d._id.toString(), d.name]));
-    const keyOf = (d: (typeof docs)[number]): string => {
-      if (groupBy === "department") return d.department ? (deptName.get(d.department.toString()) ?? "Unknown") : "No department";
+    const deptName = new Map(departments.map((d) => [d.id, d.name]));
+    const keyOf = (id: string | null): string => {
+      if (groupBy === "department") return id ? (deptName.get(id) ?? "Unknown") : "No department";
       if (groupBy === "project") {
-        const p = d.project ? projects.get(d.project.toString()) : undefined;
+        const p = id ? projects.get(id) : undefined;
         return p ? `${p.projectNo} · ${p.title}` : "No project";
       }
-      if (groupBy === "person") return people.get(d.user.toString())?.name ?? "Unknown";
-      return d.category;
+      if (groupBy === "person") return (id ? people.get(id)?.name : undefined) ?? "Unknown";
+      return id ?? "";
     };
     const map = new Map<string, ExpenseGroupRow>();
-    for (const d of docs) {
-      const key = keyOf(d);
+    for (const g of groups) {
+      const key = keyOf(g.key);
       const row = map.get(key) ?? { group: key, count: 0, amount: 0, tax: 0, reimbursable: 0, company: 0 };
-      row.count += 1;
-      row.amount += d.amount;
-      row.tax += d.taxAmount;
-      if (d.type === "reimbursable") row.reimbursable += d.amount;
-      else row.company += d.amount;
+      row.count += g.count;
+      row.amount += g.amount;
+      row.tax += g.tax;
+      row.reimbursable += g.reimbursable;
+      row.company += g.company;
       map.set(key, row);
     }
     const rows = [...map.values()].sort((a, b) => b.amount - a.amount);
@@ -470,13 +527,35 @@ const reimbursements = defineReport<ReimbursementRow>({
     PERSON_FILTER,
   ],
   async run(f) {
-    await connectDB();
     const { from, to } = rangeOf(f);
-    const filter: Record<string, unknown> = { type: "reimbursable", date: { $gte: from, $lte: to }, status: f.status || { $ne: "draft" }, ...(await userScope(f)) };
-    const docs = await Expense.find(filter, { user: 1, expenseNo: 1, date: 1, category: 1, description: 1, amount: 1, status: 1, approverName: 1, decidedAt: 1, payment: 1 }).sort({ date: -1 }).limit(20_000).lean();
+    const docs = await db()
+      .select({
+        user: Expense.user,
+        expenseNo: Expense.expenseNo,
+        date: Expense.date,
+        category: Expense.category,
+        description: Expense.description,
+        amount: Expense.amount,
+        status: Expense.status,
+        approverName: Expense.approverName,
+        decidedAt: Expense.decidedAt,
+        payment: Expense.payment,
+      })
+      .from(Expense)
+      .where(
+        and(
+          eq(Expense.type, "reimbursable"),
+          gte(Expense.date, from),
+          lte(Expense.date, to),
+          f.status ? eq(Expense.status, f.status as ExpenseStatus) : ne(Expense.status, "draft"),
+          userScope(f, Expense.user),
+        ),
+      )
+      .orderBy(desc(Expense.date))
+      .limit(20_000);
     const people = await peopleMap(docs.map((d) => d.user));
     const rows: ReimbursementRow[] = docs.flatMap((d) => {
-      const person = people.get(d.user.toString());
+      const person = people.get(d.user);
       if (!person) return [];
       return [
         {
@@ -489,7 +568,7 @@ const reimbursements = defineReport<ReimbursementRow>({
           status: statusLabel("expense", d.status),
           statusKey: d.status,
           approver: d.approverName ?? "",
-          decidedAt: d.decidedAt,
+          decidedAt: d.decidedAt ?? undefined,
           paidOn: fmtDate(d.payment?.date),
           viaPayroll: d.payment?.viaPayroll ? "Yes" : d.status === "paid" ? "No" : "",
         },
@@ -550,40 +629,44 @@ const projectProfitability = defineReport<ProfitRow>({
     { key: "project", label: "Project", type: "project" },
   ],
   async run(f, user) {
-    await connectDB();
     const settings = await getSettings();
     const hidden = await hiddenClientIds(user);
-    const filter: Record<string, unknown> = { ...clientScope(f, hidden) };
-    if (f.status) filter.status = f.status;
-    if (f.project) filter._id = f.project;
-    const projects = await Project.find(filter, { projectNo: 1, title: 1, client: 1, status: 1, budget: 1 }).sort({ createdAt: -1 }).limit(2000).lean();
-    const ids = projects.map((p) => p._id);
+    const projects = await db()
+      .select({ id: Project._id, projectNo: Project.projectNo, title: Project.title, client: Project.client, status: Project.status, budget: Project.budget })
+      .from(Project)
+      .where(and(clientScope(f, hidden, Project.client), f.status ? eq(Project.status, f.status) : undefined, f.project ? eq(Project._id, f.project) : undefined))
+      .orderBy(desc(Project.createdAt))
+      .limit(2000);
+    const ids = projects.map((p) => p.id);
     const [invoiced, received, spent, clients] = await Promise.all([
-      Invoice.aggregate<{ _id: Types.ObjectId; total: number; balance: number }>([
-        { $match: { project: { $in: ids }, status: { $nin: ["draft", "cancelled"] } } },
-        { $group: { _id: "$project", total: { $sum: "$total" }, balance: { $sum: "$balance" } } },
-      ]),
-      Payment.aggregate<{ _id: { project: Types.ObjectId; type: string }; amount: number }>([
-        { $match: { project: { $in: ids }, type: { $in: ["payment", "refund"] } } },
-        { $group: { _id: { project: "$project", type: "$type" }, amount: { $sum: "$amount" } } },
-      ]),
-      Expense.aggregate<{ _id: Types.ObjectId; amount: number }>([
-        { $match: { project: { $in: ids }, status: { $in: ["approved", "paid"] } } },
-        { $group: { _id: "$project", amount: { $sum: "$amount" } } },
-      ]),
+      db()
+        .select({ project: Invoice.project, total: sumOf(Invoice.total), balance: sumOf(Invoice.balance) })
+        .from(Invoice)
+        .where(and(inList(Invoice.project, ids), notInList(Invoice.status, ["draft", "cancelled"])))
+        .groupBy(Invoice.project),
+      db()
+        .select({ project: Payment.project, type: Payment.type, amount: sumOf(Payment.amount) })
+        .from(Payment)
+        .where(and(inList(Payment.project, ids), inList(Payment.type, ["payment", "refund"])))
+        .groupBy(Payment.project, Payment.type),
+      db()
+        .select({ project: Expense.project, amount: sumOf(Expense.amount) })
+        .from(Expense)
+        .where(and(inList(Expense.project, ids), inList(Expense.status, ["approved", "paid"])))
+        .groupBy(Expense.project),
       clientNames(projects.map((p) => p.client), user),
     ]);
-    const inv = new Map(invoiced.map((i) => [i._id.toString(), i]));
-    const exp = new Map(spent.map((e) => [e._id.toString(), e.amount]));
-    const cash = (id: string) => received.filter((r) => r._id.project.toString() === id).reduce((s, r) => s + (r._id.type === "refund" ? -Math.abs(r.amount) : r.amount), 0);
+    const inv = new Map(invoiced.map((i) => [i.project, i]));
+    const exp = new Map(spent.map((e) => [e.project, e.amount]));
+    const cash = (id: string) => received.filter((r) => r.project === id).reduce((s, r) => s + (r.type === "refund" ? -Math.abs(r.amount) : r.amount), 0);
     const rows: ProfitRow[] = projects.map((p) => {
-      const id = p._id.toString();
+      const id = p.id;
       const i = inv.get(id);
       const expenses = exp.get(id) ?? 0;
       return {
         projectNo: p.projectNo,
         title: p.title,
-        client: p.client ? (clients.get(p.client.toString()) ?? "") : "Internal",
+        client: p.client ? (clients.get(p.client) ?? "") : "Internal",
         status: optionLabel(settings.projectStatuses, p.status),
         budget: p.budget,
         invoiced: i?.total ?? 0,
@@ -654,32 +737,57 @@ const assetRegister = defineReport<AssetRow>({
     DEPARTMENT_FILTER,
   ],
   async run(f) {
-    await connectDB();
     const today = todayKey();
-    const filter: Record<string, unknown> = {};
-    if (f.status) filter.status = f.status;
-    if (f.category) filter.category = f.category;
-    if (f.person) filter.assignedTo = f.person;
-    if (f.department) filter.department = f.department;
-    const [assets, departments] = await Promise.all([Asset.find(filter).sort({ assetNo: 1 }).limit(20_000).lean(), Department.find({}, { name: 1 }).lean()]);
+    const [assets, departments] = await Promise.all([
+      db()
+        .select({
+          assetNo: Asset.assetNo,
+          name: Asset.name,
+          category: Asset.category,
+          brand: Asset.brand,
+          model: Asset.model,
+          serialNo: Asset.serialNo,
+          purchaseDate: Asset.purchaseDate,
+          cost: Asset.cost,
+          status: Asset.status,
+          condition: Asset.condition,
+          assignedTo: Asset.assignedTo,
+          department: Asset.department,
+          location: Asset.location,
+          warrantyUntil: Asset.warrantyUntil,
+          nextServiceDate: Asset.nextServiceDate,
+        })
+        .from(Asset)
+        .where(
+          and(
+            f.status ? eq(Asset.status, f.status as AssetStatus) : undefined,
+            f.category ? eq(Asset.category, f.category) : undefined,
+            f.person ? eq(Asset.assignedTo, f.person) : undefined,
+            f.department ? eq(Asset.department, f.department) : undefined,
+          ),
+        )
+        .orderBy(asc(Asset.assetNo))
+        .limit(20_000),
+      db().select({ id: Department._id, name: Department.name }).from(Department),
+    ]);
     const people = await peopleMap(assets.map((a) => a.assignedTo));
-    const deptName = new Map(departments.map((d) => [d._id.toString(), d.name]));
+    const deptName = new Map(departments.map((d) => [d.id, d.name]));
     const rows: AssetRow[] = assets.map((a) => ({
       assetNo: a.assetNo,
       name: a.name,
       category: a.category,
       brandModel: [a.brand, a.model].filter(Boolean).join(" "),
       serialNo: a.serialNo ?? "",
-      purchaseDate: a.purchaseDate,
+      purchaseDate: a.purchaseDate ?? undefined,
       cost: a.cost,
       status: statusLabel("asset", a.status),
       statusKey: a.status,
       condition: statusLabel("assetCondition", a.condition),
-      assignedTo: a.assignedTo ? (people.get(a.assignedTo.toString())?.name ?? "") : "",
-      department: a.department ? (deptName.get(a.department.toString()) ?? "") : "",
+      assignedTo: a.assignedTo ? (people.get(a.assignedTo)?.name ?? "") : "",
+      department: a.department ? (deptName.get(a.department) ?? "") : "",
       location: a.location ?? "",
-      warrantyUntil: a.warrantyUntil,
-      nextService: a.nextServiceDate,
+      warrantyUntil: a.warrantyUntil ?? undefined,
+      nextService: a.nextServiceDate ?? undefined,
     }));
     const soon = addDays(today, 60);
     return {

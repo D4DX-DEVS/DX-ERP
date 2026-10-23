@@ -1,6 +1,7 @@
 import { forbidden, notFound } from "next/navigation";
+import { and, eq } from "drizzle-orm";
 import { can, requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Project, Task } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
 import { isObjectId } from "@/lib/validation";
@@ -16,10 +17,13 @@ export default async function EditTaskPage({ params }: { params: Promise<{ id: s
   const { id } = await params;
   if (!isObjectId(id)) notFound();
   const user = await requireUser();
-  await connectDB();
-  const task = await Task.findOne({ $and: [{ _id: id }, await taskFilter(user)] }).lean();
+  const [task] = await db()
+    .select()
+    .from(Task)
+    .where(and(eq(Task._id, id), await taskFilter(user)))
+    .limit(1);
   if (!task) notFound();
-  const project = task.project ? await Project.findById(task.project, { manager: 1 }).lean() : null;
+  const [project] = task.project ? await db().select({ _id: Project._id, manager: Project.manager }).from(Project).where(eq(Project._id, task.project)).limit(1) : [];
   if (!taskCaps(user, task, project?.manager).manage) forbidden();
 
   const settings = await getSettings();
@@ -38,19 +42,19 @@ export default async function EditTaskPage({ params }: { params: Promise<{ id: s
             lockProject
             initial={{
               id,
-              project: task.project?.toString(),
-              milestone: task.milestone?.toString(),
-              parent: task.parent?.toString(),
+              project: task.project ?? undefined,
+              milestone: task.milestone ?? undefined,
+              parent: task.parent ?? undefined,
               title: task.title,
               description: task.description ?? "",
-              assignees: task.assignees.map(String),
-              reviewer: task.reviewer?.toString(),
+              assignees: task.assignees,
+              reviewer: task.reviewer ?? undefined,
               priority: task.priority,
               startDate: task.startDate ?? "",
               dueDate: task.dueDate ?? "",
               estimateHours: task.estimateHours ? String(task.estimateHours) : "",
-              dependencies: task.dependencies.map(String),
-              sharedWith: task.sharedWith.map(String),
+              dependencies: task.dependencies,
+              sharedWith: task.sharedWith,
               isLearning: task.isLearning,
             }}
           />

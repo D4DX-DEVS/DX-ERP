@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { and, eq } from "drizzle-orm";
 import { can } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { inr } from "@/lib/format";
 import { LearningResource, Review, Task } from "@/lib/models";
+import { inList, jsonHas, jsonHasField } from "@/lib/sql";
 import { fmtDate } from "@/lib/time";
 import { PersonCell } from "@/components/ui/avatar";
 import { Card, CardBody, CardHeader, DetailList } from "@/components/ui/card";
@@ -14,25 +16,25 @@ import { ObjectivesPanel } from "../../_components/objectives-panel";
 import type { InternTabProps } from "./types";
 
 export async function OverviewTab({ user, target, access, settings, today, department, designation, mentor, manager }: InternTabProps) {
-  await connectDB();
   const internship = target.internship;
   const progress = internshipProgress(internship?.startDate, internship?.endDate, today);
   const objectives = internship?.objectives ?? [];
   const achieved = objectives.filter((o) => o.status === "achieved").length;
   const doneKeys = settings.taskStatuses.filter((s) => s.category === "done").map((s) => s.key);
 
+  const visibleLearning = visibleResourceFilter({ id: target._id, personType: target.personType, department: target.department });
   const [sharedReviews, learningTotal, learningDone, tasksTotal, tasksDone] = await Promise.all([
-    Review.countDocuments({ user: target._id, status: "shared" }),
-    LearningResource.countDocuments(visibleResourceFilter({ id: target._id, personType: target.personType, department: target.department })),
-    LearningResource.countDocuments({ ...visibleResourceFilter({ id: target._id, personType: target.personType, department: target.department }), "completions.user": target._id }),
-    access.canSeeTasks ? Task.countDocuments({ assignees: target._id }) : Promise.resolve(0),
-    access.canSeeTasks ? Task.countDocuments({ assignees: target._id, status: { $in: doneKeys } }) : Promise.resolve(0),
+    db().$count(Review, and(eq(Review.user, target._id), eq(Review.status, "shared"))),
+    db().$count(LearningResource, visibleLearning),
+    db().$count(LearningResource, and(visibleLearning, jsonHasField(LearningResource.completions, "user", target._id))),
+    access.canSeeTasks ? db().$count(Task, jsonHas(Task.assignees, target._id)) : Promise.resolve(0),
+    access.canSeeTasks ? db().$count(Task, and(jsonHas(Task.assignees, target._id), inList(Task.status, doneKeys))) : Promise.resolve(0),
   ]);
 
   const weeks = Math.max(1, Math.ceil(progress.total / 7));
   const week = Math.min(weeks, Math.floor(progress.elapsed / 7) + 1);
   const stipend = internship?.stipend;
-  const objectiveViews = objectives.map((o) => ({ id: o._id?.toString() ?? o.text, text: o.text, status: o.status }));
+  const objectiveViews = objectives.map((o) => ({ id: o._id ?? o.text, text: o.text, status: o.status }));
 
   return (
     <div className="grid items-start gap-4 lg:grid-cols-3">
@@ -67,7 +69,7 @@ export async function OverviewTab({ user, target, access, settings, today, depar
         <Card>
           <CardHeader title="Objectives" subtitle={`${achieved} of ${objectives.length} achieved`} />
           <CardBody>
-            <ObjectivesPanel userId={target._id.toString()} objectives={objectiveViews} canEdit={access.canRun && internship?.status !== "completed" && internship?.status !== "terminated"} />
+            <ObjectivesPanel userId={target._id} objectives={objectiveViews} canEdit={access.canRun && internship?.status !== "completed" && internship?.status !== "terminated"} />
           </CardBody>
         </Card>
       </div>

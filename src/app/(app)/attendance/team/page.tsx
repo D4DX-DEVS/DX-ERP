@@ -1,4 +1,5 @@
 import { forbidden } from "next/navigation";
+import { and, eq } from "drizzle-orm";
 import { Download, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -8,7 +9,7 @@ import { Alert, EmptyState, PageBody, PageHeader, StatCard } from "@/components/
 import { PersonCell } from "@/components/ui/avatar";
 import { EmptyRow, TableWrap, THead, Td, Th, Tr } from "@/components/ui/table";
 import { requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { peopleOptions } from "@/lib/people";
 import { AttendanceCorrection } from "@/lib/models";
 import { idParam, pageParam, param, type SearchParams } from "@/lib/query";
@@ -61,8 +62,6 @@ export default async function TeamAttendancePage({ searchParams }: { searchParam
   const access = await attendanceAccess(user);
   if (!access.canViewTeam) forbidden();
   const sp = await searchParams;
-  await connectDB();
-
   const today = todayKey();
   const date = dayParam(sp, "date") ?? today;
   const q = param(sp, "q");
@@ -72,7 +71,7 @@ export default async function TeamAttendancePage({ searchParams }: { searchParam
 
   const [register, pendingCorrections, staffOptions] = await Promise.all([
     loadRegister(access, { date, q, dept }),
-    access.canDecide ? AttendanceCorrection.countDocuments({ status: "pending", ...decidableFilter(user, access) }) : Promise.resolve(0),
+    access.canDecide ? db().$count(AttendanceCorrection, and(eq(AttendanceCorrection.status, "pending"), decidableFilter(user, access))) : Promise.resolve(0),
     access.manage ? peopleOptions() : Promise.resolve([]),
   ]);
   const { rows } = register;

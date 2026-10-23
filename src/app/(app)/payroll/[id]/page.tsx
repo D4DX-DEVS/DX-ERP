@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Check, Download } from "lucide-react";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { can, requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { PayrollRun, Payslip } from "@/lib/models";
+import { jsonPath } from "@/lib/sql";
 import { param, type SearchParams } from "@/lib/query";
 import { inr, plural, round2 } from "@/lib/format";
 import { addMonths, fmtDate, fmtDateTime, monthRange, todayKey } from "@/lib/time";
@@ -31,16 +33,23 @@ export default async function PayrollRunPage({ params, searchParams }: { params:
   const { id } = await params;
   const sp = await searchParams;
   if (!isObjectId(id)) notFound();
-  await connectDB();
-  const run = await PayrollRun.findById(id).lean();
+  const [run] = await db().select().from(PayrollRun).where(eq(PayrollRun._id, id)).limit(1);
   if (!run) notFound();
 
   const prevPeriod = addMonths(run.period, -1);
-  const [payslips, prevRun] = await Promise.all([
-    Payslip.find({ run: run._id }).sort({ "snapshot.name": 1 }).lean(),
-    PayrollRun.findOne({ period: prevPeriod, kind: run.kind, status: { $ne: "cancelled" } }, { totals: 1, runNo: 1 }).lean(),
+  const [payslips, [prevRun]] = await Promise.all([
+    db().select().from(Payslip).where(eq(Payslip.run, run._id)).orderBy(asc(jsonPath(Payslip.snapshot, "name"))),
+    db()
+      .select({
+        totals: PayrollRun.totals,
+        runNo: PayrollRun.runNo,
+        lop: sql<number>`coalesce((select sum(${Payslip.lopDays}) from ${Payslip} where ${Payslip.run} = ${PayrollRun._id}), 0)`.mapWith(Number),
+      })
+      .from(PayrollRun)
+      .where(and(eq(PayrollRun.period, prevPeriod), eq(PayrollRun.kind, run.kind), ne(PayrollRun.status, "cancelled")))
+      .limit(1),
   ]);
-  const prevLop = prevRun ? ((await Payslip.aggregate<{ lop: number }>([{ $match: { run: prevRun._id } }, { $group: { _id: null, lop: { $sum: "$lopDays" } } }]))[0]?.lop ?? 0) : 0;
+  const prevLop = prevRun?.lop ?? 0;
 
   const today = todayKey();
   const canPrepare = can(user, "payroll.prepare");
@@ -177,7 +186,7 @@ export default async function PayrollRunPage({ params, searchParams }: { params:
             <tbody>
               {shown.length === 0 && <EmptyRow colSpan={8}>{rows.length === 0 ? "This run has no payslips." : "No payslips match these filters."}</EmptyRow>}
               {shown.map(({ p, flags }) => (
-                <Tr key={p._id.toString()}>
+                <Tr key={p._id}>
                   <Td>
                     <div className="font-semibold">{p.snapshot.name}</div>
                     <div className="text-xs text-muted">
@@ -211,14 +220,14 @@ export default async function PayrollRunPage({ params, searchParams }: { params:
                     <div className="flex items-center justify-end gap-1.5">
                       {editable && p.status === "draft" && (
                         <PayslipEditDialog
-                          id={p._id.toString()}
+                          id={p._id}
                           name={p.snapshot.name}
                           earnings={p.earnings.filter((l) => l.source === "manual").map((l) => ({ name: l.name, amount: String(l.amount) }))}
                           deductions={p.deductions.filter((l) => l.source === "manual").map((l) => ({ name: l.name, amount: String(l.amount) }))}
                           remarks={p.remarks ?? ""}
                         />
                       )}
-                      {run.status === "approved" && canPay && p.status === "approved" && <PayslipPayDialog id={p._id.toString()} name={p.snapshot.name} net={p.net} today={today} />}
+                      {run.status === "approved" && canPay && p.status === "approved" && <PayslipPayDialog id={p._id} name={p.snapshot.name} net={p.net} today={today} />}
                       <Link href={`/payslips/${p._id}`} className="text-[13px] font-semibold text-brand-600 hover:text-brand-800">
                         View
                       </Link>
@@ -236,7 +245,7 @@ export default async function PayrollRunPage({ params, searchParams }: { params:
             <CardBody className="flex flex-col">
               {exceptions.length === 0 && <p className="text-[13px] text-muted">No exceptions. Everyone has a bank account and full attendance.</p>}
               {exceptions.slice(0, 12).map(({ p, flags }) => (
-                <div key={p._id.toString()} className="border-t border-line-soft py-2.5 text-[13px] first:border-t-0 first:pt-0">
+                <div key={p._id} className="border-t border-line-soft py-2.5 text-[13px] first:border-t-0 first:pt-0">
                   <strong className="font-semibold">{p.snapshot.name}</strong>
                   <div className="flex flex-wrap gap-1.5 pt-1">
                     {flags

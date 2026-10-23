@@ -1,4 +1,5 @@
 import { Download } from "lucide-react";
+import { desc } from "drizzle-orm";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Chip } from "@/components/ui/chip";
@@ -7,7 +8,7 @@ import { Menu } from "@/components/ui/menu";
 import { PageBody, PageHeader } from "@/components/ui/page";
 import { EmptyRow, TableWrap, THead, Td, Th, Tr } from "@/components/ui/table";
 import { requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { titleCase } from "@/lib/format";
 import { AuditLog } from "@/lib/models";
 import { peopleOptions } from "@/lib/people";
@@ -23,23 +24,25 @@ export const metadata = { title: "Audit trail" };
 export default async function Page({ searchParams }: { searchParams: Promise<SearchParams> }) {
   await requirePagePermission("audit.view");
   const sp = await searchParams;
-  await connectDB();
   const page = pageParam(sp);
   const filter = buildAuditFilter(sp);
 
-  const [rows, total, entities, people] = await Promise.all([
-    AuditLog.find(filter)
-      .sort({ at: -1, _id: -1 })
-      .skip((page - 1) * PAGE_SIZE)
+  const [rows, total, entityRows, people] = await Promise.all([
+    db()
+      .select()
+      .from(AuditLog)
+      .where(filter)
+      .orderBy(desc(AuditLog.at), desc(AuditLog._id))
       .limit(PAGE_SIZE)
-      .lean(),
-    AuditLog.countDocuments(filter),
-    AuditLog.distinct("entity") as Promise<string[]>,
+      .offset((page - 1) * PAGE_SIZE),
+    db().$count(AuditLog, filter),
+    db().selectDistinct({ entity: AuditLog.entity }).from(AuditLog),
     peopleOptions({ includeExited: true, personTypes: ["employee", "trainee", "intern", "admin"] }),
   ]);
 
+  const entities = entityRows.map((e) => e.entity);
   const exportHref = (format: string) => withParams("/audit/export", { ...sp, format, page: undefined }, {});
-  const filtered = Object.keys(filter).length > 0;
+  const filtered = filter !== undefined;
 
   return (
     <PageBody>
@@ -88,7 +91,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
             {rows.map((r) => {
               const changes = r.changes ?? [];
               return (
-                <Tr key={r._id.toString()} className="align-top">
+                <Tr key={r._id} className="align-top">
                   <Td className="whitespace-nowrap text-xs text-ink-2">{fmtDateTime(r.at)}</Td>
                   <Td>
                     <div className="font-semibold whitespace-nowrap">{r.actorName}</div>

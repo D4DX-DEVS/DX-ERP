@@ -1,7 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import type { CurrentUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Department, Designation, User } from "@/lib/models";
 import { todayKey } from "@/lib/time";
 import { DEFAULT_EMPLOYMENT_TYPE, DEFAULT_ROLE_FOR, EMPLOYMENT_TYPE_KEYS, type NewPersonType } from "./constants";
@@ -78,23 +78,22 @@ const emailSchema = z.email();
 
 /** Validates CSV rows against the live directory (duplicates, unknown references, role limits). */
 export async function analyseImport(user: CurrentUser, rows: ImportRowInput[]): Promise<ImportAnalysis> {
-  await connectDB();
   const [users, departments, designations, roles] = await Promise.all([
-    User.find({}, { email: 1, personType: 1, status: 1 }).lean(),
-    Department.find({}, { name: 1, code: 1 }).lean(),
-    Designation.find({}, { name: 1 }).lean(),
+    db().select({ _id: User._id, email: User.email, personType: User.personType, status: User.status }).from(User),
+    db().select({ _id: Department._id, name: Department.name, code: Department.code }).from(Department),
+    db().select({ _id: Designation._id, name: Designation.name }).from(Designation),
     roleOptionsFor(user),
   ]);
   const existing = new Set(users.map((u) => u.email.toLowerCase()));
   const managers = new Map(
-    users.filter((u) => u.personType !== "admin" && !["resigned", "terminated", "inactive"].includes(u.status)).map((u) => [u.email.toLowerCase(), u._id.toString()]),
+    users.filter((u) => u.personType !== "admin" && !["resigned", "terminated", "inactive"].includes(u.status)).map((u) => [u.email.toLowerCase(), u._id]),
   );
   const deptByName = new Map<string, string>();
   for (const d of departments) {
-    deptByName.set(d.name.toLowerCase(), d._id.toString());
-    if (d.code) deptByName.set(d.code.toLowerCase(), d._id.toString());
+    deptByName.set(d.name.toLowerCase(), d._id);
+    if (d.code) deptByName.set(d.code.toLowerCase(), d._id);
   }
-  const desigByName = new Map(designations.map((d) => [d.name.toLowerCase(), d._id.toString()]));
+  const desigByName = new Map(designations.map((d) => [d.name.toLowerCase(), d._id]));
   const roleByLabel = new Map<string, string>();
   for (const r of roles) {
     roleByLabel.set(r.key.toLowerCase(), r.key);

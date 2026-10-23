@@ -1,7 +1,8 @@
 import { notFound } from "next/navigation";
+import { asc, eq } from "drizzle-orm";
 import { PageBody, PageHeader } from "@/components/ui/page";
 import { requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { Asset, Department } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
@@ -14,16 +15,16 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   await requirePagePermission("assets.manage");
   const { id } = await params;
   if (!isObjectId(id)) notFound();
-  await connectDB();
-  const [asset, settings, departments] = await Promise.all([
-    Asset.findById(id).lean(),
+  const [[asset], settings, departments] = await Promise.all([
+    db().select().from(Asset).where(eq(Asset._id, id)).limit(1),
     getSettings(),
-    Department.find({ active: true }, { name: 1 }).sort({ name: 1 }).lean(),
+    db().select({ _id: Department._id, name: Department.name }).from(Department).where(eq(Department.active, true)).orderBy(asc(Department.name)),
   ]);
   if (!asset) notFound();
   // Keep the asset's current department selectable even if it has been deactivated since.
-  const current = asset.department && !departments.some((d) => d._id.equals(asset.department!)) ? await Department.findById(asset.department, { name: 1 }).lean() : null;
-  const options = [...departments, ...(current ? [current] : [])].map((d) => ({ id: d._id.toString(), name: d.name }));
+  const currentId = asset.department;
+  const [current] = currentId && !departments.some((d) => d._id === currentId) ? await db().select({ _id: Department._id, name: Department.name }).from(Department).where(eq(Department._id, currentId)).limit(1) : [];
+  const options = [...departments, ...(current ? [current] : [])].map((d) => ({ id: d._id, name: d.name }));
 
   return (
     <PageBody className="max-w-3xl">
@@ -37,21 +38,21 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           assetNo: asset.assetNo,
           name: asset.name,
           category: asset.category,
-          brand: asset.brand,
-          model: asset.model,
-          serialNo: asset.serialNo,
-          purchaseDate: asset.purchaseDate,
+          brand: asset.brand ?? undefined,
+          model: asset.model ?? undefined,
+          serialNo: asset.serialNo ?? undefined,
+          purchaseDate: asset.purchaseDate ?? undefined,
           cost: asset.cost,
-          vendor: asset.vendor,
-          invoiceRef: asset.invoiceRef,
-          warrantyUntil: asset.warrantyUntil,
-          serviceProvider: asset.serviceProvider,
-          nextServiceDate: asset.nextServiceDate,
-          department: asset.department?.toString(),
-          location: asset.location,
+          vendor: asset.vendor ?? undefined,
+          invoiceRef: asset.invoiceRef ?? undefined,
+          warrantyUntil: asset.warrantyUntil ?? undefined,
+          serviceProvider: asset.serviceProvider ?? undefined,
+          nextServiceDate: asset.nextServiceDate ?? undefined,
+          department: asset.department ?? undefined,
+          location: asset.location ?? undefined,
           condition: asset.condition,
-          notes: asset.notes,
-          documents: asset.documents.map((d) => ({ id: d.file.toString(), name: d.name, size: d.size ?? 0, mime: d.mime ?? "" })),
+          notes: asset.notes ?? undefined,
+          documents: asset.documents.map((d) => ({ id: d.file, name: d.name, size: d.size ?? 0, mime: d.mime ?? "" })),
         }}
       />
     </PageBody>

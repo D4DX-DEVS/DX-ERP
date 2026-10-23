@@ -1,11 +1,12 @@
 "use server";
 
+import { and, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import { actionPermission, ActionError, parse, runAction, type ActionResult } from "@/lib/actions";
 import { audit, diff } from "@/lib/audit";
 import { revokeUserSessions } from "@/lib/auth/session";
-import { escapeRegex } from "@/lib/format";
-import { Role, User } from "@/lib/models";
+import { db } from "@/lib/db";
+import { Role, User, newId } from "@/lib/models";
 import { notify } from "@/lib/notify";
 import {
   ALL_PERMISSIONS,
@@ -17,6 +18,7 @@ import {
   type RoleKey,
 } from "@/lib/rbac/permissions";
 import { getSettings } from "@/lib/settings";
+import { eqIgnoreCase, jsonPush } from "@/lib/sql";
 import { todayKey } from "@/lib/time";
 import { isObjectId, zs } from "@/lib/validation";
 import { adviseRotationForUser } from "@/lib/vault/service";
@@ -78,13 +80,13 @@ export async function saveRolePermissions(key: string, permissions: string[]): P
     const user = await actionPermission("roles.manage");
     assertRoleKey(key);
     if (key === "super_admin") throw new ActionError("The super admin role always has every permission and can't be edited.");
-    const role = await Role.findOne({ key }).lean();
+    const [role] = await db().select().from(Role).where(eq(Role.key, key)).limit(1);
     if (!role) throw new ActionError("Role not found");
     const next = cleanPermissions(permissions);
     const { added, removed, changes } = permissionChanges(role.permissions, next);
     if (changes.length === 0) return { changed: 0 };
     assertCanGrant(user, key, added);
-    await Role.updateOne({ key }, { $set: { permissions: next } });
+    await db().update(Role).set({ permissions: next }).where(eq(Role.key, key));
     await audit(user, { action: "access", entity: "role", entityId: role._id, ref: role.key, summary: summarizePermissions(role.name, added, removed), changes });
     return { changed: changes.length };
   }, "Permissions saved");
@@ -95,13 +97,13 @@ export async function resetRolePermissions(key: string): Promise<ActionResult<{ 
     const user = await actionPermission("roles.manage");
     assertRoleKey(key);
     if (!(ROLE_KEYS as readonly string[]).includes(key) || key === "super_admin") throw new ActionError("Only built-in roles can be reset to their defaults.");
-    const role = await Role.findOne({ key }).lean();
+    const [role] = await db().select().from(Role).where(eq(Role.key, key)).limit(1);
     if (!role) throw new ActionError("Role not found");
     const next = [...DEFAULT_ROLE_PERMISSIONS[key as RoleKey]];
     const { added, removed, changes } = permissionChanges(role.permissions, next);
     if (changes.length === 0) return { changed: 0 };
     assertCanGrant(user, key, added);
-    await Role.updateOne({ key }, { $set: { permissions: next } });
+    await db().update(Role).set({ permissions: next }).where(eq(Role.key, key));
     await audit(user, { action: "access", entity: "role", entityId: role._id, ref: role.key, summary: `Reset role ${role.name} to defaults · ${summarizePermissions(role.name, added, removed).split(": ")[1]}`, changes });
     return { changed: changes.length };
   }, "Role reset to defaults");
@@ -122,20 +124,22 @@ export async function createRole(input: Record<string, unknown>): Promise<Action
     const user = await actionPermission("roles.manage");
     const data = parse(createRoleSchema, input);
     if ((ROLE_KEYS as readonly string[]).includes(data.key)) fieldError("key", "This key is reserved for a built-in role");
-    if (await Role.exists({ key: data.key })) fieldError("key", "A role with this key already exists");
-    if (await Role.exists({ name: new RegExp(`^${escapeRegex(data.name)}$`, "i") })) fieldError("name", "A role with this name already exists");
+    const [sameKey] = await db().select({ id: Role._id }).from(Role).where(eq(Role.key, data.key)).limit(1);
+    if (sameKey) fieldError("key", "A role with this key already exists");
+    const [sameName] = await db().select({ id: Role._id }).from(Role).where(eqIgnoreCase(Role.name, data.name)).limit(1);
+    if (sameName) fieldError("name", "A role with this name already exists");
 
     let permissions: Permission[] = [];
     let copiedFrom: string | undefined;
     if (data.copyFrom) {
       if (data.copyFrom === "super_admin") fieldError("copyFrom", "Permissions can't be copied from the super admin role");
-      const source = await Role.findOne({ key: data.copyFrom }).lean();
+      const [source] = await db().select().from(Role).where(eq(Role.key, data.copyFrom)).limit(1);
       if (!source) fieldError("copyFrom", "Role not found");
       permissions = cleanPermissions(source.permissions);
       if (!user.isSuperAdmin && permissions.some((p) => !user.permissions.includes(p))) fieldError("copyFrom", "That role has permissions you don't hold, so you can't copy it");
       copiedFrom = source.name;
     }
-    const role = await Role.create({ key: data.key, name: data.name, description: data.description, permissions, system: false });
+    const [role] = await db().insert(Role).values({ key: data.key, name: data.name, description: data.description, permissions, system: false }).returning();
     await audit(user, {
       action: "access",
       entity: "role",
@@ -153,11 +157,12 @@ export async function updateRoleDetails(input: Record<string, unknown>): Promise
   return runAction(async () => {
     const user = await actionPermission("roles.manage");
     const data = parse(roleDetailsSchema, input);
-    const role = await Role.findOne({ key: data.key }).lean();
+    const [role] = await db().select().from(Role).where(eq(Role.key, data.key)).limit(1);
     if (!role) throw new ActionError("Role not found");
     if (role.system) throw new ActionError("Built-in roles can't be renamed.");
-    if (await Role.exists({ key: { $ne: data.key }, name: new RegExp(`^${escapeRegex(data.name)}$`, "i") })) fieldError("name", "A role with this name already exists");
-    await Role.updateOne({ key: data.key }, { $set: { name: data.name, description: data.description ?? "" } });
+    const [sameName] = await db().select({ id: Role._id }).from(Role).where(and(ne(Role.key, data.key), eqIgnoreCase(Role.name, data.name))).limit(1);
+    if (sameName) fieldError("name", "A role with this name already exists");
+    await db().update(Role).set({ name: data.name, description: data.description ?? "" }).where(eq(Role.key, data.key));
     const changes = diff({ name: role.name, description: role.description }, { name: data.name, description: data.description }, ["name", "description"]);
     if (changes.length) await audit(user, { action: "access", entity: "role", entityId: role._id, ref: role.key, summary: `Updated details of role ${data.name}`, changes });
     return null;
@@ -168,12 +173,12 @@ export async function deleteRole(key: string): Promise<ActionResult<null>> {
   return runAction(async () => {
     const user = await actionPermission("roles.manage");
     assertRoleKey(key);
-    const role = await Role.findOne({ key }).lean();
+    const [role] = await db().select().from(Role).where(eq(Role.key, key)).limit(1);
     if (!role) throw new ActionError("Role not found");
     if (role.system) throw new ActionError("Built-in roles can't be deleted. Use “Reset to defaults” instead.");
-    const people = await User.countDocuments({ role: key });
+    const people = await db().$count(User, eq(User.role, key));
     if (people > 0) throw new ActionError(`${people} ${people === 1 ? "person has" : "people have"} this role. Move them to another role first.`);
-    await Role.deleteOne({ key });
+    await db().delete(Role).where(eq(Role.key, key));
     await audit(user, { action: "access", entity: "role", entityId: role._id, ref: role.key, summary: `Deleted role ${role.name}` });
     return null;
   }, "Role deleted");
@@ -183,10 +188,14 @@ export async function deleteRole(key: string): Promise<ActionResult<null>> {
 
 async function loadTarget(id: string, actorId: string) {
   if (!isObjectId(id)) throw new ActionError("Person not found");
-  const target = await User.findById(id, { name: 1, role: 1, isSuperAdmin: 1, accountActive: 1, personType: 1, employeeId: 1 }).lean();
+  const [target] = await db()
+    .select({ _id: User._id, name: User.name, role: User.role, isSuperAdmin: User.isSuperAdmin, accountActive: User.accountActive, personType: User.personType, employeeId: User.employeeId, status: User.status })
+    .from(User)
+    .where(eq(User._id, id))
+    .limit(1);
   if (!target) throw new ActionError("Person not found");
   if (target.isSuperAdmin || target.personType === "admin") throw new ActionError("The super admin is configured through server environment variables and can't be changed here.");
-  if (target._id.toString() === actorId) throw new ActionError("You can't change your own role or access. Ask another administrator.");
+  if (target._id === actorId) throw new ActionError("You can't change your own role or access. Ask another administrator.");
   return target;
 }
 
@@ -198,7 +207,10 @@ export async function changeUserRole(input: Record<string, unknown>): Promise<Ac
     const data = parse(changeRoleSchema, input);
     const target = await loadTarget(data.id, actor.id);
     if (data.role === "super_admin") fieldError("role", "The super admin role can't be assigned");
-    const [next, current] = await Promise.all([Role.findOne({ key: data.role }, { name: 1, permissions: 1 }).lean(), Role.findOne({ key: target.role }, { name: 1, permissions: 1 }).lean()]);
+    const [next, current] = await Promise.all([
+      db().select({ name: Role.name, permissions: Role.permissions }).from(Role).where(eq(Role.key, data.role)).limit(1).then((r) => r[0]),
+      db().select({ name: Role.name, permissions: Role.permissions }).from(Role).where(eq(Role.key, target.role)).limit(1).then((r) => r[0]),
+    ]);
     if (!next) fieldError("role", "Role not found");
     if (!actor.isSuperAdmin) {
       // Delegated admins can't hand out — or take away — more power than they hold.
@@ -209,13 +221,13 @@ export async function changeUserRole(input: Record<string, unknown>): Promise<Ac
     if (target.role === data.role) fieldError("role", `${target.name} already has this role`);
     const fromName = current?.name ?? target.role;
 
-    await User.updateOne(
-      { _id: target._id },
-      {
-        $set: { role: data.role },
-        $push: { history: { type: "role_change", date: todayKey(), summary: `Role changed from ${fromName} to ${next.name}`, from: fromName, to: next.name, by: actor._id, byName: actor.name, at: new Date() } },
-      },
-    );
+    await db()
+      .update(User)
+      .set({
+        role: data.role,
+        history: jsonPush(User.history, { _id: newId(), type: "role_change", date: todayKey(), summary: `Role changed from ${fromName} to ${next.name}`, from: fromName, to: next.name, by: actor._id, byName: actor.name, at: new Date() }),
+      })
+      .where(eq(User._id, target._id));
     await revokeUserSessions(target._id, "role_change");
     await audit(actor, {
       action: "access",
@@ -237,26 +249,25 @@ export async function setLoginAccess(id: string, enabled: boolean): Promise<Acti
     if (target.accountActive === enabled) throw new ActionError(`Login access is already ${enabled ? "enabled" : "disabled"} for ${target.name}.`);
     if (!actor.isSuperAdmin) {
       // Delegated admins can't switch off (or on) people whose role carries permissions they don't hold.
-      const current = await Role.findOne({ key: target.role }, { permissions: 1 }).lean();
+      const [current] = await db().select({ permissions: Role.permissions }).from(Role).where(eq(Role.key, target.role)).limit(1);
       const own = new Set<string>(actor.permissions);
       if (current?.permissions.some((p) => !own.has(p))) throw new ActionError(`${target.name}'s role has permissions you don't hold. Ask the super admin.`);
     }
     if (enabled) {
-      const full = await User.findById(target._id, { status: 1 }).lean();
       const settings = await getSettings();
-      const status = full?.status ?? "";
+      const status = target.status;
       if (["resigned", "terminated", "inactive"].includes(status) || settings.employmentStatuses.find((s) => s.key === status)?.category === "exited") {
         throw new ActionError("Change the employment status first — people who have left can't sign in.");
       }
     }
     const summary = enabled ? "Login access enabled" : "Login access disabled";
-    await User.updateOne(
-      { _id: target._id },
-      {
-        $set: { accountActive: enabled },
-        $push: { history: { type: "access_change", date: todayKey(), summary, from: enabled ? "No access" : "Login enabled", to: enabled ? "Login enabled" : "No access", by: actor._id, byName: actor.name, at: new Date() } },
-      },
-    );
+    await db()
+      .update(User)
+      .set({
+        accountActive: enabled,
+        history: jsonPush(User.history, { _id: newId(), type: "access_change", date: todayKey(), summary, from: enabled ? "No access" : "Login enabled", to: enabled ? "Login enabled" : "No access", by: actor._id, byName: actor.name, at: new Date() }),
+      })
+      .where(eq(User._id, target._id));
     await revokeUserSessions(target._id, enabled ? "access_enabled" : "access_disabled");
     if (!enabled) await adviseRotationForUser(target._id, `${target.name}'s login access was disabled after they accessed it`);
     await audit(actor, {

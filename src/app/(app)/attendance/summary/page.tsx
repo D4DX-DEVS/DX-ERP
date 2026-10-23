@@ -1,4 +1,5 @@
 import { forbidden } from "next/navigation";
+import { and, eq } from "drizzle-orm";
 import { Download } from "lucide-react";
 import { PersonCell } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -8,7 +9,7 @@ import { Menu } from "@/components/ui/menu";
 import { EmptyRow, TableWrap, THead, Td, Th, Tr } from "@/components/ui/table";
 import { PageBody, PageHeader } from "@/components/ui/page";
 import { requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { AttendanceCorrection } from "@/lib/models";
 import { idParam, pageParam, param, type SearchParams } from "@/lib/query";
 import { fmtDate, formatDuration, monthKey } from "@/lib/time";
@@ -31,8 +32,6 @@ export default async function AttendanceSummaryPage({ searchParams }: { searchPa
   const access = await attendanceAccess(user);
   if (!access.canViewTeam) forbidden();
   const sp = await searchParams;
-  await connectDB();
-
   const thisMonth = monthKey(currentTime());
   const requested = validMonthParam(sp, "month") ?? thisMonth;
   const month = requested > thisMonth ? thisMonth : requested;
@@ -42,7 +41,7 @@ export default async function AttendanceSummaryPage({ searchParams }: { searchPa
 
   const [{ rows, departments }, pendingCorrections] = await Promise.all([
     loadSummary(access, { month, q, dept }),
-    access.canDecide ? AttendanceCorrection.countDocuments({ status: "pending", ...decidableFilter(user, access) }) : Promise.resolve(0),
+    access.canDecide ? db().$count(AttendanceCorrection, and(eq(AttendanceCorrection.status, "pending"), decidableFilter(user, access))) : Promise.resolve(0),
   ]);
   const pageRows = rows.slice((page - 1) * PAGE, page * PAGE);
   const total = rows.reduce(

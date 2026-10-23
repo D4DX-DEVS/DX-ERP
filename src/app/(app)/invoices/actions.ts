@@ -9,8 +9,11 @@ import { ID_PREFIX, fiscalYear, nextNumber, nextSeq } from "@/lib/counters";
 import { getSettings } from "@/lib/settings";
 import { round2, inr } from "@/lib/format";
 import { addDays, diffDays, todayKey, zonedDateTime } from "@/lib/time";
-import { Client, Contract, Invoice, Payment, Project, type IInvoice } from "@/lib/models";
+import { and, eq, isNull, sql } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { Client, Contract, Invoice, Payment, Project, newId, type Id, type IInvoice } from "@/lib/models";
 import type { Address } from "@/lib/models/_base";
+import { jsonPush } from "@/lib/sql";
 import { balanceOf, computeTotals, CUSTOM_TERM, INVOICE_PAYMENT_METHODS, settledStatus } from "./totals";
 import { canSeeClient } from "@/app/(app)/crm/_lib/access";
 
@@ -70,9 +73,29 @@ function formatAddress(a?: Address): string | undefined {
 
 async function loadInvoice(id: string): Promise<IInvoice> {
   if (!isObjectId(id)) throw new ActionError("Invoice not found.");
-  const inv = await Invoice.findById(id).lean();
+  const [inv] = await db().select().from(Invoice).where(eq(Invoice._id, id)).limit(1);
   if (!inv) throw new ActionError("Invoice not found.");
   return inv;
+}
+
+/** Marks a project milestone as invoiced by `invoice`, or (`invoiced` false) releases it — only while it still points at `invoice`. */
+async function setMilestoneInvoiced(project: Id, milestone: Id, invoice: Id, invoiced: boolean): Promise<void> {
+  const [row] = await db().select({ milestones: Project.milestones }).from(Project).where(eq(Project._id, project)).limit(1);
+  if (!row) return;
+  let changed = false;
+  const milestones = row.milestones.map((m) => {
+    if (m._id !== milestone) return m;
+    if (invoiced) {
+      changed = true;
+      return { ...m, invoiced: true, invoice };
+    }
+    if (m.invoice !== invoice) return m;
+    changed = true;
+    const released = { ...m, invoiced: false };
+    delete released.invoice;
+    return released;
+  });
+  if (changed) await db().update(Project).set({ milestones }).where(eq(Project._id, project));
 }
 
 const label = (inv: Pick<IInvoice, "invoiceNo" | "draftNo">) => inv.invoiceNo ?? inv.draftNo;
@@ -83,23 +106,23 @@ export async function saveInvoice(input: Record<string, unknown>): Promise<Actio
     const user = await actionPermission("invoices.manage");
     const data = parse(draftSchema, input);
 
-    const client = await Client.findById(data.client, { name: 1, confidential: 1, owner: 1 }).lean();
+    const [client] = await db().select({ name: Client.name, confidential: Client.confidential, owner: Client.owner }).from(Client).where(eq(Client._id, data.client)).limit(1);
     if (!client || !canSeeClient(user, client)) throw new ActionError("Client not found.", { client: "Choose a client" });
 
-    let projectDoc: { milestones: { _id: { toString(): string }; invoiced?: boolean; invoice?: { toString(): string } }[] } | null = null;
+    let projectDoc: { milestones: { _id: Id; invoiced?: boolean; invoice?: Id }[] } | null = null;
     if (data.project) {
-      const p = await Project.findById(data.project, { client: 1, milestones: 1 }).lean();
-      if (!p || p.client?.toString() !== data.client) throw new ActionError("That project does not belong to the selected client.", { project: "Choose one of this client's projects" });
+      const [p] = await db().select({ client: Project.client, milestones: Project.milestones }).from(Project).where(eq(Project._id, data.project)).limit(1);
+      if (!p || p.client !== data.client) throw new ActionError("That project does not belong to the selected client.", { project: "Choose one of this client's projects" });
       projectDoc = p;
     }
     if (data.contract) {
-      const c = await Contract.findById(data.contract, { client: 1 }).lean();
-      if (!c || c.client.toString() !== data.client) throw new ActionError("That contract does not belong to the selected client.", { contract: "Choose one of this client's contracts" });
+      const [c] = await db().select({ client: Contract.client }).from(Contract).where(eq(Contract._id, data.contract)).limit(1);
+      if (!c || c.client !== data.client) throw new ActionError("That contract does not belong to the selected client.", { contract: "Choose one of this client's contracts" });
     }
     if (data.milestone) {
-      const m = projectDoc?.milestones.find((x) => x._id.toString() === data.milestone);
+      const m = projectDoc?.milestones.find((x) => x._id === data.milestone);
       if (!m) throw new ActionError("Milestone not found on the selected project.", { milestone: "Choose a milestone of the project" });
-      if (m.invoiced && m.invoice?.toString() !== data.id) throw new ActionError("This milestone has already been invoiced.", { milestone: "Already invoiced" });
+      if (m.invoiced && m.invoice !== data.id) throw new ActionError("This milestone has already been invoiced.", { milestone: "Already invoiced" });
     }
 
     let paymentTermDays: number;
@@ -140,11 +163,11 @@ export async function saveInvoice(input: Record<string, unknown>): Promise<Actio
     if (data.id) {
       const before = await loadInvoice(data.id);
       if (before.status !== "draft") throw new ActionError("Only draft invoices can be edited.");
-      const updated = await Invoice.findOneAndUpdate(
-        { _id: data.id, status: "draft" },
-        { $set: fields, $push: { history: { action: "edited", by: user._id, byName: user.name, at: new Date() } } },
-        { returnDocument: "after" },
-      ).lean();
+      const [updated] = await db()
+        .update(Invoice)
+        .set({ ...fields, history: jsonPush(Invoice.history, { _id: newId(), action: "edited", by: user._id, byName: user.name, at: new Date() }) })
+        .where(and(eq(Invoice._id, data.id), eq(Invoice.status, "draft")))
+        .returning();
       if (!updated) throw new ActionError("This invoice is no longer a draft.");
       await audit(user, {
         action: "update",
@@ -153,24 +176,24 @@ export async function saveInvoice(input: Record<string, unknown>): Promise<Actio
         ref: updated.draftNo,
         summary: `Updated draft ${updated.draftNo}`,
         // Amounts are intentionally left out of the audit trail (`audit.view` does not imply `invoices.view`).
-        changes: diff({ ...before, client: before.client.toString() } as Record<string, unknown>, { ...updated, client: updated.client.toString() } as Record<string, unknown>, ["client", "issueDate", "dueDate", "subtotal", "discount", "taxTotal", "total"], ["subtotal", "discount", "taxTotal", "total"]),
+        changes: diff(before as Record<string, unknown>, updated as Record<string, unknown>, ["client", "issueDate", "dueDate", "subtotal", "discount", "taxTotal", "total"], ["subtotal", "discount", "taxTotal", "total"]),
       });
-      return { id: updated._id.toString() };
+      return { id: updated._id };
     }
 
     const draftNo = await nextNumber("invoice-draft", ID_PREFIX.invoiceDraft, 5);
-    const doc = await Invoice.create({
-      ...fields,
-      project: data.project,
-      contract: data.contract,
-      milestone: data.milestone,
-      draftNo,
-      status: "draft",
-      createdBy: user._id,
-      history: [{ action: "created", by: user._id, byName: user.name, at: new Date() }],
-    });
+    const [doc] = await db()
+      .insert(Invoice)
+      .values({
+        ...fields,
+        draftNo,
+        status: "draft",
+        createdBy: user._id,
+        history: [{ _id: newId(), action: "created", by: user._id, byName: user.name, at: new Date() }],
+      })
+      .returning();
     await audit(user, { action: "create", entity: "invoice", entityId: doc._id, ref: draftNo, summary: `Created draft invoice ${draftNo} for ${client.name}` });
-    return { id: doc._id.toString() };
+    return { id: doc._id };
   }, "Draft saved");
 }
 
@@ -179,8 +202,8 @@ export async function deleteDraftInvoice(id: string): Promise<ActionResult<null>
   return runAction(async () => {
     const user = await actionPermission("invoices.manage");
     const inv = await loadInvoice(id);
-    const res = await Invoice.deleteOne({ _id: id, status: "draft" });
-    if (res.deletedCount === 0) throw new ActionError("Only draft invoices can be deleted.");
+    const deleted = await db().delete(Invoice).where(and(eq(Invoice._id, id), eq(Invoice.status, "draft"))).returning({ id: Invoice._id });
+    if (deleted.length === 0) throw new ActionError("Only draft invoices can be deleted.");
     await audit(user, { action: "delete", entity: "invoice", entityId: inv._id, ref: inv.draftNo, summary: `Deleted draft invoice ${inv.draftNo}` });
     return null;
   }, "Draft deleted");
@@ -194,25 +217,30 @@ export async function issueInvoice(id: string): Promise<ActionResult<{ invoiceNo
     if (inv.status !== "draft") throw new ActionError("This invoice has already been issued.");
     if (inv.items.length === 0 || inv.total <= 0) throw new ActionError("Add line items with a total above zero before issuing.");
 
-    const client = await Client.findById(inv.client, { name: 1, address: 1, gstin: 1, email: 1 }).lean();
+    const billingColumns = { name: Client.name, address: Client.address, gstin: Client.gstin, email: Client.email };
+    const [client] = await db().select(billingColumns).from(Client).where(eq(Client._id, inv.client)).limit(1);
     if (!client) throw new ActionError("The client of this invoice no longer exists.");
 
     if (inv.project && inv.milestone) {
-      const project = await Project.findById(inv.project, { milestones: 1 }).lean();
-      const m = project?.milestones.find((x) => x._id.toString() === inv.milestone?.toString());
-      if (m?.invoiced && m.invoice?.toString() !== inv._id.toString()) throw new ActionError("The milestone on this invoice has already been invoiced.");
+      const [project] = await db().select({ milestones: Project.milestones }).from(Project).where(eq(Project._id, inv.project)).limit(1);
+      const m = project?.milestones.find((x) => x._id === inv.milestone);
+      if (m?.invoiced && m.invoice !== inv._id) throw new ActionError("The milestone on this invoice has already been invoiced.");
     }
 
     // Claim the draft first so a double click cannot consume two invoice numbers. Everything below is built from the
     // claimed document, so an edit that slipped in between loading and claiming cannot leave mismatched figures.
-    const claimed = await Invoice.findOneAndUpdate({ _id: id, status: "draft" }, { $set: { status: "issued", issuedAt: new Date() } }, { returnDocument: "after" }).lean();
+    const [claimed] = await db()
+      .update(Invoice)
+      .set({ status: "issued", issuedAt: new Date() })
+      .where(and(eq(Invoice._id, id), eq(Invoice.status, "draft")))
+      .returning();
     if (!claimed) throw new ActionError("This invoice has already been issued.");
 
     let invoiceNo: string;
     let billedTo = client;
     try {
-      if (claimed.client.toString() !== inv.client.toString()) {
-        const latest = await Client.findById(claimed.client, { name: 1, address: 1, gstin: 1, email: 1 }).lean();
+      if (claimed.client !== inv.client) {
+        const [latest] = await db().select(billingColumns).from(Client).where(eq(Client._id, claimed.client)).limit(1);
         if (!latest) throw new ActionError("The client of this invoice no longer exists.");
         billedTo = latest;
       }
@@ -222,24 +250,25 @@ export async function issueInvoice(id: string): Promise<ActionResult<{ invoiceNo
       const fy = fiscalYear(zonedDateTime(claimed.issueDate, "12:00"));
       const seq = await nextSeq(n.invoiceIncludeFiscalYear ? `invoice:${fy}` : "invoice");
       invoiceNo = `${n.invoicePrefix}${n.invoiceIncludeFiscalYear ? `${fy}-` : ""}${String(seq).padStart(n.invoicePadding, "0")}`;
-      await Invoice.updateOne(
-        { _id: id },
-        {
-          $set: {
-            invoiceNo,
-            balance: balanceOf({ total: claimed.total, amountPaid: 0, amountRefunded: 0, adjustments: 0 }),
-            billingSnapshot: { name: billedTo.name, address: formatAddress(billedTo.address), gstin: billedTo.gstin, email: billedTo.email },
-          },
-          $push: { history: { action: "issued", by: user._id, byName: user.name, at: new Date(), note: invoiceNo } },
-        },
-      );
+      await db()
+        .update(Invoice)
+        .set({
+          invoiceNo,
+          balance: balanceOf({ total: claimed.total, amountPaid: 0, amountRefunded: 0, adjustments: 0 }),
+          billingSnapshot: { name: billedTo.name, address: formatAddress(billedTo.address ?? undefined), gstin: billedTo.gstin ?? undefined, email: billedTo.email ?? undefined },
+          history: jsonPush(Invoice.history, { _id: newId(), action: "issued", by: user._id, byName: user.name, at: new Date(), note: invoiceNo }),
+        })
+        .where(eq(Invoice._id, id));
     } catch (error) {
-      await Invoice.updateOne({ _id: id, status: "issued", invoiceNo: { $exists: false } }, { $set: { status: "draft" }, $unset: { issuedAt: 1 } });
+      await db()
+        .update(Invoice)
+        .set({ status: "draft", issuedAt: null })
+        .where(and(eq(Invoice._id, id), eq(Invoice.status, "issued"), isNull(Invoice.invoiceNo)));
       throw error;
     }
 
     if (claimed.project && claimed.milestone) {
-      await Project.updateOne({ _id: claimed.project, "milestones._id": claimed.milestone }, { $set: { "milestones.$.invoiced": true, "milestones.$.invoice": claimed._id } });
+      await setMilestoneInvoiced(claimed.project, claimed.milestone, claimed._id, true);
     }
     await audit(user, { action: "status", entity: "invoice", entityId: inv._id, ref: invoiceNo, summary: `Issued invoice ${invoiceNo} to ${billedTo.name}`, changes: [{ field: "status", from: "draft", to: "issued" }] });
     return { invoiceNo };
@@ -256,21 +285,21 @@ export async function cancelInvoice(id: string, reason: string): Promise<ActionR
     if (inv.status === "cancelled") throw new ActionError("This invoice is already cancelled.");
     if (round2(inv.amountPaid - inv.amountRefunded) > 0) throw new ActionError("Payments are still recorded against this invoice. Refund them before cancelling.");
 
-    const res = await Invoice.findOneAndUpdate(
-      { _id: id, status: inv.status, amountPaid: inv.amountPaid, amountRefunded: inv.amountRefunded },
-      {
-        $set: { status: "cancelled", cancelledAt: new Date(), cancelReason: text, balance: 0 },
-        $push: { history: { action: "cancelled", by: user._id, byName: user.name, at: new Date(), note: text } },
-      },
-      { returnDocument: "after" },
-    ).lean();
+    const [res] = await db()
+      .update(Invoice)
+      .set({
+        status: "cancelled",
+        cancelledAt: new Date(),
+        cancelReason: text,
+        balance: 0,
+        history: jsonPush(Invoice.history, { _id: newId(), action: "cancelled", by: user._id, byName: user.name, at: new Date(), note: text }),
+      })
+      .where(and(eq(Invoice._id, id), eq(Invoice.status, inv.status), eq(Invoice.amountPaid, inv.amountPaid), eq(Invoice.amountRefunded, inv.amountRefunded)))
+      .returning({ id: Invoice._id });
     if (!res) throw new ActionError("This invoice was just updated by someone else. Refresh and try again.");
 
     if (inv.project && inv.milestone) {
-      await Project.updateOne(
-        { _id: inv.project, milestones: { $elemMatch: { _id: inv.milestone, invoice: inv._id } } },
-        { $set: { "milestones.$.invoiced": false }, $unset: { "milestones.$.invoice": 1 } },
-      );
+      await setMilestoneInvoiced(inv.project, inv.milestone, inv._id, false);
     }
     await audit(user, { action: "cancel", entity: "invoice", entityId: inv._id, ref: label(inv), summary: `Cancelled invoice ${label(inv)}: ${text}`, changes: [{ field: "status", from: inv.status, to: "cancelled" }] });
     return null;
@@ -281,7 +310,7 @@ type MoneyEvent = { type: "payment" | "refund" | "adjustment"; date: string; amo
 
 /**
  * Applies one money movement atomically: the invoice totals only change when nobody else changed them in the
- * meantime, then the Payment row is written (the invoice change is reverted if that write fails).
+ * meantime, and the Payment row is written in the same batch (both apply, or neither does).
  */
 async function applyMoneyEvent(
   inv: IInvoice,
@@ -298,35 +327,49 @@ async function applyMoneyEvent(
   const status = settledStatus(next);
   // Take the number before touching the invoice so a counter failure cannot leave totals without a Payment row.
   const paymentNo = await nextNumber("payment", ID_PREFIX.payment, 5);
-  const updated = await Invoice.findOneAndUpdate(
-    { _id: inv._id, status: inv.status, amountPaid: inv.amountPaid, amountRefunded: inv.amountRefunded, adjustments: inv.adjustments },
-    { $set: { amountPaid: next.amountPaid, amountRefunded: next.amountRefunded, adjustments: next.adjustments, balance, status } },
-    { returnDocument: "after" },
-  ).lean();
-  if (!updated) throw new ActionError("This invoice was just updated by someone else. Refresh and try again.");
-
-  try {
-    await Payment.create({
-      paymentNo,
-      invoice: inv._id,
-      client: inv.client,
-      project: inv.project,
-      type: event.type,
-      date: event.date,
-      amount: event.amount,
-      method: event.method,
-      reference: event.reference,
-      note: event.note,
-      recordedBy: user._id,
-      recordedByName: user.name,
-    });
-  } catch (error) {
-    await Invoice.updateOne(
-      { _id: inv._id },
-      { $set: { amountPaid: inv.amountPaid, amountRefunded: inv.amountRefunded, adjustments: inv.adjustments, balance: inv.balance, status: inv.status } },
-    );
-    throw error;
-  }
+  // The Payment row and the invoice update share one batch (one D1 transaction) and one guard: both apply only while
+  // the invoice still has the figures read above, so neither can happen without the other.
+  const unchanged = and(
+    eq(Invoice._id, inv._id),
+    eq(Invoice.status, inv.status),
+    eq(Invoice.amountPaid, inv.amountPaid),
+    eq(Invoice.amountRefunded, inv.amountRefunded),
+    eq(Invoice.adjustments, inv.adjustments),
+  );
+  const now = Date.now();
+  const [, updated] = await db().batch([
+    // INSERT … SELECT so the row is only written while the guard holds (the selection must list every column in table order).
+    db()
+      .insert(Payment)
+      .select(
+        db()
+          .select({
+            _id: sql<string>`${newId()}`.as("_id"),
+            paymentNo: sql<string>`${paymentNo}`.as("paymentNo"),
+            invoice: Invoice._id,
+            client: Invoice.client,
+            project: Invoice.project,
+            type: sql<MoneyEvent["type"]>`${event.type}`.as("type"),
+            date: sql<string>`${event.date}`.as("date"),
+            amount: sql<number>`${event.amount}`.as("amount"),
+            method: sql<string>`${event.method}`.as("method"),
+            reference: sql<string | null>`${event.reference ?? null}`.as("reference"),
+            note: sql<string | null>`${event.note ?? null}`.as("note"),
+            recordedBy: sql<string>`${user._id}`.as("recordedBy"),
+            recordedByName: sql<string | null>`${user.name}`.as("recordedByName"),
+            createdAt: sql<Date>`${now}`.as("createdAt"),
+            updatedAt: sql<Date>`${now}`.as("updatedAt"),
+          })
+          .from(Invoice)
+          .where(unchanged),
+      ),
+    db()
+      .update(Invoice)
+      .set({ amountPaid: next.amountPaid, amountRefunded: next.amountRefunded, adjustments: next.adjustments, balance, status })
+      .where(unchanged)
+      .returning({ id: Invoice._id }),
+  ]);
+  if (updated.length === 0) throw new ActionError("This invoice was just updated by someone else. Refresh and try again.");
   return { paymentNo, balance, status };
 }
 

@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
+import { and, asc, count, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { can, requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
-import { Client, Proposal } from "@/lib/models";
-import { idParam, pageParam, PAGE_SIZE, param, searchRegex, type SearchParams } from "@/lib/query";
+import { db } from "@/lib/db";
+import { Client, Proposal, type ProposalStatus } from "@/lib/models";
+import { idParam, pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
+import { inList, searchAny } from "@/lib/sql";
 import { inr, inrCompact, plural } from "@/lib/format";
 import { STATUS } from "@/lib/status";
 import { fmtDate } from "@/lib/time";
@@ -22,7 +24,6 @@ export const metadata = { title: "Proposals" };
 export default async function ProposalsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePagePermission("proposals.view");
   const sp = await searchParams;
-  await connectDB();
   const page = pageParam(sp);
   const status = param(sp, "status");
   const kind = param(sp, "kind");
@@ -30,31 +31,50 @@ export default async function ProposalsPage({ searchParams }: { searchParams: Pr
   const q = param(sp, "q");
 
   const hidden = await hiddenClientIds(user);
-  const scope = recordScope(hidden, user, ["owner", "createdBy"]);
-  const and: Record<string, unknown>[] = [scope];
-  if (status && status in STATUS.proposal) and.push({ status });
-  if (kind === "proposal" || kind === "quotation") and.push({ kind });
-  if (clientId) and.push({ client: clientId });
-  const re = searchRegex(q);
-  if (re) and.push({ $or: [{ title: re }, { proposalNo: re }] });
-  const filter = { $and: and };
+  const scope = recordScope(hidden, user, Proposal.client, [Proposal.owner, Proposal.createdBy]);
+  const conds: (SQL | undefined)[] = [scope];
+  if (status && status in STATUS.proposal) conds.push(eq(Proposal.status, status as ProposalStatus));
+  if (kind === "proposal" || kind === "quotation") conds.push(eq(Proposal.kind, kind));
+  if (clientId) conds.push(eq(Proposal.client, clientId));
+  conds.push(searchAny(q, Proposal.title, Proposal.proposalNo));
+  const filter = and(...conds);
 
   const [rows, total, clients, byStatus, expiring] = await Promise.all([
-    Proposal.find(filter).sort({ createdAt: -1 }).skip((page - 1) * PAGE_SIZE).limit(PAGE_SIZE).lean(),
-    Proposal.countDocuments(filter),
-    Client.find(clientScope(user), { name: 1 }).sort({ name: 1 }).limit(500).lean(),
-    Proposal.aggregate<{ _id: string; n: number; value: number }>([{ $match: { $and: [scope] } }, { $group: { _id: "$status", n: { $sum: 1 }, value: { $sum: "$total" } } }]),
-    Proposal.countDocuments({ $and: [scope, { status: { $in: ["sent", "negotiation"] }, validUntil: { $gte: today(), $lte: inDays(7) } }] }),
+    db()
+      .select({
+        _id: Proposal._id,
+        title: Proposal.title,
+        proposalNo: Proposal.proposalNo,
+        version: Proposal.version,
+        kind: Proposal.kind,
+        client: Proposal.client,
+        total: Proposal.total,
+        validUntil: Proposal.validUntil,
+        status: Proposal.status,
+      })
+      .from(Proposal)
+      .where(filter)
+      .orderBy(desc(Proposal.createdAt))
+      .limit(PAGE_SIZE)
+      .offset((page - 1) * PAGE_SIZE),
+    db().$count(Proposal, filter),
+    db().select({ _id: Client._id, name: Client.name }).from(Client).where(clientScope(user)).orderBy(asc(Client.name)).limit(500),
+    db()
+      .select({ status: Proposal.status, n: count(), value: sql<number>`coalesce(sum(${Proposal.total}), 0)`.mapWith(Number) })
+      .from(Proposal)
+      .where(scope)
+      .groupBy(Proposal.status),
+    db().$count(Proposal, and(scope, inList(Proposal.status, ["sent", "negotiation"]), gte(Proposal.validUntil, today()), lte(Proposal.validUntil, inDays(7)))),
   ]);
-  const clientNames = new Map(clients.map((c) => [c._id.toString(), c.name]));
-  const missing = rows.map((r) => r.client.toString()).filter((c) => !clientNames.has(c));
+  const clientNames = new Map(clients.map((c) => [c._id, c.name]));
+  const missing = rows.map((r) => r.client).filter((c) => !clientNames.has(c));
   if (missing.length) {
-    const extra = await Client.find({ _id: { $in: missing } }, { name: 1 }).lean();
-    for (const c of extra) clientNames.set(c._id.toString(), c.name);
+    const extra = await db().select({ _id: Client._id, name: Client.name }).from(Client).where(inList(Client._id, missing));
+    for (const c of extra) clientNames.set(c._id, c.name);
   }
 
   const stat = (keys: string[]) => {
-    const rowsFor = byStatus.filter((b) => keys.includes(b._id));
+    const rowsFor = byStatus.filter((b) => keys.includes(b.status));
     return { n: rowsFor.reduce((s, b) => s + b.n, 0), value: rowsFor.reduce((s, b) => s + b.value, 0) };
   };
   const drafts = stat(["draft"]);
@@ -95,7 +115,7 @@ export default async function ProposalsPage({ searchParams }: { searchParams: Pr
             { value: "quotation", label: "Quotations" },
           ]}
         />
-        <SelectFilter param="client" label="Client" allLabel="All clients" options={clients.map((c) => ({ value: c._id.toString(), label: c.name }))} />
+        <SelectFilter param="client" label="Client" allLabel="All clients" options={clients.map((c) => ({ value: c._id, label: c.name }))} />
         <ClearFilters />
       </FilterBar>
 
@@ -115,7 +135,7 @@ export default async function ProposalsPage({ searchParams }: { searchParams: Pr
               const left = daysUntil(p.validUntil);
               const open = p.status === "sent" || p.status === "negotiation";
               return (
-                <Tr key={p._id.toString()}>
+                <Tr key={p._id}>
                   <Td>
                     <Link href={`/proposals/${p._id}`} className="font-semibold text-ink hover:text-brand-600">
                       {p.title}
@@ -129,7 +149,7 @@ export default async function ProposalsPage({ searchParams }: { searchParams: Pr
                       {p.kind}
                     </Tag>
                   </Td>
-                  <Td>{clientNames.get(p.client.toString()) ?? "—"}</Td>
+                  <Td>{clientNames.get(p.client) ?? "—"}</Td>
                   <Td align="right" className="font-semibold">
                     {inr(p.total)}
                   </Td>

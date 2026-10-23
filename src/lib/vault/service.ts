@@ -1,7 +1,9 @@
 import "server-only";
-import { connectDB } from "@/lib/db";
+import { and, eq, or, sql } from "drizzle-orm";
+import { db } from "@/lib/db";
 import { requestMeta, type CurrentUser } from "@/lib/auth/session";
-import { Project, ProjectVault, VaultEvent, VaultItem, type IVaultItem, type ObjectId, type VaultEventAction, type VaultKind } from "@/lib/models";
+import { Project, ProjectVault, VaultEvent, VaultItem, type Id, type IVaultItem, type VaultEventAction, type VaultKind } from "@/lib/models";
+import { inList, isUniqueViolation, jsonHasAny, jsonHasField } from "@/lib/sql";
 import { currentMasterKey, itemAad, newDataKey, previousMasterKey, seal, unseal, unwrapDataKey, VaultKeyError, wrapDataKey } from "./crypto";
 import type { EnvEntry } from "./dotenv";
 
@@ -15,25 +17,23 @@ import type { EnvEntry } from "./dotenv";
  */
 export type VaultRole = "owner" | "member";
 
-type Id = { toString(): string };
-
 export function vaultRole(user: Pick<CurrentUser, "id" | "isSuperAdmin">, project: { manager?: Id | null; team?: { user: Id }[] }): VaultRole | null {
   if (user.isSuperAdmin) return "owner";
-  if (project.manager?.toString() === user.id) return "owner";
-  if ((project.team ?? []).some((m) => m.user.toString() === user.id)) return "member";
+  if (project.manager === user.id) return "owner";
+  if ((project.team ?? []).some((m) => m.user === user.id)) return "member";
   return null;
 }
 
 export function canSeeItem(user: Pick<CurrentUser, "id">, role: VaultRole | null, item: Pick<IVaultItem, "audience" | "members" | "createdBy">): boolean {
   if (!role) return false;
   if (role === "owner") return true;
-  if (item.createdBy.toString() === user.id) return true;
-  return item.audience === "team" || item.members.some((m) => m.toString() === user.id);
+  if (item.createdBy === user.id) return true;
+  return item.audience === "team" || item.members.some((m) => m === user.id);
 }
 
 export function canManageItem(user: Pick<CurrentUser, "id">, role: VaultRole | null, item: Pick<IVaultItem, "createdBy">): boolean {
   if (!role) return false;
-  return role === "owner" || item.createdBy.toString() === user.id;
+  return role === "owner" || item.createdBy === user.id;
 }
 
 /* ------------------------------------------------------------------ */
@@ -65,21 +65,21 @@ export function payloadFields(payload: VaultPayload): EnvEntry[] {
  * The project's data key. Created on first use when `create` is set. A key wrapped with the previous
  * master key (VAULT_MASTER_KEY_PREVIOUS) is transparently re-wrapped with the current one.
  */
-export async function projectDataKey(projectId: ObjectId | string, create: boolean): Promise<Buffer | null> {
-  await connectDB();
-  const pid = projectId.toString();
+export async function projectDataKey(projectId: Id, create: boolean): Promise<Buffer | null> {
+  const pid = projectId;
   const master = currentMasterKey();
-  let vault = await ProjectVault.findOne({ project: pid });
+  const findVault = async () => (await db().select().from(ProjectVault).where(eq(ProjectVault.project, pid)).limit(1))[0];
+  let vault = await findVault();
   if (!vault) {
     if (!create) return null;
     const dek = newDataKey();
     try {
-      await ProjectVault.create({ project: pid, wrappedKey: wrapDataKey(master, dek, pid), masterKeyId: master.id });
+      await db().insert(ProjectVault).values({ project: pid, wrappedKey: wrapDataKey(master, dek, pid), masterKeyId: master.id });
       return dek;
     } catch (error) {
       // Another request created it first (unique index) — use theirs.
-      if ((error as { code?: number })?.code !== 11000) throw error;
-      vault = await ProjectVault.findOne({ project: pid });
+      if (!isUniqueViolation(error)) throw error;
+      vault = await findVault();
       if (!vault) throw error;
     }
   }
@@ -87,20 +87,18 @@ export async function projectDataKey(projectId: ObjectId | string, create: boole
   const previous = previousMasterKey();
   if (previous && vault.masterKeyId === previous.id) {
     const dek = unwrapDataKey(previous, vault.wrappedKey, pid);
-    vault.wrappedKey = wrapDataKey(master, dek, pid);
-    vault.masterKeyId = master.id;
-    await vault.save();
+    await db().update(ProjectVault).set({ wrappedKey: wrapDataKey(master, dek, pid), masterKeyId: master.id }).where(eq(ProjectVault._id, vault._id));
     return dek;
   }
   throw new VaultKeyError("This project's secrets were encrypted with a different master key. Restore the original VAULT_MASTER_KEY (or set it as VAULT_MASTER_KEY_PREVIOUS).");
 }
 
 export function sealPayload(dek: Buffer, projectId: Id, itemId: Id, payload: VaultPayload): string {
-  return seal(dek, JSON.stringify(payload), itemAad(projectId.toString(), itemId.toString(), payload.kind));
+  return seal(dek, JSON.stringify(payload), itemAad(projectId, itemId, payload.kind));
 }
 
 export function openPayload(dek: Buffer, item: { _id: Id; project: Id; kind: VaultKind; ciphertext: string }): VaultPayload {
-  const parsed = JSON.parse(unseal(dek, item.ciphertext, itemAad(item.project.toString(), item._id.toString(), item.kind))) as VaultPayload;
+  const parsed = JSON.parse(unseal(dek, item.ciphertext, itemAad(item.project, item._id, item.kind))) as VaultPayload;
   if (parsed.kind !== item.kind) throw new VaultKeyError("Secret payload does not match its record.");
   return parsed;
 }
@@ -114,9 +112,9 @@ export async function logVaultEvent(
   input: { project: Id; item?: Id; itemName: string; action: VaultEventAction; field?: string },
 ): Promise<void> {
   const meta = await requestMeta().catch(() => ({ ip: undefined, userAgent: undefined }));
-  await VaultEvent.create({
-    project: input.project.toString(),
-    item: input.item?.toString(),
+  await db().insert(VaultEvent).values({
+    project: input.project,
+    item: input.item,
     itemName: input.itemName,
     field: input.field,
     action: input.action,
@@ -137,34 +135,57 @@ export const REVEAL_ACTIONS: VaultEventAction[] = ["reveal", "copy", "download",
  * updated so the owners rotate it.
  */
 export async function adviseRotationForRemoved(projectId: Id, userIds: string[], reason: string): Promise<number> {
-  if (userIds.length === 0) return 0;
-  await connectDB();
-  const pid = projectId.toString();
-  await VaultItem.updateMany({ project: pid }, { $pull: { members: { $in: userIds } } });
+  return adviseRotation([projectId], userIds, reason);
+}
+
+/** `adviseRotationForRemoved` over several projects at once (no per-project queries). */
+async function adviseRotation(projectIds: Id[], userIds: string[], reason: string): Promise<number> {
+  if (userIds.length === 0 || projectIds.length === 0) return 0;
+  // Drop the people from per-item audiences (the `$pull`), in one statement.
+  await db()
+    .update(VaultItem)
+    .set({
+      members: sql`(select coalesce(json_group_array(value), json('[]')) from json_each(${VaultItem.members}) where value not in (select value from json_each(${JSON.stringify(userIds)})))`,
+    })
+    .where(and(inList(VaultItem.project, projectIds), jsonHasAny(VaultItem.members, userIds)));
   const [seen, authored] = await Promise.all([
-    VaultEvent.distinct("item", { project: pid, user: { $in: userIds }, action: { $in: [...REVEAL_ACTIONS, "create", "update"] } }) as Promise<ObjectId[]>,
-    VaultItem.find({ project: pid, $or: [{ createdBy: { $in: userIds } }, { updatedBy: { $in: userIds } }] }, { _id: 1 }).lean(),
+    db()
+      .selectDistinct({ item: VaultEvent.item })
+      .from(VaultEvent)
+      .where(and(inList(VaultEvent.project, projectIds), inList(VaultEvent.user, userIds), inList(VaultEvent.action, [...REVEAL_ACTIONS, "create", "update"]))),
+    db()
+      .select({ _id: VaultItem._id })
+      .from(VaultItem)
+      .where(and(inList(VaultItem.project, projectIds), or(inList(VaultItem.createdBy, userIds), inList(VaultItem.updatedBy, userIds)))),
   ]);
-  const ids = [...seen, ...authored.map((i) => i._id)];
+  const ids = [...new Set([...seen.map((e) => e.item).filter((i): i is Id => Boolean(i)), ...authored.map((i) => i._id)])];
   if (ids.length === 0) return 0;
-  const res = await VaultItem.updateMany({ _id: { $in: ids } }, { $set: { rotationAdvisedAt: new Date(), rotationAdvisedReason: reason } });
-  return res.modifiedCount;
+  const flagged = await db()
+    .update(VaultItem)
+    .set({ rotationAdvisedAt: new Date(), rotationAdvisedReason: reason })
+    .where(inList(VaultItem._id, ids))
+    .returning({ id: VaultItem._id });
+  return flagged.length;
 }
 
 /** A person who can no longer sign in (exit, login disabled) loses every vault at once: flag each project they belong to. */
 export async function adviseRotationForUser(userId: Id, reason: string): Promise<number> {
-  await connectDB();
-  const uid = userId.toString();
-  const projects = await Project.find({ $or: [{ manager: uid }, { "team.user": uid }] }, { _id: 1 }).lean();
-  let flagged = 0;
-  for (const p of projects) flagged += await adviseRotationForRemoved(p._id, [uid], reason);
-  return flagged;
+  const uid = userId;
+  const projects = await db()
+    .select({ id: Project._id })
+    .from(Project)
+    .where(or(eq(Project.manager, uid), jsonHasField(Project.team, "user", uid)));
+  return adviseRotation(projects.map((p) => p.id), [uid], reason);
 }
 
 /** Deletes every vault item, access-log entry and the wrapped key of a project (crypto-shred). Returns the number of items shredded. */
 export async function shredProjectVault(projectId: Id): Promise<number> {
-  await connectDB();
-  const pid = projectId.toString();
-  const [items] = await Promise.all([VaultItem.deleteMany({ project: pid }), VaultEvent.deleteMany({ project: pid }), ProjectVault.deleteOne({ project: pid })]);
-  return items.deletedCount;
+  const pid = projectId;
+  // One atomic batch: either the whole vault is shredded or nothing is.
+  const [items] = await db().batch([
+    db().delete(VaultItem).where(eq(VaultItem.project, pid)).returning({ id: VaultItem._id }),
+    db().delete(VaultEvent).where(eq(VaultEvent.project, pid)),
+    db().delete(ProjectVault).where(eq(ProjectVault.project, pid)),
+  ]);
+  return items.length;
 }

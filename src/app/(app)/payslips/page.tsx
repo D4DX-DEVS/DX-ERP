@@ -35,7 +35,7 @@ export default async function MyPayslipsPage() {
   const settings = await getSettings();
   return (
     <PageBody>
-      <PageHeader overline="Pay & claims · only you, HR and Finance can see this" title={title} actions={<PayslipDownload id={result.data.slip._id.toString()} />} />
+      <PageHeader overline="Pay & claims · only you, HR and Finance can see this" title={title} actions={<PayslipDownload id={result.data.slip._id} />} />
       <PayslipView data={result.data} company={settings.company} footer={settings.documents.payslipFooter} />
     </PageBody>
   );

@@ -1,5 +1,7 @@
 import { KeyRound } from "lucide-react";
+import { asc, desc, eq } from "drizzle-orm";
 import type { CurrentUser } from "@/lib/auth/session";
+import { db } from "@/lib/db";
 import { VaultEvent, VaultItem, type IProject } from "@/lib/models";
 import { fmtDate, fmtDateTime, timeAgo, todayKey } from "@/lib/time";
 import { peopleMap } from "@/lib/work-access";
@@ -40,10 +42,10 @@ export async function VaultTab({ user, role, project }: { user: CurrentUser; rol
     );
   }
 
-  const items = (await VaultItem.find({ project: project._id }).sort({ kind: 1, name: 1 }).lean()).filter((i) => canSeeItem(user, role, i));
+  const items = (await db().select().from(VaultItem).where(eq(VaultItem.project, project._id)).orderBy(asc(VaultItem.kind), asc(VaultItem.name))).filter((i) => canSeeItem(user, role, i));
   const [people, events] = await Promise.all([
     peopleMap([project.manager, ...project.team.map((m) => m.user), ...items.flatMap((i) => [i.createdBy, i.updatedBy])]),
-    role === "owner" ? VaultEvent.find({ project: project._id }).sort({ at: -1 }).limit(60).lean() : Promise.resolve([]),
+    role === "owner" ? db().select().from(VaultEvent).where(eq(VaultEvent.project, project._id)).orderBy(desc(VaultEvent.at)).limit(60) : Promise.resolve([]),
   ]);
 
   let key: Buffer | null = null;
@@ -59,7 +61,7 @@ export async function VaultTab({ user, role, project }: { user: CurrentUser; rol
 
   const today = todayKey();
   const teamSize = project.team.length;
-  const audienceSize = new Set([project.manager?.toString(), ...project.team.map((m) => m.user.toString())].filter(Boolean)).size;
+  const audienceSize = new Set([project.manager, ...project.team.map((m) => m.user)].filter(Boolean)).size;
   const views: VaultItemView[] = items.map((i) => {
     let keys: string[] = [];
     let url: string | undefined;
@@ -80,13 +82,13 @@ export async function VaultTab({ user, role, project }: { user: CurrentUser; rol
         broken = error.message;
       }
     }
-    const updater = i.updatedBy ? people.get(i.updatedBy.toString())?.name : undefined;
+    const updater = i.updatedBy ? people.get(i.updatedBy)?.name : undefined;
     return {
-      id: i._id.toString(),
+      id: i._id,
       kind: i.kind,
       name: i.name,
-      description: i.description,
-      environment: i.environment,
+      description: i.description ?? undefined,
+      environment: i.environment ?? undefined,
       environmentLabel: i.environment ? ENV_LABELS[i.environment] : undefined,
       keys,
       url,
@@ -94,42 +96,42 @@ export async function VaultTab({ user, role, project }: { user: CurrentUser; rol
       hasNotes,
       entryCount: i.entryCount,
       audience: i.audience,
-      members: i.members.map((m) => m.toString()),
+      members: i.members,
       audienceLabel: i.audience === "team" ? `Whole team · ${audienceSize}` : i.members.length === 0 ? "Project manager only" : `Manager + ${i.members.length} selected`,
       notifyOnReveal: i.notifyOnReveal,
-      rotateBy: i.rotateBy,
+      rotateBy: i.rotateBy ?? undefined,
       rotateByLabel: i.rotateBy ? fmtDate(i.rotateBy) : undefined,
       rotationOverdue: Boolean(i.rotateBy && i.rotateBy < today),
       rotationAdvised: i.rotationAdvisedAt ? (i.rotationAdvisedReason ?? "Rotation advised") : undefined,
       version: i.version,
       updatedLabel: `${timeAgo(i.valuesUpdatedAt)}${updater ? ` by ${updater}` : ""}`,
-      createdBy: people.get(i.createdBy.toString())?.name ?? "Unknown",
+      createdBy: people.get(i.createdBy)?.name ?? "Unknown",
       canManage: canManageItem(user, role, i),
       broken,
     };
   });
 
   const eventViews: VaultEventView[] = events.map((e) => ({
-    id: e._id.toString(),
+    id: e._id,
     who: e.userName,
     action: EVENT_LABELS[e.action] ?? e.action,
     tone: e.action === "delete" ? "red" : e.action === "reveal" || e.action === "copy" || e.action === "download" || e.action === "edit_open" ? "amber" : "blue",
     itemName: e.itemName,
-    field: e.field,
+    field: e.field ?? undefined,
     when: fmtDateTime(e.at),
     ago: timeAgo(e.at),
-    ip: e.ip,
+    ip: e.ip ?? undefined,
   }));
 
   const teamOptions = project.team.map((m) => {
-    const p = people.get(m.user.toString());
-    return { id: m.user.toString(), name: p?.name ?? "Unknown", photo: p?.photo, personType: p?.personType };
+    const p = people.get(m.user);
+    return { id: m.user, name: p?.name ?? "Unknown", photo: p?.photo, personType: p?.personType };
   });
-  const manager = project.manager ? people.get(project.manager.toString())?.name : undefined;
+  const manager = project.manager ? people.get(project.manager)?.name : undefined;
 
   return (
     <VaultPanel
-      projectId={project._id.toString()}
+      projectId={project._id}
       role={role}
       items={views}
       events={eventViews}

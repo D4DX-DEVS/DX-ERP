@@ -1,11 +1,12 @@
 import "server-only";
 import { cache } from "react";
-import type { Types } from "mongoose";
+import { and, asc, count, desc, eq, gt, gte, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { can, type CurrentUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import {
   Attendance,
   AttendanceCorrection,
+  Designation,
   Expense,
   Invoice,
   LeaveRequest,
@@ -16,13 +17,15 @@ import {
   Task,
   TimesheetEntry,
   User,
+  type Id,
 } from "@/lib/models";
 import type { AppSettings } from "@/lib/config-defaults";
 import { workCalendar } from "@/lib/domain/calendar";
-import { EXITED_STATUSES } from "@/lib/people";
-import { fyOf, peopleMap, type PersonInfo } from "@/lib/reports/shared";
+import { directReportIds, EXITED_STATUSES, namesFor } from "@/lib/people";
+import { fyOf } from "@/lib/reports/shared";
 import { getSettings } from "@/lib/settings";
-import { addMonths, monthKey, monthRange, TZ, todayKey, zonedDateTime } from "@/lib/time";
+import { inList, jsonHas, notInList } from "@/lib/sql";
+import { addMonths, monthKey, monthRange, todayKey, zonedDateTime } from "@/lib/time";
 
 /* ---------------------------------------------------------------- periods */
 
@@ -59,12 +62,12 @@ export interface Headcount {
 }
 
 export const loadHeadcount = cache(async (): Promise<Headcount> => {
-  await connectDB();
-  const rows = await User.aggregate<{ _id: string; n: number }>([
-    { $match: { personType: { $in: PERSON_TYPES }, status: { $nin: EXITED_STATUSES } } },
-    { $group: { _id: "$personType", n: { $sum: 1 } } },
-  ]);
-  const get = (type: string) => rows.find((r) => r._id === type)?.n ?? 0;
+  const rows = await db()
+    .select({ type: User.personType, n: count() })
+    .from(User)
+    .where(and(inList(User.personType, PERSON_TYPES), notInList(User.status, EXITED_STATUSES)))
+    .groupBy(User.personType);
+  const get = (type: string) => rows.find((r) => r.type === type)?.n ?? 0;
   const employees = get("employee");
   const trainees = get("trainee");
   const interns = get("intern");
@@ -92,17 +95,22 @@ function beforeAbsenceCutoff(settings: AppSettings, today: string): boolean {
 }
 
 export const loadAttendanceToday = cache(async (): Promise<AttendanceToday> => {
-  await connectDB();
   const settings = await getSettings();
   const { today } = getPeriods();
   const [headcount, cal, docs, leaveUsers] = await Promise.all([
     loadHeadcount(),
     workCalendar(settings, today, today),
-    Attendance.find({ date: today, checkIn: { $exists: true } }, { user: 1, late: 1 }).lean(),
-    LeaveRequest.distinct("user", { status: "approved", startDate: { $lte: today }, endDate: { $gte: today }, halfDay: false }),
+    db()
+      .select({ user: Attendance.user, late: Attendance.late })
+      .from(Attendance)
+      .where(and(eq(Attendance.date, today), isNotNull(Attendance.checkIn))),
+    db()
+      .selectDistinct({ user: LeaveRequest.user })
+      .from(LeaveRequest)
+      .where(and(eq(LeaveRequest.status, "approved"), lte(LeaveRequest.startDate, today), gte(LeaveRequest.endDate, today), eq(LeaveRequest.halfDay, false))),
   ]);
-  const present = new Set(docs.map((d) => d.user.toString()));
-  const onLeave = leaveUsers.filter((u) => !present.has(u.toString())).length;
+  const present = new Set(docs.map((d) => d.user));
+  const onLeave = leaveUsers.filter((u) => !present.has(u.user)).length;
   const workingDay = cal.isWorkingDay(today);
   return {
     total: headcount.total,
@@ -141,44 +149,69 @@ export interface OpenMovements {
   overdue: number;
   /** Still open from an earlier day (In-Time never recorded). */
   missing: number;
-  people: Map<string, PersonInfo>;
+  people: Map<string, { name: string; designation?: string }>;
 }
 
 /** Where an open (still "out") movement stands: fine, past its expected return, or left open from an earlier day. */
-export function classifyOpenMovement(m: { date: string; expectedReturn?: Date }, settings: AppSettings, today: string): OpenMovementState {
+export function classifyOpenMovement(m: { date: string; expectedReturn?: Date | null }, settings: AppSettings, today: string): OpenMovementState {
   if (m.date < today) return "missing_in";
   const grace = settings.movement.overdueGraceMinutes * 60_000;
   return m.expectedReturn && Date.now() > m.expectedReturn.getTime() + grace ? "overdue" : "out";
 }
 
 export const loadOpenMovements = cache(async (): Promise<OpenMovements> => {
-  await connectDB();
   const settings = await getSettings();
   const { today } = getPeriods();
-  const docs = await Movement.find({ status: "out" }, { user: 1, date: 1, outTime: 1, expectedReturn: 1, purpose: 1, destination: 1, categoryLabel: 1, official: 1 }).sort({ outTime: 1 }).limit(200).lean();
+  const docs = await db()
+    .select({
+      _id: Movement._id,
+      user: Movement.user,
+      date: Movement.date,
+      outTime: Movement.outTime,
+      expectedReturn: Movement.expectedReturn,
+      purpose: Movement.purpose,
+      destination: Movement.destination,
+      categoryLabel: Movement.categoryLabel,
+      official: Movement.official,
+    })
+    .from(Movement)
+    .where(eq(Movement.status, "out"))
+    .orderBy(asc(Movement.outTime))
+    .limit(200);
   const rows: OpenMovement[] = docs.map((m) => {
     return {
-      id: m._id.toString(),
-      personId: m.user.toString(),
+      id: m._id,
+      personId: m.user,
       official: m.official,
       categoryLabel: m.categoryLabel,
       purpose: m.purpose,
-      destination: m.destination,
+      destination: m.destination ?? undefined,
       date: m.date,
-      outTime: m.outTime,
-      expectedReturn: m.expectedReturn,
+      outTime: m.outTime ?? undefined,
+      expectedReturn: m.expectedReturn ?? undefined,
       state: classifyOpenMovement(m, settings, today),
     };
   });
   // Most urgent first: earlier-day (missing In-Time), then overdue, then everyone else by Out-Time.
   const rank: Record<OpenMovementState, number> = { missing_in: 0, overdue: 1, out: 2 };
   rows.sort((a, b) => rank[a.state] - rank[b.state] || (a.outTime?.getTime() ?? 0) - (b.outTime?.getTime() ?? 0));
+  // Name + designation of the people involved, in one query (the dashboard has a small per-request query budget).
+  const ids = [...new Set(rows.map((r) => r.personId))];
+  const people = new Map<string, { name: string; designation?: string }>();
+  if (ids.length > 0) {
+    const found = await db()
+      .select({ id: User._id, name: User.name, designation: Designation.name })
+      .from(User)
+      .leftJoin(Designation, eq(Designation._id, User.designation))
+      .where(inList(User._id, ids));
+    for (const u of found) people.set(u.id, { name: u.name, designation: u.designation ?? undefined });
+  }
   return {
     rows,
     outside: rows.filter((r) => r.state !== "missing_in").length,
     overdue: rows.filter((r) => r.state === "overdue").length,
     missing: rows.filter((r) => r.state === "missing_in").length,
-    people: await peopleMap(rows.map((r) => r.personId)),
+    people,
   };
 });
 
@@ -195,92 +228,127 @@ export interface ApprovalQueue {
   oldest?: { who?: string; at: Date };
 }
 
-export const isReportingManager = cache(async (userId: string): Promise<boolean> => {
-  await connectDB();
-  return Boolean(await User.exists({ reportingManager: userId }));
-});
+/** Direct reports of a person, fetched once per request (shared by `isReportingManager` and the approval queues). */
+const reportsOf = cache((userId: string) => directReportIds(userId));
+
+export const isReportingManager = cache(async (userId: string): Promise<boolean> => (await reportsOf(userId)).length > 0);
 
 /** Everything waiting on this person, based on their approval permissions and direct reports. */
 export const loadApprovalQueues = cache(async (user: CurrentUser): Promise<ApprovalQueue[]> => {
-  await connectDB();
   const me = user._id;
-  const reports: Types.ObjectId[] = await User.distinct("_id", { reportingManager: me });
+  const reports = await reportsOf(me);
 
-  type Summary = { count: number; oldest?: { user?: Types.ObjectId; at?: Date } };
-  const queue = async (key: QueueKey, label: string, singular: string, href: string, load: () => Promise<Summary>): Promise<ApprovalQueue | null> => {
-    const { count, oldest } = await load();
-    if (count === 0) return null;
-    const who = oldest?.user ? (await peopleMap([oldest.user])).get(oldest.user.toString())?.name : undefined;
-    return { key, label, singular, count, href, oldest: oldest?.at ? { who, at: oldest.at } : undefined };
-  };
-  const queues: Promise<ApprovalQueue | null>[] = [];
+  type Summary = { count: number; oldest?: { user?: Id | null; at?: Date | null } };
+  /** Matching-row count next to the oldest row, in one query (`count(*) over ()` counts before `limit`). */
+  const total = sql<number>`count(*) over ()`.mapWith(Number);
+  const defs: { key: QueueKey; label: string; singular: string; href: string; load: () => Promise<Summary> }[] = [];
 
   // Leave: manager step for direct reports, HR step for holders of leave.approve.
-  const leaveFilter: Record<string, unknown> = {
-    user: { $ne: me },
-    $or: [{ status: "pending_manager", manager: me }, ...(can(user, "leave.approve") ? [{ status: "pending_hr" }] : [])],
-  };
-  queues.push(
-    queue("leave", "Leave", "leave request", "/leave/approvals", async () => {
-      const [count, doc] = await Promise.all([LeaveRequest.countDocuments(leaveFilter), LeaveRequest.findOne(leaveFilter, { user: 1, createdAt: 1 }).sort({ createdAt: 1 }).lean()]);
-      return { count, oldest: doc ? { user: doc.user, at: doc.createdAt } : undefined };
-    }),
+  const leaveFilter = and(
+    ne(LeaveRequest.user, me),
+    or(and(eq(LeaveRequest.status, "pending_manager"), eq(LeaveRequest.manager, me)), can(user, "leave.approve") ? eq(LeaveRequest.status, "pending_hr") : undefined),
   );
+  defs.push({
+    key: "leave",
+    label: "Leave",
+    singular: "leave request",
+    href: "/leave/approvals",
+    load: async () => {
+      const [row] = await db().select({ user: LeaveRequest.user, at: LeaveRequest.createdAt, n: total }).from(LeaveRequest).where(leaveFilter).orderBy(asc(LeaveRequest.createdAt)).limit(1);
+      return { count: row?.n ?? 0, oldest: row ? { user: row.user, at: row.at } : undefined };
+    },
+  });
 
-  const movementFilter: Record<string, unknown> = can(user, "movement.approve")
-    ? { approvalStatus: { $in: ["pending", "correction_requested"] }, user: { $ne: me } }
-    : { approvalStatus: { $in: ["pending", "correction_requested"] }, approver: me };
-  queues.push(
-    queue("movement", "Movement", "movement", "/movement?tab=approvals", async () => {
-      const [count, doc] = await Promise.all([Movement.countDocuments(movementFilter), Movement.findOne(movementFilter, { user: 1, createdAt: 1 }).sort({ createdAt: 1 }).lean()]);
-      return { count, oldest: doc ? { user: doc.user, at: doc.createdAt } : undefined };
-    }),
-  );
+  const pendingApproval = inList(Movement.approvalStatus, ["pending", "correction_requested"]);
+  const movementFilter = can(user, "movement.approve") ? and(pendingApproval, ne(Movement.user, me)) : and(pendingApproval, eq(Movement.approver, me));
+  defs.push({
+    key: "movement",
+    label: "Movement",
+    singular: "movement",
+    href: "/movement?tab=approvals",
+    load: async () => {
+      const [row] = await db().select({ user: Movement.user, at: Movement.createdAt, n: total }).from(Movement).where(movementFilter).orderBy(asc(Movement.createdAt)).limit(1);
+      return { count: row?.n ?? 0, oldest: row ? { user: row.user, at: row.at } : undefined };
+    },
+  });
 
   if (can(user, "attendance.approve") || reports.length > 0) {
-    const f: Record<string, unknown> = can(user, "attendance.approve") ? { status: "pending", user: { $ne: me } } : { status: "pending", user: { $in: reports } };
-    queues.push(
-      queue("attendance", "Attendance corrections", "attendance correction", "/attendance/corrections", async () => {
-        const [count, doc] = await Promise.all([AttendanceCorrection.countDocuments(f), AttendanceCorrection.findOne(f, { user: 1, createdAt: 1 }).sort({ createdAt: 1 }).lean()]);
-        return { count, oldest: doc ? { user: doc.user, at: doc.createdAt } : undefined };
-      }),
-    );
+    const f = can(user, "attendance.approve")
+      ? and(eq(AttendanceCorrection.status, "pending"), ne(AttendanceCorrection.user, me))
+      : and(eq(AttendanceCorrection.status, "pending"), inList(AttendanceCorrection.user, reports));
+    defs.push({
+      key: "attendance",
+      label: "Attendance corrections",
+      singular: "attendance correction",
+      href: "/attendance/corrections",
+      load: async () => {
+        const [row] = await db()
+          .select({ user: AttendanceCorrection.user, at: AttendanceCorrection.createdAt, n: total })
+          .from(AttendanceCorrection)
+          .where(f)
+          .orderBy(asc(AttendanceCorrection.createdAt))
+          .limit(1);
+        return { count: row?.n ?? 0, oldest: row ? { user: row.user, at: row.at } : undefined };
+      },
+    });
   }
 
   if (can(user, "expenses.approve")) {
-    const f: Record<string, unknown> = { status: "submitted", user: { $ne: me } };
-    queues.push(
-      queue("expenses", "Expenses", "expense claim", "/expenses", async () => {
-        const [count, doc] = await Promise.all([Expense.countDocuments(f), Expense.findOne(f, { user: 1, submittedAt: 1 }).sort({ submittedAt: 1 }).lean()]);
-        return { count, oldest: doc ? { user: doc.user, at: doc.submittedAt } : undefined };
-      }),
-    );
+    const f = and(eq(Expense.status, "submitted"), ne(Expense.user, me));
+    defs.push({
+      key: "expenses",
+      label: "Expenses",
+      singular: "expense claim",
+      href: "/expenses",
+      load: async () => {
+        const [row] = await db().select({ user: Expense.user, at: Expense.submittedAt, n: total }).from(Expense).where(f).orderBy(asc(Expense.submittedAt)).limit(1);
+        return { count: row?.n ?? 0, oldest: row ? { user: row.user, at: row.at } : undefined };
+      },
+    });
   }
 
   // Timesheets are approved per person-week, so count distinct user + week pairs.
   if (can(user, "timesheets.approve") || reports.length > 0) {
-    const f: Record<string, unknown> = can(user, "timesheets.approve") ? { status: "submitted", user: { $ne: me } } : { status: "submitted", user: { $in: reports } };
-    queues.push(
-      queue("timesheets", "Timesheets", "timesheet", "/timesheets/approvals", async () => {
-        const [counted, doc] = await Promise.all([
-          TimesheetEntry.aggregate<{ n: number }>([{ $match: f }, { $group: { _id: { user: "$user", week: "$weekStart" } } }, { $count: "n" }]),
-          TimesheetEntry.findOne(f, { user: 1, submittedAt: 1 }).sort({ submittedAt: 1 }).lean(),
-        ]);
-        return { count: counted[0]?.n ?? 0, oldest: doc ? { user: doc.user, at: doc.submittedAt } : undefined };
-      }),
-    );
+    const f = can(user, "timesheets.approve")
+      ? and(eq(TimesheetEntry.status, "submitted"), ne(TimesheetEntry.user, me))
+      : and(eq(TimesheetEntry.status, "submitted"), inList(TimesheetEntry.user, reports));
+    defs.push({
+      key: "timesheets",
+      label: "Timesheets",
+      singular: "timesheet",
+      href: "/timesheets/approvals",
+      load: async () => {
+        // The oldest submission and the number of distinct person-weeks, in one query.
+        const pairs = sql<number>`(select count(distinct ${TimesheetEntry.user} || '|' || ${TimesheetEntry.weekStart}) from ${TimesheetEntry} where ${f})`.mapWith(Number);
+        const [row] = await db().select({ user: TimesheetEntry.user, at: TimesheetEntry.submittedAt, n: pairs }).from(TimesheetEntry).where(f).orderBy(asc(TimesheetEntry.submittedAt)).limit(1);
+        return { count: row?.n ?? 0, oldest: row ? { user: row.user, at: row.at } : undefined };
+      },
+    });
   }
 
   if (can(user, "payroll.approve")) {
-    queues.push(
-      queue("payroll", "Payroll", "payroll run", "/payroll", async () => {
-        const [count, doc] = await Promise.all([PayrollRun.countDocuments({ status: "verified" }), PayrollRun.findOne({ status: "verified" }, { verifiedAt: 1 }).sort({ verifiedAt: 1 }).lean()]);
-        return { count, oldest: doc ? { at: doc.verifiedAt } : undefined };
-      }),
-    );
+    defs.push({
+      key: "payroll",
+      label: "Payroll",
+      singular: "payroll run",
+      href: "/payroll",
+      load: async () => {
+        const [row] = await db().select({ at: PayrollRun.verifiedAt, n: total }).from(PayrollRun).where(eq(PayrollRun.status, "verified")).orderBy(asc(PayrollRun.verifiedAt)).limit(1);
+        return { count: row?.n ?? 0, oldest: row ? { at: row.at } : undefined };
+      },
+    });
   }
 
-  return (await Promise.all(queues)).filter((q): q is ApprovalQueue => q !== null);
+  const loaded = (await Promise.all(defs.map(async (d) => ({ d, s: await d.load() })))).filter((x) => x.s.count > 0);
+  const names = await namesFor(loaded.map((x) => x.s.oldest?.user));
+  return loaded.map(({ d, s }) => ({
+    key: d.key,
+    label: d.label,
+    singular: d.singular,
+    count: s.count,
+    href: d.href,
+    oldest: s.oldest?.at ? { who: s.oldest.user ? names.get(s.oldest.user) : undefined, at: s.oldest.at } : undefined,
+  }));
 });
 
 /* ---------------------------------------------------------------- finance */
@@ -297,44 +365,46 @@ export interface FinanceSeries {
 }
 
 export const loadFinance = cache(async (): Promise<FinanceSeries> => {
-  await connectDB();
   const { sinceMonth, today } = getPeriods();
   const lo = `${sinceMonth}-01`;
-  const [invoiced, payments, expenses, open] = await Promise.all([
-    Invoice.aggregate<{ _id: string; total: number; count: number }>([
-      { $match: { issueDate: { $gte: lo }, status: { $nin: ["draft", "cancelled"] } } },
-      { $group: { _id: { $substrBytes: ["$issueDate", 0, 7] }, total: { $sum: "$total" }, count: { $sum: 1 } } },
-    ]),
-    Payment.aggregate<{ _id: { month: string; type: string }; amount: number }>([
-      { $match: { date: { $gte: lo }, type: { $in: ["payment", "refund"] } } },
-      { $group: { _id: { month: { $substrBytes: ["$date", 0, 7] }, type: "$type" }, amount: { $sum: "$amount" } } },
-    ]),
-    Expense.aggregate<{ _id: string; amount: number }>([
-      { $match: { date: { $gte: lo }, status: { $in: ["approved", "paid"] } } },
-      { $group: { _id: { $substrBytes: ["$date", 0, 7] }, amount: { $sum: "$amount" } } },
-    ]),
-    Invoice.aggregate<{ _id: null; outstanding: number; overdueCount: number; overdueAmount: number }>([
-      { $match: { status: { $in: ["issued", "partially_paid", "overdue"] }, balance: { $gt: 0 } } },
-      {
-        $group: {
-          _id: null,
-          outstanding: { $sum: "$balance" },
-          overdueCount: { $sum: { $cond: [{ $lt: ["$dueDate", today] }, 1, 0] } },
-          overdueAmount: { $sum: { $cond: [{ $lt: ["$dueDate", today] }, "$balance", 0] } },
-        },
-      },
-    ]),
+  const invoiceMonth = sql<string>`substr(${Invoice.issueDate}, 1, 7)`;
+  const paymentMonth = sql<string>`substr(${Payment.date}, 1, 7)`;
+  const expenseMonth = sql<string>`substr(${Expense.date}, 1, 7)`;
+  const [invoiced, payments, expenses, [open]] = await Promise.all([
+    db()
+      .select({ month: invoiceMonth, total: sql<number>`coalesce(sum(${Invoice.total}), 0)`.mapWith(Number), count: count() })
+      .from(Invoice)
+      .where(and(gte(Invoice.issueDate, lo), notInList(Invoice.status, ["draft", "cancelled"])))
+      .groupBy(invoiceMonth),
+    db()
+      .select({ month: paymentMonth, type: Payment.type, amount: sql<number>`coalesce(sum(${Payment.amount}), 0)`.mapWith(Number) })
+      .from(Payment)
+      .where(and(gte(Payment.date, lo), inList(Payment.type, ["payment", "refund"])))
+      .groupBy(paymentMonth, Payment.type),
+    db()
+      .select({ month: expenseMonth, amount: sql<number>`coalesce(sum(${Expense.amount}), 0)`.mapWith(Number) })
+      .from(Expense)
+      .where(and(gte(Expense.date, lo), inList(Expense.status, ["approved", "paid"])))
+      .groupBy(expenseMonth),
+    db()
+      .select({
+        outstanding: sql<number>`coalesce(sum(${Invoice.balance}), 0)`.mapWith(Number),
+        overdueCount: sql<number>`coalesce(sum(case when ${Invoice.dueDate} < ${today} then 1 else 0 end), 0)`.mapWith(Number),
+        overdueAmount: sql<number>`coalesce(sum(case when ${Invoice.dueDate} < ${today} then ${Invoice.balance} else 0 end), 0)`.mapWith(Number),
+      })
+      .from(Invoice)
+      .where(and(inList(Invoice.status, ["issued", "partially_paid", "overdue"]), gt(Invoice.balance, 0))),
   ]);
   const collected = new Map<string, number>();
-  for (const p of payments) collected.set(p._id.month, (collected.get(p._id.month) ?? 0) + (p._id.type === "refund" ? -Math.abs(p.amount) : p.amount));
+  for (const p of payments) collected.set(p.month, (collected.get(p.month) ?? 0) + (p.type === "refund" ? -Math.abs(p.amount) : p.amount));
   return {
-    invoiced: new Map(invoiced.map((i) => [i._id, i.total])),
-    invoiceCount: new Map(invoiced.map((i) => [i._id, i.count])),
+    invoiced: new Map(invoiced.map((i) => [i.month, i.total])),
+    invoiceCount: new Map(invoiced.map((i) => [i.month, i.count])),
     collected,
-    expenses: new Map(expenses.map((e) => [e._id, e.amount])),
-    outstanding: open[0]?.outstanding ?? 0,
-    overdueCount: open[0]?.overdueCount ?? 0,
-    overdueAmount: open[0]?.overdueAmount ?? 0,
+    expenses: new Map(expenses.map((e) => [e.month, e.amount])),
+    outstanding: open?.outstanding ?? 0,
+    overdueCount: open?.overdueCount ?? 0,
+    overdueAmount: open?.overdueAmount ?? 0,
   };
 });
 
@@ -349,31 +419,39 @@ export interface MonthlyTotals {
 
 export const loadMonthlyOps = cache(
   async (flags: { attendance: boolean; movements: boolean; tasks: boolean }): Promise<MonthlyTotals> => {
-    await connectDB();
     const { sinceMonth } = getPeriods();
     const lo = `${sinceMonth}-01`;
+    const attendanceMonth = sql<string>`substr(${Attendance.date}, 1, 7)`;
+    const movementMonth = sql<string>`substr(${Movement.date}, 1, 7)`;
     const [attendance, movements, tasks] = await Promise.all([
       flags.attendance
-        ? Attendance.aggregate<{ _id: string; days: number; minutes: number }>([
-            { $match: { date: { $gte: lo }, checkIn: { $exists: true } } },
-            { $group: { _id: { $substrBytes: ["$date", 0, 7] }, days: { $sum: 1 }, minutes: { $sum: "$workMinutes" } } },
-          ])
+        ? db()
+            .select({ month: attendanceMonth, days: count(), minutes: sql<number>`coalesce(sum(${Attendance.workMinutes}), 0)`.mapWith(Number) })
+            .from(Attendance)
+            .where(and(gte(Attendance.date, lo), isNotNull(Attendance.checkIn)))
+            .groupBy(attendanceMonth)
         : [],
       flags.movements
-        ? Movement.aggregate<{ _id: string; n: number }>([{ $match: { date: { $gte: lo }, status: { $in: ["out", "returned"] } } }, { $group: { _id: { $substrBytes: ["$date", 0, 7] }, n: { $sum: 1 } } }])
+        ? db()
+            .select({ month: movementMonth, n: count() })
+            .from(Movement)
+            .where(and(gte(Movement.date, lo), inList(Movement.status, ["out", "returned"])))
+            .groupBy(movementMonth)
         : [],
-      flags.tasks
-        ? Task.aggregate<{ _id: string; n: number }>([
-            { $match: { completedAt: { $gte: zonedDateTime(lo, "00:00") } } },
-            { $group: { _id: { $dateToString: { format: "%Y-%m", date: "$completedAt", timezone: TZ } }, n: { $sum: 1 } } },
-          ])
-        : [],
+      // Months are the company-zone month of the completion instant, so bucket them here rather than in SQL.
+      flags.tasks ? db().select({ completedAt: Task.completedAt }).from(Task).where(gte(Task.completedAt, zonedDateTime(lo, "00:00"))) : [],
     ]);
+    const tasksDone = new Map<string, number>();
+    for (const t of tasks) {
+      if (!t.completedAt) continue;
+      const m = monthKey(t.completedAt);
+      tasksDone.set(m, (tasksDone.get(m) ?? 0) + 1);
+    }
     return {
-      attendedDays: new Map(attendance.map((a) => [a._id, a.days])),
-      workMinutes: new Map(attendance.map((a) => [a._id, a.minutes])),
-      movements: new Map(movements.map((m) => [m._id, m.n])),
-      tasksDone: new Map(tasks.map((t) => [t._id, t.n])),
+      attendedDays: new Map(attendance.map((a) => [a.month, a.days])),
+      workMinutes: new Map(attendance.map((a) => [a.month, a.minutes])),
+      movements: new Map(movements.map((m) => [m.month, m.n])),
+      tasksDone,
     };
   },
   );
@@ -391,37 +469,52 @@ export interface OpenTask {
   id: string;
   taskNo: string;
   title: string;
-  project?: Types.ObjectId;
+  project?: Id;
   status: string;
   priority: string;
   dueDate?: string;
   progress: number;
-  submissions: { submittedBy: Types.ObjectId; reviewStatus: string; submittedAt: Date; reviewNote?: string }[];
+  submissions: { submittedBy: Id; reviewStatus: string; submittedAt: Date; reviewNote?: string }[];
 }
 
 /** A person's open tasks, soonest deadline first with undated tasks last. `shared` also includes tasks shared with them. */
-export async function loadOpenTasks(userId: string | Types.ObjectId, closedStatuses: string[], limit: number, shared = false): Promise<{ tasks: OpenTask[]; total: number }> {
-  await connectDB();
-  const scope = shared ? { $or: [{ assignees: userId }, { sharedWith: userId }] } : { assignees: userId };
-  // `$and` keeps the scope's own `$or` intact next to the due-date `$or` below.
-  const base = { $and: [scope, { status: { $nin: closedStatuses } }] };
-  const projection = { taskNo: 1, title: 1, project: 1, status: 1, priority: 1, dueDate: 1, progress: 1, submissions: 1 } as const;
+export async function loadOpenTasks(userId: Id, closedStatuses: string[], limit: number, shared = false): Promise<{ tasks: OpenTask[]; total: number }> {
+  const scope = shared ? or(jsonHas(Task.assignees, userId), jsonHas(Task.sharedWith, userId)) : jsonHas(Task.assignees, userId);
+  const base = and(scope, notInList(Task.status, closedStatuses));
+  const columns = {
+    _id: Task._id,
+    taskNo: Task.taskNo,
+    title: Task.title,
+    project: Task.project,
+    status: Task.status,
+    priority: Task.priority,
+    dueDate: Task.dueDate,
+    progress: Task.progress,
+    submissions: Task.submissions,
+  };
   const [dated, total] = await Promise.all([
-    Task.find({ $and: [...base.$and, { dueDate: { $exists: true, $nin: [null, ""] } }] }, projection).sort({ dueDate: 1 }).limit(limit).lean(),
-    Task.countDocuments(base),
+    db()
+      .select(columns)
+      .from(Task)
+      .where(and(base, isNotNull(Task.dueDate), ne(Task.dueDate, "")))
+      .orderBy(asc(Task.dueDate))
+      .limit(limit),
+    db().$count(Task, base),
   ]);
   const undated =
     dated.length < limit
-      ? await Task.find({ $and: [...base.$and, { $or: [{ dueDate: { $exists: false } }, { dueDate: null }, { dueDate: "" }] }] }, projection)
-          .sort({ updatedAt: -1 })
+      ? await db()
+          .select(columns)
+          .from(Task)
+          .where(and(base, or(isNull(Task.dueDate), eq(Task.dueDate, ""))))
+          .orderBy(desc(Task.updatedAt))
           .limit(limit - dated.length)
-          .lean()
       : [];
   const tasks = [...dated, ...undated].map((t) => ({
-    id: t._id.toString(),
+    id: t._id,
     taskNo: t.taskNo,
     title: t.title,
-    project: t.project,
+    project: t.project ?? undefined,
     status: t.status,
     priority: t.priority,
     dueDate: t.dueDate || undefined,

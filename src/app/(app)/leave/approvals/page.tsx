@@ -1,4 +1,5 @@
 import { forbidden } from "next/navigation";
+import { and, asc, desc, eq, gte, lte, ne } from "drizzle-orm";
 import { CheckCircle2, Download } from "lucide-react";
 import { AttachmentList } from "@/components/ui/file-upload";
 import { Avatar } from "@/components/ui/avatar";
@@ -11,12 +12,13 @@ import { Alert, EmptyState, PageBody, PageHeader } from "@/components/ui/page";
 import { EmptyRow, TableWrap, THead, Td, Th, Tr } from "@/components/ui/table";
 import { LinkTabs } from "@/components/ui/tabs";
 import { requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { leaveYearOf } from "@/lib/domain/leave-balance";
 import { Department, Designation, LeaveRequest, LeaveType, User, type LeaveStatus } from "@/lib/models";
 import { PAGE_SIZE, pageParam, param, type SearchParams } from "@/lib/query";
 import { plain } from "@/lib/serialize";
 import { getSettings } from "@/lib/settings";
+import { inList } from "@/lib/sql";
 import { fmtDate, timeAgo, todayKey } from "@/lib/time";
 import { LeaveTabs } from "../_components/tabs";
 import { leaveAccess } from "../_lib/access";
@@ -37,18 +39,17 @@ export default async function LeaveApprovalsPage({ searchParams }: { searchParam
   const tabParam = param(sp, "tab");
   const tab = TABS.find((t) => t === tabParam) ?? "pending";
   const page = pageParam(sp);
-  await connectDB();
   const settings = await getSettings();
 
   // Queue: HR / management decide at any pending stage; a manager decides the manager stage for their own reports.
-  const pendingFilter: Record<string, unknown> = access.approve
-    ? { status: { $in: PENDING }, user: { $ne: user._id } }
-    : { status: "pending_manager", manager: user._id, user: { $ne: user._id } };
+  const pendingFilter = access.approve
+    ? and(inList(LeaveRequest.status, PENDING), ne(LeaveRequest.user, user._id))
+    : and(eq(LeaveRequest.status, "pending_manager"), eq(LeaveRequest.manager, user._id), ne(LeaveRequest.user, user._id));
   // History: everyone with org-wide access, otherwise the manager's direct reports.
-  const scope: Record<string, unknown> = access.viewAll || access.approve ? {} : { user: { $in: access.reportIds } };
-  const historyFilter: Record<string, unknown> = { ...scope, ...(tab === "approved" ? { status: "approved" } : tab === "rejected" ? { status: "rejected" } : {}) };
+  const scope = access.viewAll || access.approve ? undefined : inList(LeaveRequest.user, access.reportIds);
+  const historyFilter = and(scope, tab === "approved" ? eq(LeaveRequest.status, "approved") : tab === "rejected" ? eq(LeaveRequest.status, "rejected") : undefined);
 
-  const pendingCount = await LeaveRequest.countDocuments(pendingFilter);
+  const pendingCount = await db().$count(LeaveRequest, pendingFilter);
   const canExport = access.viewAll || access.manage;
   const header = (
     <PageHeader
@@ -88,11 +89,25 @@ export default async function LeaveApprovalsPage({ searchParams }: { searchParam
 
   if (tab !== "pending") {
     const [rows, total] = await Promise.all([
-      LeaveRequest.find(historyFilter).sort({ createdAt: -1 }).skip((page - 1) * PAGE_SIZE).limit(PAGE_SIZE).lean(),
-      LeaveRequest.countDocuments(historyFilter),
+      db()
+        .select()
+        .from(LeaveRequest)
+        .where(historyFilter)
+        .orderBy(desc(LeaveRequest.createdAt))
+        .limit(PAGE_SIZE)
+        .offset((page - 1) * PAGE_SIZE),
+      db().$count(LeaveRequest, historyFilter),
     ]);
-    const people = await User.find({ _id: { $in: rows.map((r) => r.user) } }, { name: 1, employeeId: 1 }).lean();
-    const byId = new Map(people.map((p) => [p._id.toString(), p]));
+    const people = await db()
+      .select({ _id: User._id, name: User.name, employeeId: User.employeeId })
+      .from(User)
+      .where(
+        inList(
+          User._id,
+          rows.map((r) => r.user),
+        ),
+      );
+    const byId = new Map(people.map((p) => [p._id, p]));
     return (
       <PageBody>
         {header}
@@ -111,10 +126,10 @@ export default async function LeaveApprovalsPage({ searchParams }: { searchParam
             <tbody>
               {rows.length === 0 && <EmptyRow colSpan={7}>No leave requests in this view.</EmptyRow>}
               {rows.map((r) => {
-                const p = byId.get(r.user.toString());
+                const p = byId.get(r.user);
                 const last = r.approvals.at(-1);
                 return (
-                  <Tr key={r._id.toString()} className="align-top">
+                  <Tr key={r._id} className="align-top">
                     <Td>
                       <div className="font-semibold">{p?.name ?? "Unknown person"}</div>
                       <div className="text-xs text-muted">{p?.employeeId}</div>
@@ -154,27 +169,48 @@ export default async function LeaveApprovalsPage({ searchParams }: { searchParam
     );
   }
 
-  const requests = await LeaveRequest.find(pendingFilter).sort({ createdAt: 1 }).limit(60).lean();
-  const people = await User.find(
-    { _id: { $in: requests.flatMap((r) => [r.user, ...(r.manager ? [r.manager] : [])]) } },
-    { name: 1, employeeId: 1, photo: 1, personType: 1, department: 1, designation: 1, reportingManager: 1 },
-  ).lean();
-  const byId = new Map(people.map((p) => [p._id.toString(), p]));
-  const [departments, designations, types] = await Promise.all([
-    Department.find({ _id: { $in: people.flatMap((p) => (p.department ? [p.department] : [])) } }, { name: 1 }).lean(),
-    Designation.find({ _id: { $in: people.flatMap((p) => (p.designation ? [p.designation] : [])) } }, { name: 1 }).lean(),
-    LeaveType.find({ _id: { $in: requests.map((r) => r.leaveType) } }, { name: 1 }).lean(),
+  const requests = await db().select().from(LeaveRequest).where(pendingFilter).orderBy(asc(LeaveRequest.createdAt)).limit(60);
+  const [people, types] = await Promise.all([
+    db()
+      .select({
+        _id: User._id,
+        name: User.name,
+        employeeId: User.employeeId,
+        photo: User.photo,
+        personType: User.personType,
+        department: User.department,
+        reportingManager: User.reportingManager,
+        deptName: Department.name,
+        desigName: Designation.name,
+      })
+      .from(User)
+      .leftJoin(Department, eq(Department._id, User.department))
+      .leftJoin(Designation, eq(Designation._id, User.designation))
+      .where(
+        inList(
+          User._id,
+          requests.flatMap((r) => [r.user, ...(r.manager ? [r.manager] : [])]),
+        ),
+      ),
+    db()
+      .select({ _id: LeaveType._id, name: LeaveType.name })
+      .from(LeaveType)
+      .where(
+        inList(
+          LeaveType._id,
+          requests.map((r) => r.leaveType),
+        ),
+      ),
   ]);
-  const deptName = new Map(departments.map((d) => [d._id.toString(), d.name]));
-  const desigName = new Map(designations.map((d) => [d._id.toString(), d.name]));
-  const typeName = new Map(types.map((t) => [t._id.toString(), t.name]));
+  const byId = new Map(people.map((p) => [p._id, p]));
+  const typeName = new Map(types.map((t) => [t._id, t.name]));
 
   // Balance after approval: pending requests are already reserved in `available`, so it is the post-approval balance.
   const years = [...new Set(requests.map((r) => leaveYearOf(r.startDate, settings)))];
   const today = todayKey();
   const balanceSets = await Promise.all(
     years.map(async (year) => {
-      const subjects = requests.filter((r) => leaveYearOf(r.startDate, settings) === year).map((r) => ({ id: r.user.toString(), personType: byId.get(r.user.toString())?.personType ?? "employee" }));
+      const subjects = requests.filter((r) => leaveYearOf(r.startDate, settings) === year).map((r) => ({ id: r.user, personType: byId.get(r.user)?.personType ?? "employee" }));
       return [year, await bulkLeaveBalances(subjects, year, settings, today)] as const;
     }),
   );
@@ -184,10 +220,27 @@ export default async function LeaveApprovalsPage({ searchParams }: { searchParam
   const minStart = requests.reduce((m, r) => (r.startDate < m ? r.startDate : m), "9999-12-31");
   const maxEnd = requests.reduce((m, r) => (r.endDate > m ? r.endDate : m), "0000-01-01");
   const approved = requests.length
-    ? await LeaveRequest.find({ status: "approved", startDate: { $lte: maxEnd }, endDate: { $gte: minStart } }, { user: 1, startDate: 1, endDate: 1, halfDay: 1, halfDaySession: 1 }).lean()
+    ? await db()
+        .select({
+          user: LeaveRequest.user,
+          startDate: LeaveRequest.startDate,
+          endDate: LeaveRequest.endDate,
+          halfDay: LeaveRequest.halfDay,
+          halfDaySession: LeaveRequest.halfDaySession,
+        })
+        .from(LeaveRequest)
+        .where(and(eq(LeaveRequest.status, "approved"), lte(LeaveRequest.startDate, maxEnd), gte(LeaveRequest.endDate, minStart)))
     : [];
-  const approvedPeople = await User.find({ _id: { $in: approved.map((a) => a.user) } }, { name: 1, department: 1 }).lean();
-  const approvedById = new Map(approvedPeople.map((p) => [p._id.toString(), p]));
+  const approvedPeople = await db()
+    .select({ _id: User._id, name: User.name, department: User.department })
+    .from(User)
+    .where(
+      inList(
+        User._id,
+        approved.map((a) => a.user),
+      ),
+    );
+  const approvedById = new Map(approvedPeople.map((p) => [p._id, p]));
 
   return (
     <PageBody>
@@ -200,21 +253,21 @@ export default async function LeaveApprovalsPage({ searchParams }: { searchParam
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {requests.map((r) => {
-            const id = r._id.toString();
-            const p = byId.get(r.user.toString());
-            const dept = p?.department ? deptName.get(p.department.toString()) : undefined;
-            const role = p?.designation ? desigName.get(p.designation.toString()) : undefined;
-            const manager = p?.reportingManager ? byId.get(p.reportingManager.toString())?.name : undefined;
-            const balance = balanceByYear.get(leaveYearOf(r.startDate, settings))?.rows.get(r.user.toString())?.get(r.leaveType.toString());
+            const id = r._id;
+            const p = byId.get(r.user);
+            const dept = p?.deptName ?? undefined;
+            const role = p?.desigName ?? undefined;
+            const manager = p?.reportingManager ? byId.get(p.reportingManager)?.name : undefined;
+            const balance = balanceByYear.get(leaveYearOf(r.startDate, settings))?.rows.get(r.user)?.get(r.leaveType);
             const clashes = approved
-              .filter((a) => a.user.toString() !== r.user.toString() && a.startDate <= r.endDate && a.endDate >= r.startDate)
-              .filter((a) => dept && approvedById.get(a.user.toString())?.department?.toString() === p?.department?.toString())
+              .filter((a) => a.user !== r.user && a.startDate <= r.endDate && a.endDate >= r.startDate)
+              .filter((a) => dept && approvedById.get(a.user)?.department === p?.department)
               .slice(0, 3);
-            const afterText = !balance ? "—" : balance.unlimited ? "Unpaid · no limit" : `${balance.available} ${(typeName.get(r.leaveType.toString()) ?? r.leaveTypeName ?? "").toLowerCase()}`;
+            const afterText = !balance ? "—" : balance.unlimited ? "Unpaid · no limit" : `${balance.available} ${(typeName.get(r.leaveType) ?? r.leaveTypeName ?? "").toLowerCase()}`;
             return (
               <article key={id} className="flex min-w-0 flex-col gap-3 rounded-[14px] border border-line bg-white p-4 sm:p-[18px]">
                 <div className="flex items-center gap-3">
-                  <Avatar name={p?.name ?? "?"} src={p?.photo} size="md" />
+                  <Avatar name={p?.name ?? "?"} src={p?.photo ?? undefined} size="md" />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[15px] font-semibold text-ink">{p?.name ?? "Unknown person"}</div>
                     <div className="truncate text-xs text-muted">{[role, dept, manager && `reports to ${manager}`].filter(Boolean).join(" · ") || p?.employeeId}</div>
@@ -250,7 +303,7 @@ export default async function LeaveApprovalsPage({ searchParams }: { searchParam
                 {r.attachments.length > 0 && <AttachmentList files={plain(r.attachments).map((f) => ({ file: f.file, name: f.name, size: f.size }))} />}
                 {clashes.length > 0 && (
                   <Alert tone="warning" className="py-2 text-xs">
-                    {clashes.map((c) => `${approvedById.get(c.user.toString())?.name ?? "A colleague"} (${leaveRangeLabel(c)})`).join("; ")} — same department, already on approved leave.
+                    {clashes.map((c) => `${approvedById.get(c.user)?.name ?? "A colleague"} (${leaveRangeLabel(c)})`).join("; ")} — same department, already on approved leave.
                   </Alert>
                 )}
                 <div className="text-xs text-muted">

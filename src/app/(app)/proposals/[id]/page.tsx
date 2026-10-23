@@ -1,6 +1,7 @@
 import Link from "next/link";
+import { eq } from "drizzle-orm";
 import { can, requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Client, Lead, Project } from "@/lib/models";
 import { namesFor, peopleOptions } from "@/lib/people";
 import { param, type SearchParams } from "@/lib/query";
@@ -38,7 +39,6 @@ export default async function ProposalPage({ params, searchParams }: { params: P
   const sp = await searchParams;
   const user = await requirePagePermission("proposals.view");
   const p = await pageProposal(user, id);
-  await connectDB();
   const settings = await getSettings();
 
   const revParam = Number.parseInt(param(sp, "rev"), 10);
@@ -47,9 +47,9 @@ export default async function ProposalPage({ params, searchParams }: { params: P
   const canManage = can(user, "proposals.manage");
   const canApprove = can(user, "proposals.approve");
   const [client, lead, project, names, people] = await Promise.all([
-    Client.findById(p.client, { name: 1, clientNo: 1, contactPerson: 1, email: 1 }).lean(),
-    p.lead ? Lead.findById(p.lead, { leadNo: 1, title: 1 }).lean() : null,
-    p.project ? Project.findById(p.project, { projectNo: 1, title: 1, status: 1 }).lean() : null,
+    db().select({ _id: Client._id, name: Client.name, clientNo: Client.clientNo }).from(Client).where(eq(Client._id, p.client)).limit(1).then((r) => r[0]),
+    p.lead ? db().select({ _id: Lead._id, leadNo: Lead.leadNo, title: Lead.title }).from(Lead).where(eq(Lead._id, p.lead)).limit(1).then((r) => r[0]) : undefined,
+    p.project ? db().select({ _id: Project._id, projectNo: Project.projectNo, title: Project.title, status: Project.status }).from(Project).where(eq(Project._id, p.project)).limit(1).then((r) => r[0]) : undefined,
     namesFor([p.owner, p.createdBy, p.approvedBy]),
     canApprove && p.status === "approved" && !p.project ? peopleOptions() : [],
   ]);
@@ -62,7 +62,7 @@ export default async function ProposalPage({ params, searchParams }: { params: P
   const historyItems: TimelineItem[] = [...p.history]
     .sort((a, b) => b.at.getTime() - a.at.getTime())
     .map((h, i) => ({
-      id: h._id?.toString() ?? String(i),
+      id: h._id ?? String(i),
       title: HISTORY_TITLES[h.action] ?? h.action,
       meta: h.byName,
       at: h.at,
@@ -137,8 +137,8 @@ export default async function ProposalPage({ params, searchParams }: { params: P
                   ...(lead
                     ? [{ label: "Lead", value: <Link href={`/crm/leads/${lead._id}`} className="font-medium text-brand-600 hover:text-brand-800">{lead.leadNo} · {lead.title}</Link> }]
                     : []),
-                  { label: "Owner", value: p.owner ? names.get(p.owner.toString()) : undefined },
-                  { label: "Created", value: `${fmtDate(p.createdAt)}${p.createdBy ? ` · ${names.get(p.createdBy.toString()) ?? ""}` : ""}` },
+                  { label: "Owner", value: p.owner ? names.get(p.owner) : undefined },
+                  { label: "Created", value: `${fmtDate(p.createdAt)}${p.createdBy ? ` · ${names.get(p.createdBy) ?? ""}` : ""}` },
                   { label: "Sent", value: p.sentAt ? fmtDateTime(p.sentAt) : "Not sent yet" },
                   {
                     label: "Valid until",

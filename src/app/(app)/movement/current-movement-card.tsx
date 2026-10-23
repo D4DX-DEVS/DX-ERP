@@ -1,6 +1,7 @@
 import Link from "next/link";
+import { and, desc, eq } from "drizzle-orm";
 import { LogOut } from "lucide-react";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Movement } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
 import { displayStatus } from "@/lib/movement/access";
@@ -15,11 +16,13 @@ import { ElapsedTimer, ExtendReturnDialog, RecordInButton } from "./movement-con
  * Record In-Time when out, otherwise today's total time outside and a "Record movement" action.
  */
 export async function CurrentMovementCard({ userId }: { userId: string }) {
-  await connectDB();
-  const [settings, open, todays] = await Promise.all([
+  const [settings, [open], todays] = await Promise.all([
     getSettings(),
-    Movement.findOne({ user: userId, status: "out" }).sort({ outTime: -1 }).lean(),
-    Movement.find({ user: userId, date: todayKey(), status: "returned" }, { durationMinutes: 1, official: 1 }).lean(),
+    db().select().from(Movement).where(and(eq(Movement.user, userId), eq(Movement.status, "out"))).orderBy(desc(Movement.outTime)).limit(1),
+    db()
+      .select({ durationMinutes: Movement.durationMinutes, official: Movement.official })
+      .from(Movement)
+      .where(and(eq(Movement.user, userId), eq(Movement.date, todayKey()), eq(Movement.status, "returned"))),
   ]);
 
   if (open && open.outTime) {
@@ -38,8 +41,8 @@ export async function CurrentMovementCard({ userId }: { userId: string }) {
           </div>
           <ElapsedTimer outTime={open.outTime.toISOString()} expectedReturn={open.expectedReturn?.toISOString()} />
           <div className="flex flex-wrap gap-2">
-            <RecordInButton id={open._id.toString()} />
-            <ExtendReturnDialog id={open._id.toString()} current={open.expectedReturn?.toISOString()} />
+            <RecordInButton id={open._id} />
+            <ExtendReturnDialog id={open._id} current={open.expectedReturn?.toISOString()} />
           </div>
         </CardBody>
       </Card>

@@ -1,6 +1,7 @@
 import { forbidden, notFound } from "next/navigation";
+import { asc } from "drizzle-orm";
 import { requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Client } from "@/lib/models";
 import { idParam, type SearchParams } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
@@ -16,7 +17,6 @@ export const metadata = { title: "New proposal" };
 export default async function NewProposalPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePagePermission("proposals.manage");
   const sp = await searchParams;
-  await connectDB();
   const settings = await getSettings();
 
   const leadId = idParam(sp, "lead");
@@ -45,9 +45,9 @@ export default async function NewProposalPage({ searchParams }: { searchParams: 
     );
   }
 
-  const clients = await Client.find(clientScope(user), { name: 1, clientNo: 1 }).sort({ name: 1 }).limit(1000).lean();
+  const clients = await db().select({ _id: Client._id, name: Client.name, clientNo: Client.clientNo }).from(Client).where(clientScope(user)).orderBy(asc(Client.name)).limit(1000);
   const prefillClient = idParam(sp, "client");
-  const clientId = lead?.client?.toString() ?? (prefillClient && clients.some((c) => c._id.toString() === prefillClient) ? prefillClient : "");
+  const clientId = lead?.client ?? (prefillClient && clients.some((c) => c._id === prefillClient) ? prefillClient : "");
   const defaultTax = settings.taxes.find((t) => t.rate === 18)?.rate ?? settings.taxes[0]?.rate ?? 0;
 
   return (
@@ -55,7 +55,7 @@ export default async function NewProposalPage({ searchParams }: { searchParams: 
       {header}
       <ProposalForm
         mode="create"
-        clients={clients.map((c) => ({ id: c._id.toString(), name: c.name, clientNo: c.clientNo }))}
+        clients={clients.map((c) => ({ id: c._id, name: c.name, clientNo: c.clientNo }))}
         taxes={settings.taxes}
         defaultTaxRate={defaultTax}
         clientLocked={Boolean(lead?.client)}
@@ -64,7 +64,7 @@ export default async function NewProposalPage({ searchParams }: { searchParams: 
           kind: "proposal",
           title: lead?.title ?? "",
           client: clientId,
-          lead: lead?._id.toString() ?? "",
+          lead: lead?._id ?? "",
           summary: lead?.requirement ?? "",
           scope: "",
           deliverables: "",

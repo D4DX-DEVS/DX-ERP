@@ -1,56 +1,59 @@
 "use server";
 
+import { and, eq, gt, lt, or, sql } from "drizzle-orm";
+import type { SQLiteUpdateSetSource } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
-import type { HydratedDocument, Types } from "mongoose";
 import { actionPermission, actionUser, ActionError, parse, runAction, type ActionResult } from "@/lib/actions";
 import { can, isStaff, type CurrentUser } from "@/lib/auth/session";
-import { Client, Movement, Project, User, type IMovement } from "@/lib/models";
+import { db } from "@/lib/db";
+import { Client, Movement, Project, User, newId, type IMovement } from "@/lib/models";
+import { inList, jsonPush } from "@/lib/sql";
 import { nextNumber, ID_PREFIX } from "@/lib/counters";
 import { getSettings } from "@/lib/settings";
 import { audit } from "@/lib/audit";
 import { notify, notifyPermission, usersWithPermission } from "@/lib/notify";
-import { recalcAttendanceDay } from "@/lib/domain/attendance-calc";
+import { recalcAttendanceDay, recalcAttendanceDays } from "@/lib/domain/attendance-calc";
 import { canApproveMovement, categoryOf, SELF_CANCEL_MINUTES, withinSelfCancelWindow } from "@/lib/movement/access";
 import { addDays, dateKey, fmtDateTime, fmtTime, minutesBetween, parseLocalDateTime, todayKey, formatDuration } from "@/lib/time";
 import { zs } from "@/lib/validation";
 import { isObjectId } from "@/lib/validation";
 
-type MovementDoc = HydratedDocument<IMovement>;
-
 function history(user: Pick<CurrentUser, "_id" | "name">, action: string, note?: string, from?: string, to?: string) {
-  return { action, by: user._id, byName: user.name, at: new Date(), note, from, to };
+  return { _id: newId(), action, by: user._id, byName: user.name, at: new Date(), note, from, to };
 }
 
-async function loadMovement(id: string): Promise<MovementDoc> {
+async function loadMovement(id: string): Promise<IMovement> {
   if (!isObjectId(id)) throw new ActionError("Movement not found.");
-  const m = await Movement.findById(id);
+  const [m] = await db().select().from(Movement).where(eq(Movement._id, id)).limit(1);
   if (!m) throw new ActionError("Movement not found.");
   return m;
 }
 
 /** Who should decide on a movement: the reporting manager, otherwise everyone with `movement.approve`. */
-async function approverIds(userId: Types.ObjectId | string): Promise<{ manager?: string; ids: string[] }> {
-  const person = await User.findById(userId, { reportingManager: 1 }).lean();
-  const manager = person?.reportingManager?.toString();
+async function approverIds(userId: string): Promise<{ manager?: string; ids: string[] }> {
+  const [person] = await db().select({ reportingManager: User.reportingManager }).from(User).where(eq(User._id, userId)).limit(1);
+  const manager = person?.reportingManager ?? undefined;
   if (manager) return { manager, ids: [manager] };
   return { ids: await usersWithPermission("movement.approve") };
 }
 
-async function validateReferences(projectId?: string, clientId?: string): Promise<{ project?: Types.ObjectId; client?: Types.ObjectId }> {
-  const out: { project?: Types.ObjectId; client?: Types.ObjectId } = {};
+async function validateReferences(projectId?: string, clientId?: string): Promise<{ project?: string; client?: string }> {
+  const out: { project?: string; client?: string } = {};
   if (projectId) {
-    const p = await Project.findById(projectId, { client: 1 }).lean();
+    const [p] = await db().select({ _id: Project._id, client: Project.client }).from(Project).where(eq(Project._id, projectId)).limit(1);
     if (!p) throw new ActionError("Selected project was not found.", { project: "Not found" });
     out.project = p._id;
     if (p.client) out.client = p.client;
   }
   if (clientId) {
-    const c = await Client.findById(clientId, { _id: 1 }).lean();
+    const [c] = await db().select({ _id: Client._id }).from(Client).where(eq(Client._id, clientId)).limit(1);
     if (!c) throw new ActionError("Selected client was not found.", { client: "Not found" });
     out.client = c._id;
   }
   return out;
 }
+
+const CHANGED = "This movement was just changed. Reload and try again.";
 
 /* ------------------------------------------------------------------ */
 /* Going out — records Out-Time on confirmation (FRS §8.4 steps 1–4)   */
@@ -73,10 +76,10 @@ export async function startMovement(input: Record<string, unknown>): Promise<Act
     const data = parse(startSchema, input);
     const settings = await getSettings();
 
-    let subjectId: Types.ObjectId = actor._id;
+    let subjectId: string = actor._id;
     if (data.onBehalfOf && data.onBehalfOf !== actor.id) {
       if (!can(actor, "movement.manage")) throw new ActionError("You can't record movements for other people.");
-      const subject = await User.findById(data.onBehalfOf, { personType: 1, status: 1 }).lean();
+      const [subject] = await db().select({ _id: User._id, personType: User.personType }).from(User).where(eq(User._id, data.onBehalfOf)).limit(1);
       if (!subject || subject.personType === "admin") throw new ActionError("Person not found.", { onBehalfOf: "Not found" });
       subjectId = subject._id;
     } else if (!isStaff(actor)) {
@@ -86,7 +89,7 @@ export async function startMovement(input: Record<string, unknown>): Promise<Act
     const category = categoryOf(settings, data.category);
     if (!category || !category.active) throw new ActionError("Choose a valid category.", { category: "Invalid category" });
 
-    const open = await Movement.findOne({ user: subjectId, status: "out" }, { movementNo: 1 }).lean();
+    const [open] = await db().select({ movementNo: Movement.movementNo }).from(Movement).where(and(eq(Movement.user, subjectId), eq(Movement.status, "out"))).limit(1);
     if (open) throw new ActionError(`There is already an open movement (${open.movementNo}). Record its In-Time first.`);
 
     const now = new Date();
@@ -104,32 +107,35 @@ export async function startMovement(input: Record<string, unknown>): Promise<Act
     const refs = await validateReferences(data.project, data.client);
     const { manager, ids } = await approverIds(subjectId);
     const needsApproval = category.requiresApproval;
-    const onBehalf = subjectId.toString() !== actor.id;
+    const onBehalf = subjectId !== actor.id;
 
-    const doc = await Movement.create({
-      movementNo: await nextNumber("movement", ID_PREFIX.movement, 6),
-      user: subjectId,
-      date: dateKey(now),
-      outTime: now,
-      expectedReturn: expectedReturn ?? undefined,
-      category: category.key,
-      categoryLabel: category.label,
-      official: category.official,
-      purpose: data.purpose,
-      destination: data.destination,
-      project: refs.project,
-      client: refs.client,
-      remarks: data.remarks,
-      status: "out",
-      approvalStatus: needsApproval ? "pending" : "not_required",
-      approver: needsApproval && manager ? manager : undefined,
-      entryMode: "live",
-      enteredBy: actor._id,
-      enteredByName: actor.name,
-      history: [history(actor, onBehalf ? "Out-Time recorded on behalf" : "Out-Time recorded", undefined, undefined, fmtTime(now))],
-    });
+    const [doc] = await db()
+      .insert(Movement)
+      .values({
+        movementNo: await nextNumber("movement", ID_PREFIX.movement, 6),
+        user: subjectId,
+        date: dateKey(now),
+        outTime: now,
+        expectedReturn: expectedReturn ?? undefined,
+        category: category.key,
+        categoryLabel: category.label,
+        official: category.official,
+        purpose: data.purpose,
+        destination: data.destination,
+        project: refs.project,
+        client: refs.client,
+        remarks: data.remarks,
+        status: "out",
+        approvalStatus: needsApproval ? "pending" : "not_required",
+        approver: needsApproval && manager ? manager : undefined,
+        entryMode: "live",
+        enteredBy: actor._id,
+        enteredByName: actor.name,
+        history: [history(actor, onBehalf ? "Out-Time recorded on behalf" : "Out-Time recorded", undefined, undefined, fmtTime(now))],
+      })
+      .returning();
 
-    const subject = onBehalf ? await User.findById(subjectId, { name: 1 }).lean() : null;
+    const [subject] = onBehalf ? await db().select({ name: User.name }).from(User).where(eq(User._id, subjectId)).limit(1) : [];
     const personName = subject?.name ?? actor.name;
     await audit(actor, {
       action: "create",
@@ -162,7 +168,7 @@ export async function startMovement(input: Record<string, unknown>): Promise<Act
     if (onBehalf) {
       await notify([subjectId], { type: "movement", title: "A movement was recorded for you", body: `${actor.name} recorded ${doc.movementNo} (${category.label}).`, link: `/movement/${doc._id}` });
     }
-    return { id: doc._id.toString() };
+    return { id: doc._id };
   }, "Out-Time recorded");
 }
 
@@ -174,18 +180,28 @@ export async function recordInTime(id: string): Promise<ActionResult<{ duration:
   return runAction(async () => {
     const actor = await actionUser();
     const m = await loadMovement(id);
-    if (m.user.toString() !== actor.id) throw new ActionError("Only the person who is out can record their In-Time. Authorised users can resolve it instead.");
+    if (m.user !== actor.id) throw new ActionError("Only the person who is out can record their In-Time. Authorised users can resolve it instead.");
     if (m.status !== "out" || !m.outTime) throw new ActionError("This movement is not open.");
     const now = new Date();
-    m.inTime = now;
-    m.durationMinutes = minutesBetween(m.outTime, now);
-    m.status = "returned";
+    const durationMinutes = minutesBetween(m.outTime, now);
     const late = m.expectedReturn && now.getTime() > m.expectedReturn.getTime();
-    m.history.push(history(actor, "In-Time recorded", late ? `Returned ${formatDuration(minutesBetween(m.expectedReturn!, now))} after expected time` : undefined, undefined, fmtTime(now)));
-    await m.save();
+    const [updated] = await db()
+      .update(Movement)
+      .set({
+        inTime: now,
+        durationMinutes,
+        status: "returned",
+        history: jsonPush(
+          Movement.history,
+          history(actor, "In-Time recorded", late ? `Returned ${formatDuration(minutesBetween(m.expectedReturn!, now))} after expected time` : undefined, undefined, fmtTime(now)),
+        ),
+      })
+      .where(and(eq(Movement._id, m._id), eq(Movement.status, "out")))
+      .returning({ id: Movement._id });
+    if (!updated) throw new ActionError("This movement is not open.");
     await recalcAttendanceDay(m.user, m.date);
-    await audit(actor, { action: "update", entity: "movement", entityId: m._id, ref: m.movementNo, summary: `In-Time recorded for ${m.movementNo} (${formatDuration(m.durationMinutes)})` });
-    return { duration: formatDuration(m.durationMinutes) };
+    await audit(actor, { action: "update", entity: "movement", entityId: m._id, ref: m.movementNo, summary: `In-Time recorded for ${m.movementNo} (${formatDuration(durationMinutes)})` });
+    return { duration: formatDuration(durationMinutes) };
   }, "Welcome back — In-Time recorded");
 }
 
@@ -196,15 +212,21 @@ export async function updateExpectedReturn(id: string, input: Record<string, unk
     const actor = await actionUser();
     const data = parse(returnSchema, input);
     const m = await loadMovement(id);
-    if (m.user.toString() !== actor.id && !can(actor, "movement.manage")) throw new ActionError("You can't change this movement.");
+    if (m.user !== actor.id && !can(actor, "movement.manage")) throw new ActionError("You can't change this movement.");
     if (m.status !== "out") throw new ActionError("Only open movements can be extended.");
     const next = parseLocalDateTime(data.expectedReturn);
     if (!next || next.getTime() <= Date.now()) throw new ActionError("Choose a time later than now.", { expectedReturn: "Must be in the future" });
     const before = m.expectedReturn;
-    m.expectedReturn = next;
-    m.overdueNotifiedAt = undefined;
-    m.history.push(history(actor, "Expected return updated", data.note, before ? fmtTime(before) : undefined, fmtTime(next)));
-    await m.save();
+    const [saved] = await db()
+      .update(Movement)
+      .set({
+        expectedReturn: next,
+        overdueNotifiedAt: null,
+        history: jsonPush(Movement.history, history(actor, "Expected return updated", data.note, before ? fmtTime(before) : undefined, fmtTime(next))),
+      })
+      .where(and(eq(Movement._id, m._id), eq(Movement.status, "out")))
+      .returning({ id: Movement._id });
+    if (!saved) throw new ActionError("Only open movements can be extended.");
     await audit(actor, {
       action: "update",
       entity: "movement",
@@ -226,17 +248,23 @@ export async function cancelMovement(id: string, rawReason: string): Promise<Act
     const actor = await actionUser();
     const reason = parse(zs.text("Reason", 500), rawReason);
     const m = await loadMovement(id);
-    const own = m.user.toString() === actor.id;
+    const own = m.user === actor.id;
     if (!own && !can(actor, "movement.manage")) throw new ActionError("You can't cancel this movement.");
     if (m.status !== "out") throw new ActionError("Only open movements can be cancelled.");
     if (own && m.date !== todayKey()) throw new ActionError("This movement is from an earlier day. Request a correction or ask HR to resolve it.");
     if (own && !can(actor, "movement.manage") && !withinSelfCancelWindow(m)) {
       throw new ActionError(`A movement can only be cancelled within ${SELF_CANCEL_MINUTES} minutes of its Out-Time. Record your In-Time and request a correction, or ask HR to resolve it.`);
     }
-    m.status = "cancelled";
-    if (m.approvalStatus === "pending") m.approvalStatus = "not_required";
-    m.history.push(history(actor, "Cancelled", reason.trim()));
-    await m.save();
+    const [cancelled] = await db()
+      .update(Movement)
+      .set({
+        status: "cancelled",
+        ...(m.approvalStatus === "pending" ? { approvalStatus: "not_required" as const } : {}),
+        history: jsonPush(Movement.history, history(actor, "Cancelled", reason.trim())),
+      })
+      .where(and(eq(Movement._id, m._id), eq(Movement.status, "out")))
+      .returning({ id: Movement._id });
+    if (!cancelled) throw new ActionError("Only open movements can be cancelled.");
     await recalcAttendanceDay(m.user, m.date);
     await audit(actor, { action: "cancel", entity: "movement", entityId: m._id, ref: m.movementNo, summary: `Cancelled ${m.movementNo}: ${reason.trim()}` });
     const { manager } = await approverIds(m.user);
@@ -269,10 +297,10 @@ export async function addLateEntry(input: Record<string, unknown>): Promise<Acti
     const data = parse(lateSchema, input);
     const settings = await getSettings();
 
-    let subjectId: Types.ObjectId = actor._id;
+    let subjectId: string = actor._id;
     if (data.onBehalfOf && data.onBehalfOf !== actor.id) {
       if (!can(actor, "movement.manage")) throw new ActionError("You can't record movements for other people.");
-      const subject = await User.findById(data.onBehalfOf, { personType: 1 }).lean();
+      const [subject] = await db().select({ _id: User._id, personType: User.personType }).from(User).where(eq(User._id, data.onBehalfOf)).limit(1);
       if (!subject || subject.personType === "admin") throw new ActionError("Person not found.", { onBehalfOf: "Not found" });
       subjectId = subject._id;
     } else if (!isStaff(actor)) {
@@ -296,49 +324,58 @@ export async function addLateEntry(input: Record<string, unknown>): Promise<Acti
     if (inTime && minutesBetween(outTime, inTime) > 24 * 60) throw new ActionError("A movement can't be longer than 24 hours.", { inTime: "Too long" });
 
     if (!inTime) {
-      const open = await Movement.findOne({ user: subjectId, status: "out" }, { movementNo: 1 }).lean();
+      const [open] = await db().select({ movementNo: Movement.movementNo }).from(Movement).where(and(eq(Movement.user, subjectId), eq(Movement.status, "out"))).limit(1);
       if (open) throw new ActionError(`There is already an open movement (${open.movementNo}).`);
     }
-    const overlap = await Movement.findOne({
-      user: subjectId,
-      status: { $in: ["out", "returned"] },
-      outTime: { $lt: inTime ?? now },
-      $or: [{ inTime: { $gt: outTime } }, { status: "out" }],
-    }, { movementNo: 1 }).lean();
+    const [overlap] = await db()
+      .select({ movementNo: Movement.movementNo })
+      .from(Movement)
+      .where(
+        and(
+          eq(Movement.user, subjectId),
+          inList(Movement.status, ["out", "returned"]),
+          lt(Movement.outTime, inTime ?? now),
+          or(gt(Movement.inTime, outTime), eq(Movement.status, "out")),
+        ),
+      )
+      .limit(1);
     if (overlap) throw new ActionError(`These times overlap movement ${overlap.movementNo}.`, { outTime: "Overlaps another movement" });
 
     const refs = await validateReferences(data.project, data.client);
     const { manager, ids } = await approverIds(subjectId);
-    const onBehalf = subjectId.toString() !== actor.id;
-    const doc = await Movement.create({
-      movementNo: await nextNumber("movement", ID_PREFIX.movement, 6),
-      user: subjectId,
-      date: dateKey(outTime),
-      outTime,
-      expectedReturn: expectedReturn ?? undefined,
-      inTime: inTime ?? undefined,
-      durationMinutes: inTime ? minutesBetween(outTime, inTime) : undefined,
-      category: category.key,
-      categoryLabel: category.label,
-      official: category.official,
-      purpose: data.purpose,
-      destination: data.destination,
-      project: refs.project,
-      client: refs.client,
-      remarks: data.remarks,
-      status: inTime ? "returned" : "out",
-      // Alternative entries are always reviewed, whatever the category.
-      approvalStatus: "pending",
-      approver: manager,
-      entryMode: "alternative",
-      alternativeReason: data.reason,
-      enteredBy: actor._id,
-      enteredByName: actor.name,
-      history: [history(actor, "Late entry recorded", data.reason, undefined, `${fmtDateTime(outTime)}${inTime ? ` → ${fmtTime(inTime)}` : ""}`)],
-    });
+    const onBehalf = subjectId !== actor.id;
+    const [doc] = await db()
+      .insert(Movement)
+      .values({
+        movementNo: await nextNumber("movement", ID_PREFIX.movement, 6),
+        user: subjectId,
+        date: dateKey(outTime),
+        outTime,
+        expectedReturn: expectedReturn ?? undefined,
+        inTime: inTime ?? undefined,
+        durationMinutes: inTime ? minutesBetween(outTime, inTime) : undefined,
+        category: category.key,
+        categoryLabel: category.label,
+        official: category.official,
+        purpose: data.purpose,
+        destination: data.destination,
+        project: refs.project,
+        client: refs.client,
+        remarks: data.remarks,
+        status: inTime ? "returned" : "out",
+        // Alternative entries are always reviewed, whatever the category.
+        approvalStatus: "pending",
+        approver: manager,
+        entryMode: "alternative",
+        alternativeReason: data.reason,
+        enteredBy: actor._id,
+        enteredByName: actor.name,
+        history: [history(actor, "Late entry recorded", data.reason, undefined, `${fmtDateTime(outTime)}${inTime ? ` → ${fmtTime(inTime)}` : ""}`)],
+      })
+      .returning();
     if (inTime) await recalcAttendanceDay(subjectId, doc.date);
 
-    const person = onBehalf ? (await User.findById(subjectId, { name: 1 }).lean())?.name ?? "" : actor.name;
+    const person = onBehalf ? ((await db().select({ name: User.name }).from(User).where(eq(User._id, subjectId)).limit(1))[0]?.name ?? "") : actor.name;
     await audit(actor, {
       action: "create",
       entity: "movement",
@@ -353,7 +390,7 @@ export async function addLateEntry(input: Record<string, unknown>): Promise<Acti
       link: `/movement/${doc._id}`,
       actionable: true,
     }, [subjectId, actor._id]);
-    return { id: doc._id.toString() };
+    return { id: doc._id };
   }, "Late entry submitted for approval");
 }
 
@@ -367,29 +404,35 @@ async function decide(id: string, approve: boolean, note?: string): Promise<IMov
   if (!(await canApproveMovement(actor, m))) throw new ActionError("You can't approve this movement.");
   if (m.approvalStatus !== "pending") throw new ActionError("This movement is not waiting for approval.");
   if (!approve && !note?.trim()) throw new ActionError("A reason is required to reject.");
-  m.approvalStatus = approve ? "approved" : "rejected";
-  m.approvedBy = actor._id;
-  m.approvedByName = actor.name;
-  m.approvedAt = new Date();
-  m.approvalNote = note?.trim() || undefined;
-  m.history.push(history(actor, approve ? "Approved" : "Rejected", note?.trim()));
-  await m.save();
-  if (m.status === "returned") await recalcAttendanceDay(m.user, m.date);
+  const [updated] = await db()
+    .update(Movement)
+    .set({
+      approvalStatus: approve ? "approved" : "rejected",
+      approvedBy: actor._id,
+      approvedByName: actor.name,
+      approvedAt: new Date(),
+      approvalNote: note?.trim() || null,
+      history: jsonPush(Movement.history, history(actor, approve ? "Approved" : "Rejected", note?.trim())),
+    })
+    .where(and(eq(Movement._id, m._id), eq(Movement.approvalStatus, "pending")))
+    .returning();
+  if (!updated) throw new ActionError("This movement is not waiting for approval.");
+  if (updated.status === "returned") await recalcAttendanceDay(updated.user, updated.date);
   await audit(actor, {
     action: approve ? "approve" : "reject",
     entity: "movement",
-    entityId: m._id,
-    ref: m.movementNo,
-    summary: `${approve ? "Approved" : "Rejected"} movement ${m.movementNo}${note ? `: ${note}` : ""}`,
+    entityId: updated._id,
+    ref: updated.movementNo,
+    summary: `${approve ? "Approved" : "Rejected"} movement ${updated.movementNo}${note ? `: ${note}` : ""}`,
   });
-  await notify([m.user], {
+  await notify([updated.user], {
     type: "movement",
-    title: `Movement ${m.movementNo} ${approve ? "approved" : "rejected"}`,
+    title: `Movement ${updated.movementNo} ${approve ? "approved" : "rejected"}`,
     body: `${actor.name}${note ? `: ${note}` : ""}`,
-    link: `/movement/${m._id}`,
+    link: `/movement/${updated._id}`,
     priority: approve ? "normal" : "high",
   });
-  return m.toObject();
+  return updated;
 }
 
 export async function approveMovement(id: string, note?: string): Promise<ActionResult<null>> {
@@ -417,7 +460,7 @@ export async function requestCorrection(id: string, input: Record<string, unknow
     const actor = await actionUser();
     const data = parse(correctionSchema, input);
     const m = await loadMovement(id);
-    if (m.user.toString() !== actor.id) throw new ActionError("Only the person can request a correction to their movement.");
+    if (m.user !== actor.id) throw new ActionError("Only the person can request a correction to their movement.");
     if (m.status === "cancelled") throw new ActionError("Cancelled movements can't be corrected.");
     if (m.corrections.some((c) => c.status === "pending")) throw new ActionError("A correction is already waiting for review.");
     const outTime = parseLocalDateTime(data.outTime)!;
@@ -431,21 +474,33 @@ export async function requestCorrection(id: string, input: Record<string, unknow
     const sameIn = (!inTime && !m.inTime) || (inTime && m.inTime && Math.abs(m.inTime.getTime() - inTime.getTime()) < 60_000);
     if (sameOut && sameIn) throw new ActionError("The proposed times are the same as the recorded ones.");
 
-    m.corrections.push({
+    const correction = {
+      _id: newId(),
       requestedBy: actor._id,
       requestedByName: actor.name,
       requestedAt: now,
       reason: data.reason,
       proposedOutTime: outTime,
       proposedInTime: inTime ?? undefined,
-      originalOutTime: m.outTime,
-      originalInTime: m.inTime,
+      originalOutTime: m.outTime ?? undefined,
+      originalInTime: m.inTime ?? undefined,
       previousApprovalStatus: m.approvalStatus,
-      status: "pending",
-    });
-    m.approvalStatus = "correction_requested";
-    m.history.push(history(actor, "Correction requested", data.reason, `${m.outTime ? fmtDateTime(m.outTime) : "—"} → ${m.inTime ? fmtTime(m.inTime) : "—"}`, `${fmtDateTime(outTime)} → ${inTime ? fmtTime(inTime) : "—"}`));
-    await m.save();
+      status: "pending" as const,
+    };
+    const [saved] = await db()
+      .update(Movement)
+      .set({
+        corrections: jsonPush(Movement.corrections, correction),
+        approvalStatus: "correction_requested",
+        history: jsonPush(
+          Movement.history,
+          history(actor, "Correction requested", data.reason, `${m.outTime ? fmtDateTime(m.outTime) : "—"} → ${m.inTime ? fmtTime(m.inTime) : "—"}`, `${fmtDateTime(outTime)} → ${inTime ? fmtTime(inTime) : "—"}`),
+        ),
+      })
+      // Guard: nothing changed since it was read (e.g. no other correction was requested in the meantime).
+      .where(and(eq(Movement._id, m._id), eq(Movement.approvalStatus, m.approvalStatus), eq(Movement.updatedAt, m.updatedAt)))
+      .returning({ id: Movement._id });
+    if (!saved) throw new ActionError(CHANGED);
     await audit(actor, {
       action: "correct",
       entity: "movement",
@@ -453,8 +508,8 @@ export async function requestCorrection(id: string, input: Record<string, unknow
       ref: m.movementNo,
       summary: `Correction requested for ${m.movementNo}: ${data.reason}`,
       changes: [
-        { field: "outTime", from: m.corrections.at(-1)?.originalOutTime, to: outTime },
-        { field: "inTime", from: m.corrections.at(-1)?.originalInTime, to: inTime },
+        { field: "outTime", from: correction.originalOutTime, to: outTime },
+        { field: "inTime", from: correction.originalInTime, to: inTime },
       ],
     });
     const { ids } = await approverIds(m.user);
@@ -474,36 +529,51 @@ export async function decideCorrection(id: string, correctionId: string, approve
     const actor = await actionUser();
     const m = await loadMovement(id);
     if (!(await canApproveMovement(actor, m))) throw new ActionError("You can't review corrections for this movement.");
-    const c = m.corrections.find((x) => x._id?.toString() === correctionId);
-    if (!c || c.status !== "pending") throw new ActionError("This correction is no longer pending.");
+    const found = m.corrections.find((x) => x._id === correctionId);
+    if (!found || found.status !== "pending") throw new ActionError("This correction is no longer pending.");
     if (!approve && !note?.trim()) throw new ActionError("A reason is required to reject.");
 
     const oldDate = m.date;
-    c.status = approve ? "approved" : "rejected";
-    c.reviewedBy = actor._id;
-    c.reviewedByName = actor.name;
-    c.reviewedAt = new Date();
-    c.reviewNote = note?.trim() || undefined;
+    const c = {
+      ...found,
+      status: approve ? ("approved" as const) : ("rejected" as const),
+      reviewedBy: actor._id,
+      reviewedByName: actor.name,
+      reviewedAt: new Date(),
+      reviewNote: note?.trim() || undefined,
+    };
     // Original timestamps stay on the correction record (originalOutTime / originalInTime).
-    m.approvalStatus = c.previousApprovalStatus && c.previousApprovalStatus !== "correction_requested" ? c.previousApprovalStatus : "not_required";
-
+    const patch: SQLiteUpdateSetSource<typeof Movement> = {
+      corrections: m.corrections.map((x) => (x._id === correctionId ? c : x)),
+      approvalStatus: c.previousApprovalStatus && c.previousApprovalStatus !== "correction_requested" ? c.previousApprovalStatus : "not_required",
+      history: jsonPush(Movement.history, history(actor, approve ? "Correction approved" : "Correction rejected", note?.trim())),
+    };
+    let newDate = m.date;
     if (approve && c.proposedOutTime) {
-      m.outTime = c.proposedOutTime;
-      m.date = dateKey(c.proposedOutTime);
+      patch.outTime = c.proposedOutTime;
+      newDate = dateKey(c.proposedOutTime);
+      patch.date = newDate;
       if (c.proposedInTime) {
-        m.inTime = c.proposedInTime;
-        m.status = "returned";
-        m.durationMinutes = minutesBetween(c.proposedOutTime, c.proposedInTime);
+        patch.inTime = c.proposedInTime;
+        patch.status = "returned";
+        patch.durationMinutes = minutesBetween(c.proposedOutTime, c.proposedInTime);
       } else if (m.inTime) {
-        m.durationMinutes = minutesBetween(c.proposedOutTime, m.inTime);
+        patch.durationMinutes = minutesBetween(c.proposedOutTime, m.inTime);
       }
     }
-    m.history.push(history(actor, approve ? "Correction approved" : "Correction rejected", note?.trim()));
-    await m.save();
-    if (approve) {
-      await recalcAttendanceDay(m.user, m.date);
-      if (oldDate !== m.date) await recalcAttendanceDay(m.user, oldDate);
-    }
+    const [saved] = await db()
+      .update(Movement)
+      .set(patch)
+      // Guard: the correction must still be pending (it can only be decided once).
+      .where(
+        and(
+          eq(Movement._id, m._id),
+          sql`exists (select 1 from json_each(${Movement.corrections}) where json_extract(value, '$._id') = ${correctionId} and json_extract(value, '$.status') = 'pending')`,
+        ),
+      )
+      .returning({ id: Movement._id });
+    if (!saved) throw new ActionError("This correction is no longer pending.");
+    if (approve) await recalcAttendanceDays(m.user, oldDate !== newDate ? [newDate, oldDate] : [newDate]);
     await audit(actor, {
       action: approve ? "approve" : "reject",
       entity: "movement",
@@ -539,18 +609,24 @@ export async function resolveMovement(id: string, input: Record<string, unknown>
     const data = parse(resolveSchema, input);
     const m = await loadMovement(id);
     if (m.status !== "out" || !m.outTime) throw new ActionError("Only open movements can be resolved.");
-    if (m.user.toString() === actor.id) throw new ActionError("You can't resolve your own movement. Record your In-Time instead.");
+    if (m.user === actor.id) throw new ActionError("You can't resolve your own movement. Record your In-Time instead.");
     const inTime = parseLocalDateTime(data.inTime)!;
     if (inTime.getTime() <= m.outTime.getTime()) throw new ActionError("In-Time must be after Out-Time.", { inTime: "Must be after Out-Time" });
     if (inTime.getTime() > Date.now()) throw new ActionError("In-Time can't be in the future.", { inTime: "In the future" });
-    m.inTime = inTime;
-    m.durationMinutes = minutesBetween(m.outTime, inTime);
-    m.status = "returned";
-    m.resolvedBy = actor._id;
-    m.resolvedByName = actor.name;
-    m.resolutionNote = data.note;
-    m.history.push(history(actor, "Resolved by authorised user", data.note, undefined, fmtDateTime(inTime)));
-    await m.save();
+    const [resolved] = await db()
+      .update(Movement)
+      .set({
+        inTime,
+        durationMinutes: minutesBetween(m.outTime, inTime),
+        status: "returned",
+        resolvedBy: actor._id,
+        resolvedByName: actor.name,
+        resolutionNote: data.note,
+        history: jsonPush(Movement.history, history(actor, "Resolved by authorised user", data.note, undefined, fmtDateTime(inTime))),
+      })
+      .where(and(eq(Movement._id, m._id), eq(Movement.status, "out")))
+      .returning({ id: Movement._id });
+    if (!resolved) throw new ActionError("Only open movements can be resolved.");
     await recalcAttendanceDay(m.user, m.date);
     await audit(actor, {
       action: "correct",

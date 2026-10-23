@@ -1,17 +1,21 @@
 "use server";
 
+import type { BatchItem } from "drizzle-orm/batch";
+import { and, eq, gte, isNotNull, isNull, lte } from "drizzle-orm";
 import { z } from "zod";
-import type { Types } from "mongoose";
 import { ActionError, actionPermission, actionUser, parse, runAction, type ActionResult } from "@/lib/actions";
 import { audit } from "@/lib/audit";
 import { can, isStaff, type CurrentUser } from "@/lib/auth/session";
 import { ID_PREFIX, nextNumber } from "@/lib/counters";
-import { recalcAttendanceDay } from "@/lib/domain/attendance-calc";
+import { db } from "@/lib/db";
+import { recalcAttendanceDays } from "@/lib/domain/attendance-calc";
+import { runBatch } from "@/lib/domain/batch";
 import { leaveBalances, leaveYearOf, leaveYearRange } from "@/lib/domain/leave-balance";
 import { resolveFileRefs } from "@/lib/files";
-import { Attendance, LeaveBalance, LeaveRequest, LeaveType, StoredFile, User, type ILeaveRequest, type LeaveStatus } from "@/lib/models";
+import { Attendance, LeaveBalance, LeaveRequest, LeaveType, StoredFile, User, newId, type ILeaveRequest, type LeaveStatus } from "@/lib/models";
 import { notify, notifyPermission } from "@/lib/notify";
 import { getSettings } from "@/lib/settings";
+import { increment, inList, jsonPush, notInList } from "@/lib/sql";
 import { statusLabel } from "@/lib/status";
 import { fmtDate, todayKey } from "@/lib/time";
 import { isObjectId, zs } from "@/lib/validation";
@@ -24,7 +28,7 @@ const ACTIVE_STATUSES: LeaveStatus[] = ["pending_manager", "pending_hr", "approv
 const PENDING_STATUSES: LeaveStatus[] = ["pending_manager", "pending_hr"];
 
 function historyEntry(user: Pick<CurrentUser, "_id" | "name">, action: string, note?: string) {
-  return { action, by: user._id, byName: user.name, at: new Date(), note };
+  return { _id: newId(), action, by: user._id, byName: user.name, at: new Date(), note };
 }
 
 /* ------------------------------------------------------------------ */
@@ -44,25 +48,61 @@ async function syncLeaveAttendance(
   try {
     const settings = await getSettings();
     const days = await leaveDayList(settings, req.startDate, req.endDate);
-    for (const date of days) {
-      if (mode === "apply") {
-        if (!req.halfDay) {
-          await Attendance.updateOne({ user: req.user, date }, { $setOnInsert: { source: "system", status: "on_leave", breaks: [] } }, { upsert: true }).catch((error: unknown) => {
-            if ((error as { code?: number }).code !== 11000) throw error;
-          });
+    if (days.length === 0) return;
+    // One batch per step (not one query per day): D1 limits the queries a request may run.
+    if (mode === "apply") {
+      const writes: BatchItem<"sqlite">[] = [];
+      if (!req.halfDay) {
+        for (const date of days) {
+          writes.push(db().insert(Attendance).values({ user: req.user, date, source: "system", status: "on_leave", breaks: [] }).onConflictDoNothing());
         }
-        await Attendance.updateOne({ user: req.user, date }, { $push: { history: historyEntry(actor, "leave_approved", req.requestNo) } });
-      } else {
-        const att = await Attendance.findOne({ user: req.user, date });
-        if (!att) continue;
-        if (!att.checkIn && !att.checkOut && att.source === "system") {
-          await Attendance.deleteOne({ _id: att._id });
-          continue;
-        }
-        att.history.push(historyEntry(actor, "leave_cancelled", req.requestNo));
-        await att.save();
       }
-      await recalcAttendanceDay(req.user, date);
+      writes.push(
+        db()
+          .update(Attendance)
+          .set({ history: jsonPush(Attendance.history, historyEntry(actor, "leave_approved", req.requestNo)) })
+          .where(and(eq(Attendance.user, req.user), inList(Attendance.date, days))),
+      );
+      await runBatch(writes);
+      await recalcAttendanceDays(req.user, days);
+    } else {
+      const rows = await db()
+        .select({ _id: Attendance._id, date: Attendance.date, checkIn: Attendance.checkIn, checkOut: Attendance.checkOut, source: Attendance.source })
+        .from(Attendance)
+        .where(and(eq(Attendance.user, req.user), inList(Attendance.date, days)));
+      const blank = rows.filter((a) => !a.checkIn && !a.checkOut && a.source === "system");
+      const kept = rows.filter((a) => !(!a.checkIn && !a.checkOut && a.source === "system"));
+      const writes: BatchItem<"sqlite">[] = [];
+      if (blank.length) {
+        writes.push(
+          db()
+            .delete(Attendance)
+            .where(
+              inList(
+                Attendance._id,
+                blank.map((a) => a._id),
+              ),
+            ),
+        );
+      }
+      if (kept.length) {
+        writes.push(
+          db()
+            .update(Attendance)
+            .set({ history: jsonPush(Attendance.history, historyEntry(actor, "leave_cancelled", req.requestNo)) })
+            .where(
+              inList(
+                Attendance._id,
+                kept.map((a) => a._id),
+              ),
+            ),
+        );
+      }
+      await runBatch(writes);
+      await recalcAttendanceDays(
+        req.user,
+        kept.map((a) => a.date),
+      );
     }
   } catch (error) {
     // The leave decision itself is already saved; day views are derived from approved leave, so this self-heals.
@@ -93,7 +133,7 @@ export async function applyLeave(input: Record<string, unknown>): Promise<Action
     const today = todayKey();
 
     if (data.endDate < data.startDate) throw new ActionError("The end date can't be before the start date.", { endDate: "Before the start date" });
-    const type = await LeaveType.findById(data.leaveType).lean();
+    const [type] = await db().select().from(LeaveType).where(eq(LeaveType._id, data.leaveType)).limit(1);
     if (!type || !type.active || !type.applicableTo.includes(user.personType)) {
       throw new ActionError("This leave type isn't available to you.", { leaveType: "Not available" });
     }
@@ -113,10 +153,17 @@ export async function applyLeave(input: Record<string, unknown>): Promise<Action
     if (days === 0) throw new ActionError("The selected dates have no working days. Weekends and holidays aren't counted.", { startDate: "No working days in this range" });
 
     // Overlap detection against the person's pending / approved requests.
-    const overlapping = await LeaveRequest.find(
-      { user: user._id, status: { $in: ACTIVE_STATUSES }, startDate: { $lte: data.endDate }, endDate: { $gte: data.startDate } },
-      { requestNo: 1, startDate: 1, endDate: 1, halfDay: 1, halfDaySession: 1, status: 1 },
-    ).lean();
+    const overlapping = await db()
+      .select({
+        requestNo: LeaveRequest.requestNo,
+        startDate: LeaveRequest.startDate,
+        endDate: LeaveRequest.endDate,
+        halfDay: LeaveRequest.halfDay,
+        halfDaySession: LeaveRequest.halfDaySession,
+        status: LeaveRequest.status,
+      })
+      .from(LeaveRequest)
+      .where(and(eq(LeaveRequest.user, user._id), inList(LeaveRequest.status, ACTIVE_STATUSES), lte(LeaveRequest.startDate, data.endDate), gte(LeaveRequest.endDate, data.startDate)));
     const clash = overlapping.find(
       (r) => !(data.halfDay && r.halfDay && r.startDate === data.startDate && r.halfDaySession && r.halfDaySession !== data.halfDaySession),
     );
@@ -128,7 +175,11 @@ export async function applyLeave(input: Record<string, unknown>): Promise<Action
     }
 
     if (!data.halfDay) {
-      const worked = await Attendance.findOne({ user: user._id, date: { $in: list }, checkIn: { $ne: null } }, { date: 1 }).lean();
+      const [worked] = await db()
+        .select({ date: Attendance.date })
+        .from(Attendance)
+        .where(and(eq(Attendance.user, user._id), inList(Attendance.date, list), isNotNull(Attendance.checkIn)))
+        .limit(1);
       if (worked) throw new ActionError(`You have attendance recorded on ${fmtDate(worked.date)}. Leave can't be applied for a day you worked.`, { startDate: "Includes a day you worked" });
     }
 
@@ -139,32 +190,48 @@ export async function applyLeave(input: Record<string, unknown>): Promise<Action
 
     if (!settings.leave.allowNegativeBalance) {
       const balances = await leaveBalances(user._id, user.personType, year, settings, today);
-      const balance = balances.find((b) => b.leaveTypeId === type._id.toString());
+      const balance = balances.find((b) => b.leaveTypeId === type._id);
       if (balance && !balance.unlimited && days > balance.available) {
         throw new ActionError(`You have ${daysLabel(Math.max(0, balance.available))} of ${type.name} available, and this request needs ${daysLabel(days)}.`, { leaveType: "Not enough balance" });
       }
     }
 
     const manager = user.reportingManagerId;
-    const doc = await LeaveRequest.create({
-      requestNo: await nextNumber("leave", ID_PREFIX.leave, 4),
-      user: user._id,
-      leaveType: type._id,
-      leaveTypeName: type.name,
-      startDate: data.startDate,
-      endDate: data.endDate,
-      halfDay: data.halfDay,
-      halfDaySession: data.halfDay ? data.halfDaySession : undefined,
-      days,
-      reason: data.reason,
-      status: manager ? "pending_manager" : "pending_hr",
-      manager,
-      approvals: [],
-      attachments: files,
-    });
+    const [doc] = await db()
+      .insert(LeaveRequest)
+      .values({
+        requestNo: await nextNumber("leave", ID_PREFIX.leave, 4),
+        user: user._id,
+        leaveType: type._id,
+        leaveTypeName: type.name,
+        startDate: data.startDate,
+        endDate: data.endDate,
+        halfDay: data.halfDay,
+        halfDaySession: data.halfDay ? data.halfDaySession : undefined,
+        days,
+        reason: data.reason,
+        status: manager ? "pending_manager" : "pending_hr",
+        manager,
+        approvals: [],
+        attachments: files,
+      })
+      .returning();
     if (files.length) {
       // Tie the uploaded documents to the request so approvers can open them.
-      await StoredFile.updateMany({ _id: { $in: files.map((f) => f.file) }, uploadedBy: user._id, entityType: "leave", entityId: null }, { $set: { entityId: doc._id.toString() } });
+      await db()
+        .update(StoredFile)
+        .set({ entityId: doc._id })
+        .where(
+          and(
+            inList(
+              StoredFile._id,
+              files.map((f) => f.file),
+            ),
+            eq(StoredFile.uploadedBy, user._id),
+            eq(StoredFile.entityType, "leave"),
+            isNull(StoredFile.entityId),
+          ),
+        );
     }
 
     const message = {
@@ -178,7 +245,7 @@ export async function applyLeave(input: Record<string, unknown>): Promise<Action
     else await notifyPermission("leave.approve", message, [user._id]);
 
     await audit(user, { action: "submit", entity: "leave", entityId: doc._id, ref: doc.requestNo, summary: `Applied for ${type.name}, ${leaveRangeLabel(doc)} (${daysLabel(days)})` });
-    return { id: doc._id.toString() };
+    return { id: doc._id };
   }, "Leave request submitted");
 }
 
@@ -186,18 +253,30 @@ export async function cancelLeave(id: string, reason?: string): Promise<ActionRe
   return runAction(async () => {
     const user = await actionUser();
     if (!isObjectId(id)) throw new ActionError("Request not found.");
-    const req = await LeaveRequest.findOne({ _id: id, user: user._id }).lean();
+    const [req] = await db()
+      .select()
+      .from(LeaveRequest)
+      .where(and(eq(LeaveRequest._id, id), eq(LeaveRequest.user, user._id)))
+      .limit(1);
     if (!req) throw new ActionError("Request not found.");
     const note = reason?.trim().slice(0, 500) || undefined;
-    const patch = { $set: { status: "cancelled", cancelledAt: new Date(), cancelReason: note } };
+    const patch = { status: "cancelled", cancelledAt: new Date(), cancelReason: note } as const;
 
     if (req.status === "approved") {
       if (req.startDate <= todayKey()) throw new ActionError("Leave that has already started can't be cancelled here. Ask HR.");
-      const claimed = await LeaveRequest.findOneAndUpdate({ _id: req._id, status: "approved" }, patch, { returnDocument: "after" }).lean();
+      const [claimed] = await db()
+        .update(LeaveRequest)
+        .set(patch)
+        .where(and(eq(LeaveRequest._id, req._id), eq(LeaveRequest.status, "approved")))
+        .returning();
       if (!claimed) throw new ActionError("This request was just changed. Reload and try again.");
       await syncLeaveAttendance(claimed, "remove", user);
     } else if (PENDING_STATUSES.includes(req.status)) {
-      const claimed = await LeaveRequest.findOneAndUpdate({ _id: req._id, status: { $in: PENDING_STATUSES } }, patch, { returnDocument: "after" }).lean();
+      const [claimed] = await db()
+        .update(LeaveRequest)
+        .set(patch)
+        .where(and(eq(LeaveRequest._id, req._id), inList(LeaveRequest.status, PENDING_STATUSES)))
+        .returning();
       if (!claimed) throw new ActionError("This request has just been decided. Reload to see the outcome.");
     } else {
       throw new ActionError(`This request is already ${statusLabel("leave", req.status).toLowerCase()}.`);
@@ -225,21 +304,21 @@ export async function cancelLeave(id: string, reason?: string): Promise<ActionRe
  */
 async function decidableRequest(actor: CurrentUser, id: string) {
   if (!isObjectId(id)) throw new ActionError("Request not found.");
-  const req = await LeaveRequest.findById(id).lean();
+  const [req] = await db().select().from(LeaveRequest).where(eq(LeaveRequest._id, id)).limit(1);
   if (!req) throw new ActionError("Request not found.");
   if (!PENDING_STATUSES.includes(req.status)) throw new ActionError(`This request is already ${statusLabel("leave", req.status).toLowerCase()}.`);
-  if (req.user.equals(actor._id)) throw new ActionError("You can't decide your own leave request.");
+  if (req.user === actor._id) throw new ActionError("You can't decide your own leave request.");
   const hr = can(actor, "leave.approve");
   // The current reporting manager decides, not the one recorded when the request was made.
-  const applicant = await User.findById(req.user, { reportingManager: 1 }).lean();
-  const isManager = applicant?.reportingManager?.toString() === actor.id;
+  const [applicant] = await db().select({ reportingManager: User.reportingManager }).from(User).where(eq(User._id, req.user)).limit(1);
+  const isManager = applicant?.reportingManager === actor.id;
   const allowed = hr || (req.status === "pending_manager" && isManager);
   if (!allowed) throw new ActionError("You don't have permission to decide this request.");
   return { req, hr };
 }
 
-async function applicantName(userId: Types.ObjectId): Promise<string> {
-  const u = await User.findById(userId, { name: 1 }).lean();
+async function applicantName(userId: string): Promise<string> {
+  const [u] = await db().select({ name: User.name }).from(User).where(eq(User._id, userId)).limit(1);
   return u?.name ?? "the applicant";
 }
 
@@ -248,16 +327,19 @@ export async function approveLeave(id: string, note?: string): Promise<ActionRes
     const actor = await actionUser();
     const { req, hr } = await decidableRequest(actor, id);
     const comment = note?.trim().slice(0, 500) || undefined;
-    const type = await LeaveType.findById(req.leaveType, { requiresHrApproval: 1 }).lean();
+    const [type] = await db().select({ requiresHrApproval: LeaveType.requiresHrApproval }).from(LeaveType).where(eq(LeaveType._id, req.leaveType)).limit(1);
     const level = hr ? "hr" : "manager";
     // The manager's approval goes on to HR only when the type requires it; HR decisions are final.
     const next = hr || !type?.requiresHrApproval ? "approved" : "pending_hr";
 
-    const updated = await LeaveRequest.findOneAndUpdate(
-      { _id: req._id, status: req.status },
-      { $set: { status: next }, $push: { approvals: { level, by: actor._id, byName: actor.name, action: "approved", note: comment, at: new Date() } } },
-      { returnDocument: "after" },
-    ).lean();
+    const [updated] = await db()
+      .update(LeaveRequest)
+      .set({
+        status: next,
+        approvals: jsonPush(LeaveRequest.approvals, { _id: newId(), level, by: actor._id, byName: actor.name, action: "approved", note: comment, at: new Date() }),
+      })
+      .where(and(eq(LeaveRequest._id, req._id), eq(LeaveRequest.status, req.status)))
+      .returning();
     if (!updated) throw new ActionError("This request was just decided by someone else.");
 
     const who = await applicantName(req.user);
@@ -291,11 +373,14 @@ export async function rejectLeave(id: string, reason: string): Promise<ActionRes
     const comment = parse(zs.text("Reason", 500), reason);
     const { req, hr } = await decidableRequest(actor, id);
     const level = hr ? "hr" : "manager";
-    const updated = await LeaveRequest.findOneAndUpdate(
-      { _id: req._id, status: req.status },
-      { $set: { status: "rejected" }, $push: { approvals: { level, by: actor._id, byName: actor.name, action: "rejected", note: comment, at: new Date() } } },
-      { returnDocument: "after" },
-    ).lean();
+    const [updated] = await db()
+      .update(LeaveRequest)
+      .set({
+        status: "rejected",
+        approvals: jsonPush(LeaveRequest.approvals, { _id: newId(), level, by: actor._id, byName: actor.name, action: "rejected", note: comment, at: new Date() }),
+      })
+      .where(and(eq(LeaveRequest._id, req._id), eq(LeaveRequest.status, req.status)))
+      .returning();
     if (!updated) throw new ActionError("This request was just decided by someone else.");
 
     const who = await applicantName(req.user);
@@ -323,7 +408,10 @@ const balanceTarget = {
 };
 
 async function balanceSubject(userId: string, leaveTypeId: string) {
-  const [person, type] = await Promise.all([User.findById(userId, { name: 1, personType: 1, employeeId: 1 }).lean(), LeaveType.findById(leaveTypeId, { name: 1 }).lean()]);
+  const [[person], [type]] = await Promise.all([
+    db().select({ _id: User._id, name: User.name, personType: User.personType, employeeId: User.employeeId }).from(User).where(eq(User._id, userId)).limit(1),
+    db().select({ _id: LeaveType._id, name: LeaveType.name }).from(LeaveType).where(eq(LeaveType._id, leaveTypeId)).limit(1),
+  ]);
   if (!person || !STAFF_TYPES.includes(person.personType)) throw new ActionError("Select a staff member.");
   if (!type) throw new ActionError("Leave type not found.");
   return { person, type };
@@ -338,13 +426,17 @@ export async function adjustLeaveBalance(input: Record<string, unknown>): Promis
     if (data.amount === 0) throw new ActionError("Enter a number of days other than zero.", { amount: "Can't be zero" });
     if (Math.round(data.amount * 2) / 2 !== data.amount) throw new ActionError("Use whole or half days.", { amount: "Use whole or half days" });
     const { person, type } = await balanceSubject(data.userId, data.leaveType);
-    if (person._id.toString() === actor.id) throw new ActionError("You can't adjust your own leave balance. Ask another HR administrator.", { userId: "Not yourself" });
+    if (person._id === actor.id) throw new ActionError("You can't adjust your own leave balance. Ask another HR administrator.", { userId: "Not yourself" });
 
-    const doc = await LeaveBalance.findOneAndUpdate(
-      { user: person._id, leaveType: type._id, year: data.year },
-      { $inc: { adjustment: data.amount }, $push: { notes: { amount: data.amount, reason: data.reason, by: actor._id, byName: actor.name, at: new Date() } } },
-      { upsert: true, returnDocument: "after" },
-    ).lean();
+    const note = { _id: newId(), amount: data.amount, reason: data.reason, by: actor._id, byName: actor.name, at: new Date() };
+    const [doc] = await db()
+      .insert(LeaveBalance)
+      .values({ user: person._id, leaveType: type._id, year: data.year, adjustment: data.amount, notes: [note] })
+      .onConflictDoUpdate({
+        target: [LeaveBalance.user, LeaveBalance.leaveType, LeaveBalance.year],
+        set: { adjustment: increment(LeaveBalance.adjustment, data.amount), notes: jsonPush(LeaveBalance.notes, note) },
+      })
+      .returning();
     await audit(actor, {
       action: "update",
       entity: "leave_balance",
@@ -365,14 +457,21 @@ export async function setQuotaOverride(input: Record<string, unknown>): Promise<
     const actor = await actionPermission("leave.manage");
     const data = parse(quotaSchema, input);
     const { person, type } = await balanceSubject(data.userId, data.leaveType);
-    if (person._id.toString() === actor.id) throw new ActionError("You can't change your own leave quota. Ask another HR administrator.", { userId: "Not yourself" });
-    const note = { amount: data.quota ?? 0, reason: `${data.quota === undefined ? "Quota override removed" : `Quota override set to ${data.quota}`}: ${data.reason}`, by: actor._id, byName: actor.name, at: new Date() };
-    const before = await LeaveBalance.findOne({ user: person._id, leaveType: type._id, year: data.year }, { quotaOverride: 1 }).lean();
-    const doc = await LeaveBalance.findOneAndUpdate(
-      { user: person._id, leaveType: type._id, year: data.year },
-      data.quota === undefined ? { $unset: { quotaOverride: 1 }, $push: { notes: note } } : { $set: { quotaOverride: data.quota }, $push: { notes: note } },
-      { upsert: true, returnDocument: "after" },
-    ).lean();
+    if (person._id === actor.id) throw new ActionError("You can't change your own leave quota. Ask another HR administrator.", { userId: "Not yourself" });
+    const note = { _id: newId(), amount: data.quota ?? 0, reason: `${data.quota === undefined ? "Quota override removed" : `Quota override set to ${data.quota}`}: ${data.reason}`, by: actor._id, byName: actor.name, at: new Date() };
+    const [before] = await db()
+      .select({ quotaOverride: LeaveBalance.quotaOverride })
+      .from(LeaveBalance)
+      .where(and(eq(LeaveBalance.user, person._id), eq(LeaveBalance.leaveType, type._id), eq(LeaveBalance.year, data.year)))
+      .limit(1);
+    const [doc] = await db()
+      .insert(LeaveBalance)
+      .values({ user: person._id, leaveType: type._id, year: data.year, quotaOverride: data.quota ?? null, notes: [note] })
+      .onConflictDoUpdate({
+        target: [LeaveBalance.user, LeaveBalance.leaveType, LeaveBalance.year],
+        set: { quotaOverride: data.quota ?? null, notes: jsonPush(LeaveBalance.notes, note) },
+      })
+      .returning();
     await audit(actor, {
       action: "update",
       entity: "leave_balance",
@@ -392,33 +491,53 @@ export async function carryForward(year: number): Promise<ActionResult<{ updated
     const y = parse(zs.num("Year", { min: 2000, max: 2100 }), year);
     const settings = await getSettings();
     const asOf = leaveYearRange(y, settings).to;
-    const carryTypes = await LeaveType.find({ active: true, carryForward: true }).lean();
+    const carryTypes = await db()
+      .select()
+      .from(LeaveType)
+      .where(and(eq(LeaveType.active, true), eq(LeaveType.carryForward, true)));
     if (carryTypes.length === 0) throw new ActionError("No leave type has carry-forward turned on.");
 
-    const people = await User.find({ personType: { $in: STAFF_TYPES }, status: { $nin: EXITED_STATUSES } }, { personType: 1 }).lean();
-    const { rows } = await bulkLeaveBalances(people.map((p) => ({ id: p._id.toString(), personType: p.personType })), y, settings, asOf);
-    const existing = await LeaveBalance.find({ year: y + 1, leaveType: { $in: carryTypes.map((t) => t._id) } }, { user: 1, leaveType: 1, carriedForward: 1 }).lean();
-    const current = new Map(existing.map((b) => [`${b.user.toString()}:${b.leaveType.toString()}`, b.carriedForward]));
+    const people = await db()
+      .select({ _id: User._id, personType: User.personType })
+      .from(User)
+      .where(and(inList(User.personType, STAFF_TYPES), notInList(User.status, EXITED_STATUSES)));
+    const { rows } = await bulkLeaveBalances(people.map((p) => ({ id: p._id, personType: p.personType })), y, settings, asOf);
+    const existing = await db()
+      .select({ user: LeaveBalance.user, leaveType: LeaveBalance.leaveType, carriedForward: LeaveBalance.carriedForward })
+      .from(LeaveBalance)
+      .where(
+        and(
+          eq(LeaveBalance.year, y + 1),
+          inList(
+            LeaveBalance.leaveType,
+            carryTypes.map((t) => t._id),
+          ),
+        ),
+      );
+    const current = new Map(existing.map((b) => [`${b.user}:${b.leaveType}`, b.carriedForward]));
 
     const at = new Date();
-    const ops = [];
+    const ops: BatchItem<"sqlite">[] = [];
     for (const person of people) {
       for (const t of carryTypes) {
-        const row = rows.get(person._id.toString())?.get(t._id.toString());
+        const row = rows.get(person._id)?.get(t._id);
         if (!row) continue;
         const carry = Math.min(Math.max(0, row.available), t.maxCarryForward);
-        const previous = current.get(`${person._id.toString()}:${t._id.toString()}`) ?? 0;
+        const previous = current.get(`${person._id}:${t._id}`) ?? 0;
         if (carry === previous) continue;
-        ops.push({
-          updateOne: {
-            filter: { user: person._id, leaveType: t._id, year: y + 1 },
-            update: { $set: { carriedForward: carry }, $push: { notes: { amount: carry, reason: `Carried forward from ${y}`, by: actor._id, byName: actor.name, at } } },
-            upsert: true,
-          },
-        });
+        const note = { _id: newId(), amount: carry, reason: `Carried forward from ${y}`, by: actor._id, byName: actor.name, at };
+        ops.push(
+          db()
+            .insert(LeaveBalance)
+            .values({ user: person._id, leaveType: t._id, year: y + 1, carriedForward: carry, notes: [note] })
+            .onConflictDoUpdate({
+              target: [LeaveBalance.user, LeaveBalance.leaveType, LeaveBalance.year],
+              set: { carriedForward: carry, notes: jsonPush(LeaveBalance.notes, note) },
+            }),
+        );
       }
     }
-    if (ops.length) await LeaveBalance.bulkWrite(ops);
+    await runBatch(ops);
     await audit(actor, { action: "update", entity: "leave_balance", ref: `${y} → ${y + 1}`, summary: `Carried leave forward from ${y} to ${y + 1}: ${ops.length} balances updated` });
     return { updated: ops.length };
   });

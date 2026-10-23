@@ -1,9 +1,11 @@
 import { Plus } from "lucide-react";
+import { and, asc, count, desc, eq } from "drizzle-orm";
 import { can, requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Project } from "@/lib/models";
-import { pageParam, PAGE_SIZE, param, searchRegex, withParams, type SearchParams } from "@/lib/query";
+import { pageParam, PAGE_SIZE, param, withParams, type SearchParams } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
+import { notInList, searchAny } from "@/lib/sql";
 import { keysInCategories, PROJECT_CLOSED_CATEGORIES, projectFilter, type Filter } from "@/lib/work-access";
 import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -21,7 +23,6 @@ const TIMELINE_LIMIT = 60;
 export default async function ProjectsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
   const sp = await searchParams;
-  await connectDB();
   const settings = await getSettings();
   const statuses = settings.projectStatuses;
   const closedKeys = keysInCategories(statuses, PROJECT_CLOSED_CATEGORIES);
@@ -29,25 +30,23 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Pro
   const view = ["board", "timeline"].includes(param(sp, "view")) ? param(sp, "view") : "list";
   const visible = projectFilter(user);
   const statusParam = param(sp, "status");
-  const rx = searchRegex(param(sp, "q"));
 
-  const base: Filter[] = [visible];
-  if (rx) base.push({ $or: [{ title: rx }, { projectNo: rx }] });
+  const base: Filter = and(visible, searchAny(param(sp, "q"), Project.title, Project.projectNo));
   const statusFilter: Filter =
-    statusParam === "all" ? {} : statuses.some((s) => s.key === statusParam) ? { status: statusParam } : { status: { $nin: closedKeys } };
-  const filter: Filter = { $and: [...base, statusFilter] };
+    statusParam === "all" ? undefined : statuses.some((s) => s.key === statusParam) ? eq(Project.status, statusParam) : notInList(Project.status, closedKeys);
+  const filter: Filter = and(base, statusFilter);
 
-  const counts = await Project.aggregate<{ _id: string; n: number }>([{ $match: visible }, { $group: { _id: "$status", n: { $sum: 1 } } }]);
-  const countOf = new Map(counts.map((c) => [c._id, c.n]));
+  const counts = await db().select({ status: Project.status, n: count() }).from(Project).where(visible).groupBy(Project.status);
+  const countOf = new Map(counts.map((c) => [c.status, c.n]));
   const total = counts.reduce((s, c) => s + c.n, 0);
-  const activeCount = counts.filter((c) => !closedKeys.includes(c._id)).reduce((s, c) => s + c.n, 0);
+  const activeCount = counts.filter((c) => !closedKeys.includes(c.status)).reduce((s, c) => s + c.n, 0);
 
   let body;
   if (view === "list") {
     const page = pageParam(sp);
     const [projects, matching] = await Promise.all([
-      Project.find(filter, PROJECT_ROW_FIELDS).sort({ projectNo: -1 }).skip((page - 1) * PAGE_SIZE).limit(PAGE_SIZE).lean(),
-      Project.countDocuments(filter),
+      db().select(PROJECT_ROW_FIELDS).from(Project).where(filter).orderBy(desc(Project.projectNo)).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
+      db().$count(Project, filter),
     ]);
     const rows = await buildProjectRows(user, projects, settings);
     body = (
@@ -58,19 +57,27 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Pro
     );
   } else if (view === "board") {
     const shown = statusParam === "all" ? statuses : statuses.filter((s) => (statuses.some((x) => x.key === statusParam) ? s.key === statusParam : !closedKeys.includes(s.key)));
-    const columns: ProjectColumn[] = await Promise.all(
-      shown.map(async (s) => {
-        const colFilter: Filter = { $and: [...base, { status: s.key }] };
-        const [projects, colTotal] = await Promise.all([
-          Project.find(colFilter, PROJECT_ROW_FIELDS).sort({ updatedAt: -1 }).limit(BOARD_COLUMN_LIMIT).lean(),
-          Project.countDocuments(colFilter),
-        ]);
-        return { status: s, rows: await buildProjectRows(user, projects, settings), total: colTotal };
-      }),
-    );
+    // One query per column plus one grouped count; the rows of every column are built together.
+    const [perStatus, totalRows] = await Promise.all([
+      Promise.all(
+        shown.map((s) =>
+          db().select(PROJECT_ROW_FIELDS).from(Project).where(and(base, eq(Project.status, s.key))).orderBy(desc(Project.updatedAt)).limit(BOARD_COLUMN_LIMIT),
+        ),
+      ),
+      db().select({ status: Project.status, n: count() }).from(Project).where(base).groupBy(Project.status),
+    ]);
+    const boardRows = await buildProjectRows(user, perStatus.flat(), settings);
+    const totals = new Map(totalRows.map((r) => [r.status, r.n]));
+    const columns: ProjectColumn[] = [];
+    let offset = 0;
+    for (let i = 0; i < shown.length; i++) {
+      const size = perStatus[i].length;
+      columns.push({ status: shown[i], rows: boardRows.slice(offset, offset + size), total: totals.get(shown[i].key) ?? 0 });
+      offset += size;
+    }
     body = <ProjectBoard columns={columns} />;
   } else {
-    const projects = await Project.find(filter, PROJECT_ROW_FIELDS).sort({ startDate: 1, projectNo: -1 }).limit(TIMELINE_LIMIT).lean();
+    const projects = await db().select(PROJECT_ROW_FIELDS).from(Project).where(filter).orderBy(asc(Project.startDate), desc(Project.projectNo)).limit(TIMELINE_LIMIT);
     const rows = await buildProjectRows(user, projects, settings);
     body = (
       <Card>

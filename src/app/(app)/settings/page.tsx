@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { forbidden } from "next/navigation";
+import { and, asc, count, desc, eq, gt, gte, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { Segmented } from "@/components/ui/tabs";
 import { PageBody, PageHeader } from "@/components/ui/page";
 import { can, requirePagePermission, type CurrentUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { fiscalYear } from "@/lib/counters";
 import { env } from "@/lib/env";
 import { cn } from "@/lib/cn";
@@ -11,6 +12,7 @@ import { Asset, Backup, Department, Designation, Expense, Holiday, Lead, LeaveBa
 import { namesFor, peopleOptions } from "@/lib/people";
 import { param, type SearchParams } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
+import { jsonLength } from "@/lib/sql";
 import { todayKey } from "@/lib/time";
 import { BackupPanel, type BackupRow } from "./backup-panel";
 import { EMPLOYMENT_CATEGORIES, PIPELINE_CATEGORIES, PROJECT_CATEGORIES, SECTIONS, TASK_CATEGORIES } from "./constants";
@@ -28,8 +30,8 @@ export const maxDuration = 300;
 const humanize = (v: string) => v.charAt(0).toUpperCase() + v.slice(1);
 const asOptions = (values: readonly string[]) => values.map((value) => ({ value, label: humanize(value) }));
 
-async function groupCounts(rows: PromiseLike<{ _id: string | null; n: number }[]>): Promise<Record<string, number>> {
-  return Object.fromEntries((await rows).filter((r) => r._id).map((r) => [r._id as string, r.n]));
+async function groupCounts(rows: PromiseLike<{ key: string | null; n: number }[]>): Promise<Record<string, number>> {
+  return Object.fromEntries((await rows).filter((r) => r.key).map((r) => [r.key as string, r.n]));
 }
 
 export default async function Page({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -76,7 +78,6 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
 }
 
 async function SectionBody({ section, sp, user }: { section: string; sp: SearchParams; user: CurrentUser }) {
-  await connectDB();
   const settings = await getSettings();
   const stamp = (v: unknown) => JSON.stringify(v);
 
@@ -86,40 +87,40 @@ async function SectionBody({ section, sp, user }: { section: string; sp: SearchP
 
     case "organization": {
       const [depts, desigs, deptPeople, desigPeople, people] = await Promise.all([
-        Department.find().sort({ name: 1 }).lean(),
-        Designation.find().sort({ level: 1, name: 1 }).lean(),
-        groupCounts(User.aggregate([{ $group: { _id: { $toString: "$department" }, n: { $sum: 1 } } }])),
-        groupCounts(User.aggregate([{ $group: { _id: { $toString: "$designation" }, n: { $sum: 1 } } }])),
+        db().select().from(Department).orderBy(asc(Department.name)),
+        db().select().from(Designation).orderBy(asc(Designation.level), asc(Designation.name)),
+        groupCounts(db().select({ key: User.department, n: count() }).from(User).groupBy(User.department)),
+        groupCounts(db().select({ key: User.designation, n: count() }).from(User).groupBy(User.designation)),
         peopleOptions(),
       ]);
       const heads = await namesFor(depts.map((d) => d.head));
-      const deptNames = new Map(depts.map((d) => [d._id.toString(), d.name]));
+      const deptNames = new Map(depts.map((d) => [d._id, d.name]));
       const designationCount = new Map<string, number>();
-      for (const d of desigs) if (d.department) designationCount.set(d.department.toString(), (designationCount.get(d.department.toString()) ?? 0) + 1);
+      for (const d of desigs) if (d.department) designationCount.set(d.department, (designationCount.get(d.department) ?? 0) + 1);
       return (
         <>
           <DepartmentsCard
             people={people}
             departments={depts.map((d) => ({
-              id: d._id.toString(),
+              id: d._id,
               name: d.name,
-              code: d.code,
-              description: d.description,
+              code: d.code ?? undefined,
+              description: d.description ?? undefined,
               active: d.active,
-              head: d.head ? { id: d.head.toString(), name: heads.get(d.head.toString()) ?? "Unknown" } : undefined,
-              people: deptPeople[d._id.toString()] ?? 0,
-              designations: designationCount.get(d._id.toString()) ?? 0,
+              head: d.head ? { id: d.head, name: heads.get(d.head) ?? "Unknown" } : undefined,
+              people: deptPeople[d._id] ?? 0,
+              designations: designationCount.get(d._id) ?? 0,
             }))}
           />
           <DesignationsCard
-            departments={depts.map((d) => ({ id: d._id.toString(), name: d.name }))}
+            departments={depts.map((d) => ({ id: d._id, name: d.name }))}
             designations={desigs.map((d) => ({
-              id: d._id.toString(),
+              id: d._id,
               name: d.name,
-              department: d.department ? { id: d.department.toString(), name: deptNames.get(d.department.toString()) ?? "Unknown" } : undefined,
-              level: d.level,
+              department: d.department ? { id: d.department, name: deptNames.get(d.department) ?? "Unknown" } : undefined,
+              level: d.level ?? undefined,
               active: d.active,
-              people: desigPeople[d._id.toString()] ?? 0,
+              people: desigPeople[d._id] ?? 0,
             }))}
           />
         </>
@@ -134,34 +135,35 @@ async function SectionBody({ section, sp, user }: { section: string; sp: SearchP
       const asked = param(sp, "year");
       const year = /^\d{4}$/.test(asked) ? asked : current;
       const [holidays, yearRows] = await Promise.all([
-        Holiday.find({ date: { $gte: `${year}-01-01`, $lte: `${year}-12-31` } }).sort({ date: 1 }).lean(),
-        Holiday.aggregate<{ _id: string }>([{ $group: { _id: { $substr: ["$date", 0, 4] } } }]),
+        db().select().from(Holiday).where(and(gte(Holiday.date, `${year}-01-01`), lte(Holiday.date, `${year}-12-31`))).orderBy(asc(Holiday.date)),
+        db().selectDistinct({ year: sql<string>`substr(${Holiday.date}, 1, 4)` }).from(Holiday),
       ]);
-      const years = [...new Set([...yearRows.map((r) => r._id), String(Number(current) - 1), current, String(Number(current) + 1), year])].sort();
+      const years = [...new Set([...yearRows.map((r) => r.year), String(Number(current) - 1), current, String(Number(current) + 1), year])].sort();
       return (
         <>
           <Segmented className="self-start" items={years.map((y) => ({ href: `/settings?section=holidays&year=${y}`, label: y, active: y === year }))} />
-          <HolidaysCard key={year + stamp(holidays.map((h) => [h.date, h.name, h.optional]))} year={year} holidays={holidays.map((h) => ({ id: h._id.toString(), date: h.date, name: h.name, optional: h.optional }))} />
+          <HolidaysCard key={year + stamp(holidays.map((h) => [h.date, h.name, h.optional]))} year={year} holidays={holidays.map((h) => ({ id: h._id, date: h.date, name: h.name, optional: h.optional }))} />
         </>
       );
     }
 
     case "leave": {
       const [types, requests, adjusted] = await Promise.all([
-        LeaveType.find().sort({ order: 1, name: 1 }).lean(),
-        groupCounts(LeaveRequest.aggregate([{ $group: { _id: { $toString: "$leaveType" }, n: { $sum: 1 } } }])),
+        db().select().from(LeaveType).orderBy(asc(LeaveType.order), asc(LeaveType.name)),
+        groupCounts(db().select({ key: LeaveRequest.leaveType, n: count() }).from(LeaveRequest).groupBy(LeaveRequest.leaveType)),
         groupCounts(
-          LeaveBalance.aggregate([
-            { $match: { $or: [{ carriedForward: { $ne: 0 } }, { adjustment: { $ne: 0 } }, { quotaOverride: { $exists: true } }, { "notes.0": { $exists: true } }] } },
-            { $group: { _id: { $toString: "$leaveType" }, n: { $sum: 1 } } },
-          ]),
+          db()
+            .select({ key: LeaveBalance.leaveType, n: count() })
+            .from(LeaveBalance)
+            .where(or(ne(LeaveBalance.carriedForward, 0), ne(LeaveBalance.adjustment, 0), isNotNull(LeaveBalance.quotaOverride), gt(jsonLength(LeaveBalance.notes), 0)))
+            .groupBy(LeaveBalance.leaveType),
         ),
       ]);
       const views = types.map((t) => ({
-        id: t._id.toString(),
+        id: t._id,
         name: t.name,
         code: t.code,
-        color: t.color,
+        color: t.color ?? undefined,
         annualQuota: t.annualQuota,
         accrual: t.accrual,
         carryForward: t.carryForward,
@@ -169,11 +171,11 @@ async function SectionBody({ section, sp, user }: { section: string; sp: SearchP
         paid: t.paid,
         allowHalfDay: t.allowHalfDay,
         requiresHrApproval: t.requiresHrApproval,
-        requiresAttachmentAfterDays: t.requiresAttachmentAfterDays,
+        requiresAttachmentAfterDays: t.requiresAttachmentAfterDays ?? undefined,
         applicableTo: t.applicableTo,
         active: t.active,
         order: t.order,
-        inUse: (requests[t._id.toString()] ?? 0) > 0 || (adjusted[t._id.toString()] ?? 0) > 0,
+        inUse: (requests[t._id] ?? 0) > 0 || (adjusted[t._id] ?? 0) > 0,
       }));
       return (
         <>
@@ -244,10 +246,16 @@ async function SectionBody({ section, sp, user }: { section: string; sp: SearchP
 
     case "lists": {
       const [assets, expenses, leads, docs] = await Promise.all([
-        groupCounts(Asset.aggregate([{ $group: { _id: "$category", n: { $sum: 1 } } }])),
-        groupCounts(Expense.aggregate([{ $group: { _id: "$category", n: { $sum: 1 } } }])),
-        groupCounts(Lead.aggregate([{ $group: { _id: "$source", n: { $sum: 1 } } }])),
-        groupCounts(StoredFile.aggregate([{ $match: { entityType: "user", deletedAt: null, category: { $exists: true } } }, { $group: { _id: "$category", n: { $sum: 1 } } }])),
+        groupCounts(db().select({ key: Asset.category, n: count() }).from(Asset).groupBy(Asset.category)),
+        groupCounts(db().select({ key: Expense.category, n: count() }).from(Expense).groupBy(Expense.category)),
+        groupCounts(db().select({ key: Lead.source, n: count() }).from(Lead).groupBy(Lead.source)),
+        groupCounts(
+          db()
+            .select({ key: StoredFile.category, n: count() })
+            .from(StoredFile)
+            .where(and(eq(StoredFile.entityType, "user"), isNull(StoredFile.deletedAt), isNotNull(StoredFile.category)))
+            .groupBy(StoredFile.category),
+        ),
       ]);
       return (
         <>
@@ -276,17 +284,17 @@ async function SectionBody({ section, sp, user }: { section: string; sp: SearchP
 
     case "backup": {
       if (!can(user, "backup.manage")) forbidden();
-      const backups = await Backup.find().sort({ createdAt: -1 }).limit(50).lean();
+      const backups = await db().select().from(Backup).orderBy(desc(Backup.createdAt)).limit(50);
       const rows: BackupRow[] = backups.map((b) => ({
-        id: b._id.toString(),
+        id: b._id,
         createdAt: b.createdAt.toISOString(),
         size: b.size,
         trigger: b.trigger,
         status: b.status,
-        error: b.error,
-        byName: b.byName,
+        error: b.error ?? undefined,
+        byName: b.byName ?? undefined,
         restoredAt: b.restoredAt?.toISOString(),
-        restoredBy: b.restoredBy,
+        restoredBy: b.restoredBy ?? undefined,
         total: b.collections.reduce((n, c) => n + c.count, 0),
         collections: b.collections.map((c) => ({ name: c.name ?? "", count: c.count ?? 0 })),
       }));

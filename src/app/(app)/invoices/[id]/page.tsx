@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { forbidden, notFound } from "next/navigation";
 import { Download, Pencil } from "lucide-react";
+import { desc, eq } from "drizzle-orm";
 import { can, requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Client, Contract, Invoice, Payment, Project } from "@/lib/models";
 import { inr, plural, round2 } from "@/lib/format";
 import { fmtDate, fmtDateTime, diffDays, todayKey } from "@/lib/time";
@@ -40,16 +41,23 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   const user = await requirePagePermission("invoices.view");
   const { id } = await params;
   if (!isObjectId(id)) notFound();
-  await connectDB();
-  const inv = await Invoice.findById(id).lean();
+  const [inv] = await db().select().from(Invoice).where(eq(Invoice._id, id)).limit(1);
   if (!inv) notFound();
 
-  const [settings, client, project, contract, payments] = await Promise.all([
+  const [settings, [client], [project], [contract], payments] = await Promise.all([
     getSettings(),
-    Client.findById(inv.client, { name: 1, clientNo: 1, address: 1, gstin: 1, email: 1, confidential: 1, owner: 1 }).lean(),
-    inv.project ? Project.findById(inv.project, { projectNo: 1, title: 1, milestones: 1 }).lean() : null,
-    inv.contract && can(user, "contracts.view") ? Contract.findById(inv.contract, { contractNo: 1, title: 1 }).lean() : null,
-    Payment.find({ invoice: inv._id }).sort({ createdAt: -1 }).lean(),
+    db()
+      .select({ name: Client.name, clientNo: Client.clientNo, address: Client.address, gstin: Client.gstin, email: Client.email, confidential: Client.confidential, owner: Client.owner })
+      .from(Client)
+      .where(eq(Client._id, inv.client))
+      .limit(1),
+    inv.project
+      ? db().select({ _id: Project._id, projectNo: Project.projectNo, title: Project.title, milestones: Project.milestones }).from(Project).where(eq(Project._id, inv.project)).limit(1)
+      : [],
+    inv.contract && can(user, "contracts.view")
+      ? db().select({ contractNo: Contract.contractNo, title: Contract.title }).from(Contract).where(eq(Contract._id, inv.contract)).limit(1)
+      : [],
+    db().select().from(Payment).where(eq(Payment.invoice, inv._id)).orderBy(desc(Payment.createdAt)),
   ]);
   if (client && !canSeeClient(user, client)) forbidden();
 
@@ -63,11 +71,11 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   const netPaid = round2(inv.amountPaid - inv.amountRefunded);
   const label = inv.invoiceNo ?? inv.draftNo;
   const totals = computeTotals(inv.items, inv.discount);
-  const milestone = project?.milestones.find((m) => m._id.toString() === inv.milestone?.toString());
+  const milestone = project?.milestones.find((m) => m._id === inv.milestone);
 
   const billing = inv.billingSnapshot
     ? { name: inv.billingSnapshot.name, lines: inv.billingSnapshot.address ? [inv.billingSnapshot.address] : [], gstin: inv.billingSnapshot.gstin, email: inv.billingSnapshot.email }
-    : { name: client?.name ?? "Unknown client", lines: formatAddress(client?.address), gstin: client?.gstin, email: client?.email };
+    : { name: client?.name ?? "Unknown client", lines: formatAddress(client?.address ?? undefined), gstin: client?.gstin ?? undefined, email: client?.email ?? undefined };
 
   const events: TimelineEvent[] = [
     ...payments.map<TimelineEvent>((p) => ({

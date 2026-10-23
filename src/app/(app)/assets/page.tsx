@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Boxes, Plus } from "lucide-react";
+import { and, asc, count, countDistinct, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { PersonFilter } from "../audit/person-filter";
 import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -8,12 +9,13 @@ import { ChipFilters, ClearFilters, FilterBar, Pagination, SearchInput, SelectFi
 import { EmptyState, PageBody, PageHeader, StatCard } from "@/components/ui/page";
 import { EmptyRow, TableWrap, THead, Td, Th, Tr } from "@/components/ui/table";
 import { can, requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { inrCompact } from "@/lib/format";
 import { Asset, Department } from "@/lib/models";
 import { namesFor, peopleOptions } from "@/lib/people";
-import { idParam, pageParam, PAGE_SIZE, param, searchRegex, type SearchParams } from "@/lib/query";
+import { idParam, pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
+import { notInList, searchAny } from "@/lib/sql";
 import { addDays, fmtDate, todayKey } from "@/lib/time";
 import { ASSET_STATUSES, warrantyState } from "./meta";
 
@@ -23,7 +25,6 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const user = await requirePagePermission("assets.view");
   const canManage = can(user, "assets.manage");
   const sp = await searchParams;
-  await connectDB();
 
   const today = todayKey();
   const soon = addDays(today, 30);
@@ -33,38 +34,68 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const assignee = idParam(sp, "assignee");
   const department = idParam(sp, "department");
   const warranty = param(sp, "warranty") === "soon";
-  const rx = searchRegex(param(sp, "q"));
+  const search = searchAny(param(sp, "q"), Asset.name, Asset.assetNo, Asset.serialNo, Asset.brand, Asset.model);
 
-  const conditions: Record<string, unknown>[] = [];
-  if ((ASSET_STATUSES as readonly string[]).includes(status)) conditions.push({ status });
-  if (category) conditions.push({ category });
-  if (assignee) conditions.push({ assignedTo: assignee });
-  if (department) conditions.push({ department });
-  if (warranty) conditions.push({ warrantyUntil: { $gte: today, $lte: soon }, status: { $nin: ["retired", "lost"] } });
-  if (rx) conditions.push({ $or: [{ name: rx }, { assetNo: rx }, { serialNo: rx }, { brand: rx }, { model: rx }] });
-  const filter = conditions.length ? { $and: conditions } : {};
+  const warrantySoon = and(gte(Asset.warrantyUntil, today), lte(Asset.warrantyUntil, soon), notInList(Asset.status, ["retired", "lost"]));
+  const conditions: SQL[] = [];
+  if ((ASSET_STATUSES as readonly string[]).includes(status)) conditions.push(eq(Asset.status, status as (typeof ASSET_STATUSES)[number]));
+  if (category) conditions.push(eq(Asset.category, category));
+  if (assignee) conditions.push(eq(Asset.assignedTo, assignee));
+  if (department) conditions.push(eq(Asset.department, department));
+  if (warranty && warrantySoon) conditions.push(warrantySoon);
+  if (search) conditions.push(search);
+  const filter = and(...conditions);
 
-  const [settings, rows, total, statusRows, categoryRows, cost, holders, soonCount, departments, people] = await Promise.all([
+  const [settings, rows, total, groups, [holders], soonCount, departments, people] = await Promise.all([
     getSettings(),
-    Asset.find(filter).sort({ createdAt: -1, _id: -1 }).skip((page - 1) * PAGE_SIZE).limit(PAGE_SIZE).lean(),
-    Asset.countDocuments(filter),
-    Asset.aggregate<{ _id: string; n: number }>([{ $group: { _id: "$status", n: { $sum: 1 } } }]),
-    Asset.aggregate<{ _id: string; n: number }>([{ $group: { _id: "$category", n: { $sum: 1 } } }]),
-    Asset.aggregate<{ _id: null; total: number }>([{ $group: { _id: null, total: { $sum: "$cost" } } }]),
-    Asset.distinct("assignedTo", { status: "assigned" }),
-    Asset.countDocuments({ warrantyUntil: { $gte: today, $lte: soon }, status: { $nin: ["retired", "lost"] } }),
-    Department.find({}, { name: 1 }).sort({ name: 1 }).lean(),
+    db()
+      .select({
+        _id: Asset._id,
+        name: Asset.name,
+        assetNo: Asset.assetNo,
+        category: Asset.category,
+        serialNo: Asset.serialNo,
+        assignedTo: Asset.assignedTo,
+        department: Asset.department,
+        location: Asset.location,
+        purchaseDate: Asset.purchaseDate,
+        warrantyUntil: Asset.warrantyUntil,
+        condition: Asset.condition,
+        status: Asset.status,
+      })
+      .from(Asset)
+      .where(filter)
+      .orderBy(desc(Asset.createdAt), desc(Asset._id))
+      .limit(PAGE_SIZE)
+      .offset((page - 1) * PAGE_SIZE),
+    db().$count(Asset, filter),
+    // Counts and cost per status / category, in one pass over the table.
+    db()
+      .select({ status: Asset.status, category: Asset.category, n: count(), cost: sql<number>`coalesce(sum(${Asset.cost}), 0)`.mapWith(Number) })
+      .from(Asset)
+      .groupBy(Asset.status, Asset.category),
+    db().select({ n: countDistinct(Asset.assignedTo) }).from(Asset).where(eq(Asset.status, "assigned")),
+    db().$count(Asset, warrantySoon),
+    db().select({ _id: Department._id, name: Department.name }).from(Department).orderBy(asc(Department.name)),
     peopleOptions({ includeExited: true }),
   ]);
 
-  const byStatus = Object.fromEntries(statusRows.map((r) => [r._id, r.n]));
-  const totalAssets = statusRows.reduce((n, r) => n + r.n, 0);
-  const counts = new Map(categoryRows.map((r) => [r._id, r.n]));
-  const knownCategories = [...settings.assetCategories, ...categoryRows.map((r) => r._id).filter((c) => c && !settings.assetCategories.includes(c))];
+  const byStatus: Record<string, number> = {};
+  const counts = new Map<string, number>();
+  let totalAssets = 0;
+  let totalCost = 0;
+  for (const g of groups) {
+    byStatus[g.status] = (byStatus[g.status] ?? 0) + g.n;
+    counts.set(g.category, (counts.get(g.category) ?? 0) + g.n);
+    totalAssets += g.n;
+    totalCost += g.cost;
+  }
+  const holderCount = holders?.n ?? 0;
+  const knownCategories = [...settings.assetCategories, ...[...counts.keys()].filter((c) => c && !settings.assetCategories.includes(c))];
   const categoryChips = knownCategories.filter((c) => (counts.get(c) ?? 0) > 0).map((c) => ({ value: c, label: c, count: counts.get(c) }));
 
   const holderNames = await namesFor(rows.map((r) => r.assignedTo));
-  const deptNames = new Map(departments.map((d) => [d._id.toString(), d.name]));
+  const deptNames = new Map(departments.map((d) => [d._id, d.name]));
   const filtered = conditions.length > 0;
 
   return (
@@ -82,8 +113,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <StatCard label="Total assets" value={totalAssets} sub={cost[0]?.total ? `cost ${inrCompact(cost[0].total)}` : undefined} />
-        <StatCard label="Assigned" value={byStatus.assigned ?? 0} sub={`to ${holders.length} ${holders.length === 1 ? "person" : "people"}`} href="/assets?status=assigned" />
+        <StatCard label="Total assets" value={totalAssets} sub={totalCost ? `cost ${inrCompact(totalCost)}` : undefined} />
+        <StatCard label="Assigned" value={byStatus.assigned ?? 0} sub={`to ${holderCount} ${holderCount === 1 ? "person" : "people"}`} href="/assets?status=assigned" />
         <StatCard label="Available" value={byStatus.available ?? 0} sub="ready to issue" href="/assets?status=available" />
         <StatCard label="In repair" value={byStatus.in_repair ?? 0} sub={byStatus.damaged ? `${byStatus.damaged} damaged` : "none damaged"} href="/assets?status=in_repair" />
         <StatCard label="Warranty ending · 30 d" value={soonCount} sub={soonCount ? "view the list" : "nothing expiring"} tone={soonCount ? "alert" : "default"} href="/assets?warranty=soon" />
@@ -95,7 +126,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
           <FilterBar>
             <SearchInput placeholder="Search name, number or serial" />
             <SelectFilter param="status" allLabel="All statuses" options={ASSET_STATUSES.map((s) => ({ value: s, label: s.replace("_", " ").replace(/^\w/, (c) => c.toUpperCase()) }))} />
-            <SelectFilter param="department" allLabel="All departments" options={departments.map((d) => ({ value: d._id.toString(), label: d.name }))} />
+            <SelectFilter param="department" allLabel="All departments" options={departments.map((d) => ({ value: d._id, label: d.name }))} />
             <PersonFilter param="assignee" options={people} placeholder="Assigned to anyone" />
             {warranty && <Chip tone="orange">Warranty ending in 30 days</Chip>}
             <ClearFilters />
@@ -128,10 +159,10 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
             <tbody>
               {rows.length === 0 && <EmptyRow colSpan={7}>{filtered ? "No assets match these filters." : "No assets."}</EmptyRow>}
               {rows.map((a) => {
-                const id = a._id.toString();
-                const holder = a.assignedTo ? holderNames.get(a.assignedTo.toString()) : undefined;
-                const dept = a.department ? deptNames.get(a.department.toString()) : undefined;
-                const warn = a.status === "retired" || a.status === "lost" ? null : warrantyState(a.warrantyUntil, today);
+                const id = a._id;
+                const holder = a.assignedTo ? holderNames.get(a.assignedTo) : undefined;
+                const dept = a.department ? deptNames.get(a.department) : undefined;
+                const warn = a.status === "retired" || a.status === "lost" ? null : warrantyState(a.warrantyUntil ?? undefined, today);
                 return (
                   <Tr key={id}>
                     <Td>

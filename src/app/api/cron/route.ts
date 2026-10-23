@@ -27,10 +27,12 @@ async function handle(request: Request): Promise<NextResponse> {
   const params = new URL(request.url).searchParams;
   const force = ["1", "true", "yes"].includes((params.get("force") ?? "").toLowerCase());
   const only = params.get("only")?.split(",").map((s) => s.trim()).filter(Boolean);
+  // Jobs per request (D1 allows 50 queries per request on the free plan); the caller repeats while `pending > 0`.
+  const max = Number.parseInt(params.get("max") ?? "", 10);
   try {
     const startedAt = new Date();
-    const results = await runJobs({ force, only: only?.length ? only : undefined });
-    return NextResponse.json({ ok: true, startedAt: startedAt.toISOString(), force, results }, { headers: { "Cache-Control": "no-store" } });
+    const { results, pending } = await runJobs({ force, only: only?.length ? only : undefined, maxJobs: Number.isFinite(max) && max > 0 ? max : 3 });
+    return NextResponse.json({ ok: true, startedAt: startedAt.toISOString(), force, results, pending }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("[cron] run failed", error);
     return NextResponse.json({ ok: false, error: "Job run failed" }, { status: 500, headers: { "Cache-Control": "no-store" } });

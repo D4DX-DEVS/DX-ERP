@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
+import { and, asc, count, desc, eq, gt, gte, isNotNull, or, sql } from "drizzle-orm";
 import { can, requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
-import { ISSUE_STATUSES, Issue, Project, Task, Types, type IIssue } from "@/lib/models";
+import { db } from "@/lib/db";
+import { ISSUE_STATUSES, Issue, Project, Task, type Id, type IssueSeverity } from "@/lib/models";
 import { peopleOptions } from "@/lib/people";
-import { idParam, pageParam, PAGE_SIZE, param, searchRegex, withParams, type SearchParams } from "@/lib/query";
+import { idParam, pageParam, PAGE_SIZE, param, withParams, type SearchParams } from "@/lib/query";
+import { inList, notInList, searchAny } from "@/lib/sql";
 import { statusLabel } from "@/lib/status";
 import { addDays, dateKey, diffDays, fmtDate, startOfDay, todayKey, weekStart } from "@/lib/time";
 import { ISSUE_RESOLVED_STATUSES, issueFilter, myProjectIds, peopleMap, projectFilter, type Filter } from "@/lib/work-access";
@@ -26,12 +28,9 @@ export const metadata = { title: "QA & issues" };
 const WORKING = ["open", "assigned", "in_progress", "reopened"];
 const TREND_WEEKS = 8;
 
-type Row = Pick<IIssue, "_id" | "issueNo" | "title" | "task" | "severity" | "assignee" | "targetDate" | "status" | "project">;
-
 export default async function QaPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
   const sp = await searchParams;
-  await connectDB();
   const today = todayKey();
   const currentWeek = weekStart(today);
 
@@ -41,61 +40,71 @@ export default async function QaPage({ searchParams }: { searchParams: Promise<S
   const severity = param(sp, "severity");
   const status = param(sp, "status");
   const mine = param(sp, "scope") === "mine";
-  const rx = searchRegex(param(sp, "q"));
 
   const scoped: Filter[] = [visible];
-  if (projectId) scoped.push({ project: new Types.ObjectId(projectId) });
-  const and: Filter[] = [...scoped];
-  if (mine) and.push({ $or: [{ assignee: user._id }, { reporter: user._id }] });
-  if (assigneeId) and.push({ assignee: new Types.ObjectId(assigneeId) });
-  if (SEVERITY_OPTIONS.some((s) => s.value === severity)) and.push({ severity });
-  if ((ISSUE_STATUSES as string[]).includes(status)) and.push({ status });
-  if (rx) and.push({ $or: [{ title: rx }, { issueNo: rx }] });
-  const filter: Filter = { $and: and };
-  const base: Filter = { $and: scoped };
+  if (projectId) scoped.push(eq(Issue.project, projectId));
+  const conds: Filter[] = [...scoped];
+  if (mine) conds.push(or(eq(Issue.assignee, user._id), eq(Issue.reporter, user._id)));
+  if (assigneeId) conds.push(eq(Issue.assignee, assigneeId));
+  if (SEVERITY_OPTIONS.some((s) => s.value === severity)) conds.push(eq(Issue.severity, severity as IssueSeverity));
+  if ((ISSUE_STATUSES as string[]).includes(status)) conds.push(eq(Issue.status, status as (typeof ISSUE_STATUSES)[number]));
+  conds.push(searchAny(param(sp, "q"), Issue.title, Issue.issueNo));
+  const filter: Filter = and(...conds);
+  const base: Filter = and(...scoped);
   const isManager = can(user, "qa.view_all") || can(user, "qa.manage");
+  // The user's own projects are needed for the "Report issue" rule and the project filter; load them once, on demand.
+  let ownProjectIds: Id[] | undefined;
+  const ownIds = async () => (ownProjectIds ??= await myProjectIds(user));
   // Same rule as /qa/new: QA managers, or anyone who manages / belongs to a project.
-  const canReport = can(user, "qa.manage") || (await myProjectIds(user)).length > 0;
+  const canReport = can(user, "qa.manage") || (await ownIds()).length > 0;
 
   const trendStart = addDays(currentWeek, -7 * (TREND_WEEKS - 1));
   const page = pageParam(sp);
+  const unresolved = and(...scoped, notInList(Issue.status, ISSUE_RESOLVED_STATUSES));
   const [statusCounts, openCount, criticalCount, fixedThisWeek, everFixed, reopened, rows, total, trendIssues, projectDocs, people] = await Promise.all([
-    Issue.aggregate<{ _id: string; n: number }>([{ $match: base }, { $group: { _id: "$status", n: { $sum: 1 } } }]),
-    Issue.countDocuments({ $and: [...scoped, { status: { $nin: ISSUE_RESOLVED_STATUSES } }] }),
-    Issue.countDocuments({ $and: [...scoped, { status: { $nin: ISSUE_RESOLVED_STATUSES }, severity: "critical" }] }),
-    Issue.countDocuments({ $and: [...scoped, { resolvedAt: { $gte: startOfDay(currentWeek) } }] }),
-    Issue.countDocuments({ $and: [...scoped, { $or: [{ resolvedAt: { $ne: null } }, { reopenCount: { $gt: 0 } }, { status: { $in: ISSUE_RESOLVED_STATUSES } }] }] }),
-    Issue.countDocuments({ $and: [...scoped, { reopenCount: { $gt: 0 } }] }),
-    Issue.aggregate<Row>([
-      { $match: filter },
-      {
-        $addFields: {
-          _closed: { $in: ["$status", ISSUE_RESOLVED_STATUSES] },
-          _rank: { $indexOfArray: [["critical", "major", "minor", "trivial"], "$severity"] },
-          _due: { $ifNull: ["$targetDate", "9999-12-31"] },
-        },
-      },
-      { $sort: { _closed: 1, _rank: 1, _due: 1, createdAt: -1 } },
-      { $skip: (page - 1) * PAGE_SIZE },
-      { $limit: PAGE_SIZE },
-      { $project: { issueNo: 1, title: 1, task: 1, severity: 1, assignee: 1, targetDate: 1, status: 1, project: 1 } },
-    ]),
-    Issue.countDocuments(filter),
+    db().select({ status: Issue.status, n: count() }).from(Issue).where(base).groupBy(Issue.status),
+    db().$count(Issue, unresolved),
+    db().$count(Issue, and(unresolved, eq(Issue.severity, "critical"))),
+    db().$count(Issue, and(...scoped, gte(Issue.resolvedAt, startOfDay(currentWeek)))),
+    db().$count(Issue, and(...scoped, or(isNotNull(Issue.resolvedAt), gt(Issue.reopenCount, 0), inList(Issue.status, ISSUE_RESOLVED_STATUSES)))),
+    db().$count(Issue, and(...scoped, gt(Issue.reopenCount, 0))),
+    db()
+      .select({ _id: Issue._id, issueNo: Issue.issueNo, title: Issue.title, task: Issue.task, severity: Issue.severity, assignee: Issue.assignee, targetDate: Issue.targetDate, status: Issue.status, project: Issue.project })
+      .from(Issue)
+      .where(filter)
+      .orderBy(
+        asc(sql`case when ${inList(Issue.status, ISSUE_RESOLVED_STATUSES)} then 1 else 0 end`),
+        asc(sql`case ${Issue.severity} when 'critical' then 0 when 'major' then 1 when 'minor' then 2 when 'trivial' then 3 else -1 end`),
+        asc(sql`coalesce(${Issue.targetDate}, '9999-12-31')`),
+        desc(Issue.createdAt),
+      )
+      .limit(PAGE_SIZE)
+      .offset((page - 1) * PAGE_SIZE),
+    db().$count(Issue, filter),
     isManager
-      ? Issue.find({ $and: [...scoped, { $or: [{ reportedDate: { $gte: trendStart } }, { closedAt: { $gte: startOfDay(trendStart) } }] }] }, { reportedDate: 1, closedAt: 1 }).limit(5000).lean()
+      ? db()
+          .select({ reportedDate: Issue.reportedDate, closedAt: Issue.closedAt })
+          .from(Issue)
+          .where(and(...scoped, or(gte(Issue.reportedDate, trendStart), gte(Issue.closedAt, startOfDay(trendStart)))))
+          .limit(5000)
       : [],
-    Project.find(can(user, "qa.view_all") ? projectFilter(user) : { _id: { $in: await myProjectIds(user) } }, { projectNo: 1, title: 1 }).sort({ projectNo: -1 }).limit(300).lean(),
+    db()
+      .select({ _id: Project._id, projectNo: Project.projectNo, title: Project.title })
+      .from(Project)
+      .where(can(user, "qa.view_all") ? projectFilter(user) : inList(Project._id, await ownIds()))
+      .orderBy(desc(Project.projectNo))
+      .limit(300),
     peopleOptions(),
   ]);
 
   const [taskDocs, assignees] = await Promise.all([
-    rows.some((r) => r.task) ? Task.find({ _id: { $in: rows.flatMap((r) => (r.task ? [r.task] : [])) } }, { taskNo: 1 }).lean() : [],
+    rows.some((r) => r.task) ? db().select({ _id: Task._id, taskNo: Task.taskNo }).from(Task).where(inList(Task._id, rows.flatMap((r) => (r.task ? [r.task] : [])))) : [],
     peopleMap(rows.map((r) => r.assignee)),
   ]);
-  const taskNo = new Map(taskDocs.map((t) => [t._id.toString(), t.taskNo]));
-  const projectNo = new Map(projectDocs.map((p) => [p._id.toString(), p.projectNo]));
+  const taskNo = new Map(taskDocs.map((t) => [t._id, t.taskNo]));
+  const projectNo = new Map(projectDocs.map((p) => [p._id, p.projectNo]));
 
-  const counts = new Map(statusCounts.map((c) => [c._id, c.n]));
+  const counts = new Map(statusCounts.map((c) => [c.status, c.n]));
   const totalIssues = [...counts.values()].reduce((s, n) => s + n, 0);
   const reopenRate = everFixed > 0 ? Math.round((reopened / everFixed) * 100) : 0;
   const weeks = Array.from({ length: TREND_WEEKS }, (_, i) => addDays(trendStart, 7 * i));
@@ -163,7 +172,7 @@ export default async function QaPage({ searchParams }: { searchParams: Promise<S
           />
           <FilterBar className="flex-1">
             <SearchInput placeholder="Search issues" className="sm:w-56" />
-            <SelectFilter param="project" allLabel="All projects" label="Project" options={projectDocs.map((p) => ({ value: p._id.toString(), label: `${p.projectNo} · ${p.title}` }))} className="w-44" />
+            <SelectFilter param="project" allLabel="All projects" label="Project" options={projectDocs.map((p) => ({ value: p._id, label: `${p.projectNo} · ${p.title}` }))} className="w-44" />
             <SelectFilter param="severity" allLabel="Any severity" label="Severity" options={SEVERITY_OPTIONS} />
             <SelectFilter param="assignee" allLabel="Any assignee" label="Assignee" options={people.map((p) => ({ value: p.id, label: p.name }))} className="w-40" />
             <ClearFilters />
@@ -182,21 +191,21 @@ export default async function QaPage({ searchParams }: { searchParams: Promise<S
             {rows.map((r) => {
               const late = r.targetDate && r.targetDate < today && WORKING.includes(r.status);
               return (
-                <Tr key={r._id.toString()}>
+                <Tr key={r._id}>
                   <Td className="max-w-[420px]">
                     <Link href={`/qa/${r._id}`} className="block min-w-0 hover:text-brand-600">
                       <span className="block truncate font-semibold">{r.title}</span>
                       <span className="block truncate text-xs text-muted">
                         {r.issueNo}
-                        {projectNo.get(r.project.toString()) ? ` · ${projectNo.get(r.project.toString())}` : ""}
-                        {r.task && taskNo.get(r.task.toString()) ? ` · ${taskNo.get(r.task.toString())}` : ""}
+                        {projectNo.get(r.project) ? ` · ${projectNo.get(r.project)}` : ""}
+                        {r.task && taskNo.get(r.task) ? ` · ${taskNo.get(r.task)}` : ""}
                       </span>
                     </Link>
                   </Td>
                   <Td>
                     <SeverityLabel value={r.severity} />
                   </Td>
-                  <Td className="text-ink-2">{r.assignee ? (assignees.get(r.assignee.toString())?.name ?? "Unknown") : <span className="text-muted">Unassigned</span>}</Td>
+                  <Td className="text-ink-2">{r.assignee ? (assignees.get(r.assignee)?.name ?? "Unknown") : <span className="text-muted">Unassigned</span>}</Td>
                   <Td className="whitespace-nowrap">
                     {r.targetDate ? <span className={cn(late ? "font-semibold text-danger" : "text-ink-2")}>{late ? `${diffDays(r.targetDate, today)}d late` : fmtDate(r.targetDate, "EEE d MMM")}</span> : <span className="text-muted">—</span>}
                   </Td>

@@ -102,12 +102,12 @@ with the corresponding permission. Every significant change is written to the **
 
 Reminders and housekeeping (overdue movements and missing In-Time, missing check-outs, leave and
 approval reminders, task and milestone deadlines, follow-ups, contract/proposal expiry, overdue
-invoices, document and warranty expiry, retention purges, daily backups) run:
-
-* opportunistically after page loads (at most once a minute per Worker isolate), and
-* from a Cloudflare **Cron Trigger** every 15 minutes (`triggers.crons` in `wrangler.jsonc`; the entry point
-  `cloudflare/worker.ts` calls `/api/cron` with `Authorization: Bearer <CRON_SECRET>`). Each job is throttled to
-  its own interval. The endpoint can also be called manually:
+invoices, document and warranty expiry, retention purges, daily backups) run
+from a Cloudflare **Cron Trigger** every 15 minutes (`triggers.crons` in `wrangler.jsonc`). The entry point
+`cloudflare/worker.ts` calls `/api/cron` with `Authorization: Bearer <CRON_SECRET>` through the Worker's own service
+binding, three due jobs per call, repeating while jobs are pending — so each call stays inside the free plan's
+50-queries-per-request limit. Each job is throttled to its own interval. The endpoint can also be called manually
+(`?force=1` runs every job, `?only=<name>` one job, `?max=<n>` jobs per call):
 
 ```bash
 curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://dx-erp.<subdomain>.workers.dev/api/cron

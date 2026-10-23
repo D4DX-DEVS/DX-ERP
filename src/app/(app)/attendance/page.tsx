@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { and, desc, eq, gte, isNotNull, isNull, lt, lte, ne } from "drizzle-orm";
 import { Plus } from "lucide-react";
 import { ActionButton } from "@/components/ui/actions";
 import { Button } from "@/components/ui/button";
@@ -8,11 +9,12 @@ import { StatusChip } from "@/components/ui/chip";
 import { Alert, PageBody, PageHeader, StatCard } from "@/components/ui/page";
 import { EmptyRow, TableWrap, THead, Td, Th, Tr } from "@/components/ui/table";
 import { isStaff, requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { workCalendar } from "@/lib/domain/calendar";
 import { Attendance, AttendanceCorrection, LeaveRequest, Movement, type IAttendance } from "@/lib/models";
 import type { SearchParams } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
+import { inList } from "@/lib/sql";
 import { TONE_CLASSES } from "@/lib/status";
 import { addDays, eachDay, formatDuration, fmtDate, fmtTime, monthKey, monthRange, todayKey, weekday } from "@/lib/time";
 import { cn } from "@/lib/cn";
@@ -39,9 +41,14 @@ interface LogMovement {
   open: boolean;
 }
 
+type LogAttendance = Pick<
+  IAttendance,
+  "date" | "checkIn" | "checkOut" | "breaks" | "breakMinutes" | "workMinutes" | "status" | "late" | "lateMinutes" | "earlyDeparture" | "earlyMinutes"
+>;
+
 interface LogDay {
   date: string;
-  att?: IAttendance;
+  att?: LogAttendance;
   cls: DayClass;
   holidayName?: string;
   leaveLabel?: string;
@@ -97,7 +104,6 @@ export default async function MyAttendancePage({ searchParams }: { searchParams:
   const user = await requireUser();
   if (!isStaff(user)) redirect("/attendance/team");
   const sp = await searchParams;
-  await connectDB();
   const settings = await getSettings();
   const access = await attendanceAccess(user);
   const now = currentTime();
@@ -109,16 +115,69 @@ export default async function MyAttendancePage({ searchParams }: { searchParams:
   const last = to < today ? to : today;
 
   const [records, movements, leaves, cal, corrections, openDays, pendingForMe] = await Promise.all([
-    Attendance.find({ user: user._id, date: { $gte: from, $lte: to } }).lean(),
-    Movement.find(
-      { user: user._id, date: { $gte: from, $lte: to }, status: { $in: ["out", "returned"] }, approvalStatus: { $ne: "rejected" } },
-      { movementNo: 1, date: 1, status: 1, durationMinutes: 1, official: 1, outTime: 1 },
-    ).lean(),
-    LeaveRequest.find({ user: user._id, status: "approved", startDate: { $lte: to }, endDate: { $gte: from } }, { user: 1, startDate: 1, endDate: 1, halfDay: 1, leaveTypeName: 1 }).lean(),
+    db()
+      .select({
+        date: Attendance.date,
+        checkIn: Attendance.checkIn,
+        checkOut: Attendance.checkOut,
+        breaks: Attendance.breaks,
+        breakMinutes: Attendance.breakMinutes,
+        workMinutes: Attendance.workMinutes,
+        status: Attendance.status,
+        late: Attendance.late,
+        lateMinutes: Attendance.lateMinutes,
+        earlyDeparture: Attendance.earlyDeparture,
+        earlyMinutes: Attendance.earlyMinutes,
+      })
+      .from(Attendance)
+      .where(and(eq(Attendance.user, user._id), gte(Attendance.date, from), lte(Attendance.date, to))),
+    db()
+      .select({
+        _id: Movement._id,
+        movementNo: Movement.movementNo,
+        date: Movement.date,
+        status: Movement.status,
+        durationMinutes: Movement.durationMinutes,
+        official: Movement.official,
+        outTime: Movement.outTime,
+      })
+      .from(Movement)
+      .where(
+        and(
+          eq(Movement.user, user._id),
+          gte(Movement.date, from),
+          lte(Movement.date, to),
+          inList(Movement.status, ["out", "returned"]),
+          ne(Movement.approvalStatus, "rejected"),
+        ),
+      ),
+    db()
+      .select({
+        _id: LeaveRequest._id,
+        user: LeaveRequest.user,
+        startDate: LeaveRequest.startDate,
+        endDate: LeaveRequest.endDate,
+        halfDay: LeaveRequest.halfDay,
+        leaveTypeName: LeaveRequest.leaveTypeName,
+      })
+      .from(LeaveRequest)
+      .where(and(eq(LeaveRequest.user, user._id), eq(LeaveRequest.status, "approved"), lte(LeaveRequest.startDate, to), gte(LeaveRequest.endDate, from))),
     workCalendar(settings, from, to),
-    AttendanceCorrection.find({ user: user._id }).sort({ createdAt: -1 }).limit(8).lean(),
-    Attendance.find({ user: user._id, checkIn: { $ne: null }, checkOut: null, date: { $lt: today, $gte: addDays(today, -60) } }, { date: 1, checkIn: 1 }).sort({ date: -1 }).lean(),
-    access.canDecide ? AttendanceCorrection.countDocuments({ status: "pending", ...decidableFilter(user, access) }) : Promise.resolve(0),
+    db().select().from(AttendanceCorrection).where(eq(AttendanceCorrection.user, user._id)).orderBy(desc(AttendanceCorrection.createdAt)).limit(8),
+    db()
+      .select({ date: Attendance.date, checkIn: Attendance.checkIn })
+      .from(Attendance)
+      .where(
+        and(
+          eq(Attendance.user, user._id),
+          isNotNull(Attendance.checkIn),
+          isNull(Attendance.checkOut),
+          lt(Attendance.date, today),
+          gte(Attendance.date, addDays(today, -60)),
+        ),
+      )
+      .orderBy(desc(Attendance.date)),
+    access.canDecide ? db().$count(AttendanceCorrection, and(eq(AttendanceCorrection.status, "pending"), decidableFilter(user, access))) : Promise.resolve(0),
   ]);
 
   const leaveMap = buildLeaveDayMap(leaves, settings, cal, from, to).get(user.id);
@@ -144,7 +203,7 @@ export default async function MyAttendancePage({ searchParams }: { searchParams:
       leaveLabel: l?.typeName,
       worked,
       moves: dayMoves.map((m) => ({
-        id: m._id.toString(),
+        id: m._id,
         no: m.movementNo,
         minutes: m.durationMinutes ?? 0,
         official: m.official,
@@ -282,7 +341,7 @@ export default async function MyAttendancePage({ searchParams }: { searchParams:
               ) : (
                 <ul className="flex flex-col">
                   {corrections.map((c) => (
-                    <li key={c._id.toString()} className="flex flex-col gap-1 border-t border-line-soft py-2.5 text-[13px] first:border-t-0 first:pt-0">
+                    <li key={c._id} className="flex flex-col gap-1 border-t border-line-soft py-2.5 text-[13px] first:border-t-0 first:pt-0">
                       <div className="flex items-start justify-between gap-2">
                         <strong className="font-semibold text-ink">
                           {fmtDate(c.date, "EEE d MMM")} ·{" "}
@@ -303,7 +362,7 @@ export default async function MyAttendancePage({ searchParams }: { searchParams:
                       )}
                       {c.status === "pending" && (
                         <div>
-                          <ActionButton action={cancelCorrection.bind(null, c._id.toString())} variant="ghost" size="sm" confirmTone="danger" confirmTitle="Cancel request" confirmLabel="Cancel request" confirm="Cancel this correction request?" successMessage="Request cancelled">
+                          <ActionButton action={cancelCorrection.bind(null, c._id)} variant="ghost" size="sm" confirmTone="danger" confirmTitle="Cancel request" confirmLabel="Cancel request" confirm="Cancel this correction request?" successMessage="Request cancelled">
                             Cancel request
                           </ActionButton>
                         </div>

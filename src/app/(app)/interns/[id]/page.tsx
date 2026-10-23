@@ -3,8 +3,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { forbidden, notFound } from "next/navigation";
 import { Award, CheckSquare, LayoutDashboard, Star } from "lucide-react";
+import { eq } from "drizzle-orm";
 import { can, requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { inr } from "@/lib/format";
 import { Department, Designation, User } from "@/lib/models";
 import { param, type SearchParams } from "@/lib/query";
@@ -18,6 +19,7 @@ import { Card } from "@/components/ui/card";
 import { StatusChip, Tag } from "@/components/ui/chip";
 import { PageBody } from "@/components/ui/page";
 import { LinkTabs } from "@/components/ui/tabs";
+import { personProfileColumns } from "../../staff/_lib/columns";
 import { internAccess } from "../_lib/access";
 import { CompletionTab } from "./_tabs/completion";
 import { EvaluationsTab } from "./_tabs/evaluations";
@@ -32,23 +34,24 @@ export default async function InternPage({ params, searchParams }: { params: Pro
   const { id } = await params;
   const sp = await searchParams;
   if (!isObjectId(id)) notFound();
-  await connectDB();
 
-  const target = await User.findById(id).select("-salary -salaryHistory -bank -googleSub").lean();
+  const [target] = await db().select(personProfileColumns).from(User).where(eq(User._id, id)).limit(1);
   if (!target || (target.personType !== "intern" && target.personType !== "trainee")) notFound();
   const access = internAccess(user, target);
   if (!access.canView) forbidden();
 
   const settings = await getSettings();
   const today = todayKey();
+  const personRow = (userId: string) =>
+    db().select({ _id: User._id, name: User.name, photo: User.photo, employeeId: User.employeeId }).from(User).where(eq(User._id, userId)).limit(1).then((r) => r[0]);
   const [department, designation, mentorDoc, managerDoc] = await Promise.all([
-    target.department ? Department.findById(target.department, { name: 1 }).lean() : null,
-    target.designation ? Designation.findById(target.designation, { name: 1 }).lean() : null,
-    target.internship?.mentor ? User.findById(target.internship.mentor, { name: 1, photo: 1, employeeId: 1 }).lean() : null,
-    target.reportingManager ? User.findById(target.reportingManager, { name: 1, photo: 1, employeeId: 1 }).lean() : null,
+    target.department ? db().select({ name: Department.name }).from(Department).where(eq(Department._id, target.department)).limit(1).then((r) => r[0]) : undefined,
+    target.designation ? db().select({ name: Designation.name }).from(Designation).where(eq(Designation._id, target.designation)).limit(1).then((r) => r[0]) : undefined,
+    target.internship?.mentor ? personRow(target.internship.mentor) : undefined,
+    target.reportingManager ? personRow(target.reportingManager) : undefined,
   ]);
-  const toRef = (u: { _id: { toString(): string }; name: string; photo?: string; employeeId: string } | null): PersonRef | undefined =>
-    u ? { id: u._id.toString(), name: u.name, photo: u.photo, sub: u.employeeId } : undefined;
+  const toRef = (u: { _id: string; name: string; photo: string | null; employeeId: string } | undefined): PersonRef | undefined =>
+    u ? { id: u._id, name: u.name, photo: u.photo ?? undefined, sub: u.employeeId } : undefined;
   const mentor = toRef(mentorDoc);
   const manager = toRef(managerDoc);
 

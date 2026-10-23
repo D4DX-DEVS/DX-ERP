@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import { forbidden } from "next/navigation";
 import { GraduationCap, Plus } from "lucide-react";
+import { and, asc, count, eq, gte, isNotNull, lte, sql } from "drizzle-orm";
 import { can, canAny, requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
-import { Types } from "mongoose";
-import { Department, Review, User, type Internship } from "@/lib/models";
+import { db } from "@/lib/db";
+import { Department, Review, User, type Id, type Internship } from "@/lib/models";
 import { namesFor } from "@/lib/people";
-import { idParam, PAGE_SIZE, pageParam, param, searchRegex, type SearchParams } from "@/lib/query";
+import { idParam, PAGE_SIZE, pageParam, param, type SearchParams } from "@/lib/query";
+import { inList, jsonPath, searchAny } from "@/lib/sql";
 import { STATUS, statusTone } from "@/lib/status";
 import { addDays, fmtDate, todayKey } from "@/lib/time";
 import { PersonCell } from "@/components/ui/avatar";
@@ -24,83 +25,97 @@ const INTERN_STATUSES = Object.keys(STATUS.internship);
 
 /** Row shape of the list query — the internship projection deliberately excludes stipend data. */
 interface InternRow {
-  _id: Types.ObjectId;
+  _id: Id;
   name: string;
-  photo?: string;
+  photo: string | null;
   employeeId: string;
   personType: string;
-  department?: Types.ObjectId;
-  designation?: Types.ObjectId;
+  department: Id | null;
+  designation: Id | null;
   internship?: Pick<Internship, "assignedRole" | "startDate" | "endDate" | "mentor" | "objectives" | "status" | "certificateStatus">;
 }
+
+/** The internship's status inside the JSON column (the path is inlined so select and group-by use the same expression). */
+const internshipStatus = sql<string | null>`json_extract(${User.internship}, '$.status')`;
 
 export default async function InternsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
   const sp = await searchParams;
-  await connectDB();
 
   // Mentors see only their own mentees; reviewers, managers and staff viewers see everyone.
   const seeAll = canAny(user, ["staff.view", "interns.manage", "interns.review"]);
-  if (!seeAll && (await User.countDocuments({ "internship.mentor": user._id })) === 0) forbidden();
-  const scope: Record<string, unknown> = { personType: { $in: ["intern", "trainee"] } };
-  if (!seeAll) scope["internship.mentor"] = user._id;
+  const mentorOf = jsonPath<string | null>(User.internship, "mentor");
+  if (!seeAll && (await db().$count(User, eq(mentorOf, user._id))) === 0) forbidden();
+  const scope = and(inList(User.personType, ["intern", "trainee"]), seeAll ? undefined : eq(mentorOf, user._id));
 
   const today = todayKey();
   const page = pageParam(sp);
-  const filter: Record<string, unknown> = { ...scope };
   const type = param(sp, "type");
-  if (type === "intern" || type === "trainee") filter.personType = type;
   const status = param(sp, "status");
-  if (INTERN_STATUSES.includes(status)) filter["internship.status"] = status;
   const mentorFilter = idParam(sp, "mentor");
-  if (mentorFilter && seeAll) filter["internship.mentor"] = new Types.ObjectId(mentorFilter);
-  const q = searchRegex(param(sp, "q"));
-  if (q) filter.$or = [{ name: q }, { employeeId: q }, { email: q }];
-
-  const typeFilterless = { ...filter, personType: scope.personType };
-  const [rows, total, typeCounts, statusCounts, runningIds, mentorIds, departments] = await Promise.all([
-    User.find(filter, {
-      name: 1,
-      photo: 1,
-      employeeId: 1,
-      personType: 1,
-      department: 1,
-      designation: 1,
-      "internship.assignedRole": 1,
-      "internship.startDate": 1,
-      "internship.endDate": 1,
-      "internship.mentor": 1,
-      "internship.objectives": 1,
-      "internship.status": 1,
-      "internship.certificateStatus": 1,
-    })
-      .sort({ name: 1 })
-      .skip((page - 1) * PAGE_SIZE)
+  // Everything except the person-type chip, which is also what the per-type counts use.
+  const typeFilterless = and(
+    scope,
+    INTERN_STATUSES.includes(status) ? eq(internshipStatus, status) : undefined,
+    mentorFilter && seeAll ? eq(mentorOf, mentorFilter) : undefined,
+    searchAny(param(sp, "q"), User.name, User.employeeId, User.email),
+  );
+  const filter = and(typeFilterless, type === "intern" || type === "trainee" ? eq(User.personType, type) : undefined);
+  const [pageRows, total, typeCounts, statusCounts, runningIds, mentorRows, departments] = await Promise.all([
+    db()
+      .select({
+        _id: User._id,
+        name: User.name,
+        photo: User.photo,
+        employeeId: User.employeeId,
+        personType: User.personType,
+        department: User.department,
+        designation: User.designation,
+        internship: User.internship,
+      })
+      .from(User)
+      .where(filter)
+      .orderBy(asc(User.name))
       .limit(PAGE_SIZE)
-      .lean<InternRow[]>(),
-    User.countDocuments(filter),
-    User.aggregate<{ _id: string; n: number }>([{ $match: typeFilterless }, { $group: { _id: "$personType", n: { $sum: 1 } } }]),
-    User.aggregate<{ _id: string; n: number }>([{ $match: scope }, { $group: { _id: "$internship.status", n: { $sum: 1 } } }]),
-    User.find({ ...scope, "internship.status": { $in: ["active", "extended"] }, "internship.startDate": { $lte: addDays(today, -30) } }, { _id: 1 }).lean(),
-    User.distinct("internship.mentor", scope),
-    Department.find({}, { name: 1 }).lean(),
+      .offset((page - 1) * PAGE_SIZE),
+    db().$count(User, filter),
+    db().select({ personType: User.personType, n: count() }).from(User).where(typeFilterless).groupBy(User.personType),
+    db().select({ status: internshipStatus, n: count() }).from(User).where(scope).groupBy(internshipStatus),
+    db()
+      .select({ _id: User._id })
+      .from(User)
+      .where(and(scope, inList(internshipStatus, ["active", "extended"]), lte(jsonPath(User.internship, "startDate"), addDays(today, -30)))),
+    db().selectDistinct({ mentor: mentorOf }).from(User).where(and(scope, isNotNull(mentorOf))),
+    db().select({ _id: Department._id, name: Department.name }).from(Department),
   ]);
+  const mentorIds = mentorRows.flatMap((m) => (m.mentor ? [m.mentor] : []));
+  // The stipend data in the internship column is dropped here: only what the list renders is kept.
+  const rows: InternRow[] = pageRows.map(({ internship: i, ...r }) => ({
+    ...r,
+    internship: i
+      ? { assignedRole: i.assignedRole, startDate: i.startDate, endDate: i.endDate, mentor: i.mentor, objectives: i.objectives, status: i.status, certificateStatus: i.certificateStatus }
+      : undefined,
+  }));
 
   const ids = rows.map((r) => r._id);
   const [reviewCounts, mentors, certificatesPending, recentlyReviewed] = await Promise.all([
-    Review.aggregate<{ _id: unknown; n: number }>([
-      { $match: { user: { $in: ids }, ...(canAny(user, ["interns.manage", "interns.review"]) ? {} : { status: "shared" }) } },
-      { $group: { _id: "$user", n: { $sum: 1 } } },
-    ]),
+    db()
+      .select({ user: Review.user, n: count() })
+      .from(Review)
+      .where(and(inList(Review.user, ids), canAny(user, ["interns.manage", "interns.review"]) ? undefined : eq(Review.status, "shared")))
+      .groupBy(Review.user),
     namesFor([...rows.map((r) => r.internship?.mentor), ...mentorIds]),
-    User.countDocuments({ ...scope, "internship.certificateStatus": { $in: ["requested", "approved"] } }),
-    Review.distinct("user", { user: { $in: runningIds.map((r) => r._id) }, status: "shared", date: { $gte: addDays(today, -30) } }),
+    db().$count(User, and(scope, inList(jsonPath(User.internship, "certificateStatus"), ["requested", "approved"]))),
+    db()
+      .selectDistinct({ user: Review.user })
+      .from(Review)
+      .where(and(inList(Review.user, runningIds.map((r) => r._id)), eq(Review.status, "shared"), gte(Review.date, addDays(today, -30)))),
   ]);
 
-  const reviewsBy = new Map(reviewCounts.map((r) => [String(r._id), r.n]));
-  const deptName = new Map(departments.map((d) => [d._id.toString(), d.name]));
-  const byType = new Map(typeCounts.map((c) => [c._id, c.n]));
-  const byStatus = new Map(statusCounts.map((c) => [c._id, c.n]));
+  const reviewsBy = new Map(reviewCounts.map((r) => [r.user, r.n]));
+  const deptName = new Map(departments.map((d) => [d._id, d.name]));
+  const byType = new Map(typeCounts.map((c) => [c.personType as string, c.n]));
+  const byStatus = new Map(statusCounts.map((c) => [c.status, c.n]));
   const active = (byStatus.get("active") ?? 0) + (byStatus.get("extended") ?? 0);
   const dueForReview = runningIds.length - recentlyReviewed.length;
   const hasFilters = Object.entries(sp).some(([k, v]) => k !== "page" && v);
@@ -165,11 +180,11 @@ export default async function InternsPage({ searchParams }: { searchParams: Prom
             )}
             {rows.map((r) => {
               const i = r.internship;
-              const id = r._id.toString();
+              const id = r._id;
               const progress = internshipProgress(i?.startDate, i?.endDate, today);
               const objectives = i?.objectives ?? [];
               const achieved = objectives.filter((o) => o.status === "achieved").length;
-              const mentorName = i?.mentor ? mentors.get(i.mentor.toString()) : undefined;
+              const mentorName = i?.mentor ? mentors.get(i.mentor) : undefined;
               return (
                 <Tr key={id}>
                   <Td>
@@ -180,7 +195,7 @@ export default async function InternsPage({ searchParams }: { searchParams: Prom
                       <span className="text-ink">{i?.assignedRole ?? "—"}</span>
                       <Tag tone={statusTone("personType", r.personType)}>{r.personType === "intern" ? "Intern" : "Trainee"}</Tag>
                     </div>
-                    {r.department && <div className="text-xs text-muted">{deptName.get(r.department.toString())}</div>}
+                    {r.department && <div className="text-xs text-muted">{deptName.get(r.department)}</div>}
                   </Td>
                   <Td className={mentorName ? "text-ink-2" : "font-semibold text-danger"}>{mentorName ?? "Not assigned"}</Td>
                   <Td>

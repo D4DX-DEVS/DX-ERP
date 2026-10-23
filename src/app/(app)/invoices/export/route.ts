@@ -1,6 +1,8 @@
+import { desc } from "drizzle-orm";
 import { can, getCurrentUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Invoice, Project } from "@/lib/models";
+import { inList } from "@/lib/sql";
 import { audit } from "@/lib/audit";
 import { exportResponse, isExportFormat } from "@/lib/export";
 import { todayKey } from "@/lib/time";
@@ -19,12 +21,11 @@ export async function GET(request: Request) {
   const format = url.searchParams.get("format");
   if (!isExportFormat(format)) return new Response("Unsupported format", { status: 400 });
   const type = url.searchParams.get("type") === "receivables" ? "receivables" : "invoices";
-  await connectDB();
   const today = todayKey();
   const hidden = await hiddenClientIds(user);
 
   if (type === "receivables") {
-    const receivables = await loadReceivables(today, notHiddenClient(hidden));
+    const receivables = await loadReceivables(today, notHiddenClient(hidden, Invoice.client));
     const names = await clientNames(receivables.map((r) => r.client));
     const byClient = new Map<string, { client: string; count: number; total: number; buckets: Record<AgingKey, number> }>();
     for (const r of receivables) {
@@ -52,12 +53,34 @@ export async function GET(request: Request) {
   }
 
   const filter = invoiceFilter(Object.fromEntries(url.searchParams.entries()), today, hidden);
-  const invoices = await Invoice.find(filter).sort({ createdAt: -1 }).limit(5000).lean();
+  const invoices = await db()
+    .select({
+      invoiceNo: Invoice.invoiceNo,
+      draftNo: Invoice.draftNo,
+      status: Invoice.status,
+      client: Invoice.client,
+      project: Invoice.project,
+      issueDate: Invoice.issueDate,
+      dueDate: Invoice.dueDate,
+      subtotal: Invoice.subtotal,
+      discount: Invoice.discount,
+      taxTotal: Invoice.taxTotal,
+      total: Invoice.total,
+      amountPaid: Invoice.amountPaid,
+      balance: Invoice.balance,
+    })
+    .from(Invoice)
+    .where(filter)
+    .orderBy(desc(Invoice.createdAt))
+    .limit(5000);
   const [names, projects] = await Promise.all([
-    clientNames(invoices.map((i) => i.client.toString())),
-    Project.find({ _id: { $in: invoices.flatMap((i) => (i.project ? [i.project] : [])) } }, { projectNo: 1 }).lean(),
+    clientNames(invoices.map((i) => i.client)),
+    db()
+      .select({ _id: Project._id, projectNo: Project.projectNo })
+      .from(Project)
+      .where(inList(Project._id, [...new Set(invoices.flatMap((i) => (i.project ? [i.project] : [])))])),
   ]);
-  const projectNo = new Map(projects.map((p) => [p._id.toString(), p.projectNo]));
+  const projectNo = new Map(projects.map((p) => [p._id, p.projectNo]));
   await audit(user, { action: "export", entity: "invoice", summary: `Exported invoices (${format.toUpperCase()}, ${invoices.length} records)` });
   return exportResponse({
     title: "Invoices",
@@ -68,8 +91,8 @@ export async function GET(request: Request) {
       { header: "Invoice no.", value: (i) => i.invoiceNo ?? "", width: 20 },
       { header: "Draft no.", value: (i) => i.draftNo, width: 14 },
       { header: "Status", value: (i) => statusLabel("invoice", effectiveStatus(i, today)) },
-      { header: "Client", value: (i) => names.get(i.client.toString())?.name ?? "", width: 30 },
-      { header: "Project", value: (i) => (i.project ? projectNo.get(i.project.toString()) ?? "" : "") },
+      { header: "Client", value: (i) => names.get(i.client)?.name ?? "", width: 30 },
+      { header: "Project", value: (i) => (i.project ? projectNo.get(i.project) ?? "" : "") },
       { header: "Issue date", value: (i) => (i.status === "draft" ? "" : i.issueDate) },
       { header: "Due date", value: (i) => (i.status === "draft" ? "" : i.dueDate) },
       { header: "Subtotal", value: (i) => i.subtotal, type: "money" },

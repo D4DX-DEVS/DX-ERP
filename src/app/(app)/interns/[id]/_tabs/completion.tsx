@@ -16,7 +16,7 @@ const CERT_STEPS = [
 
 export function CompletionTab({ target, access }: InternTabProps) {
   const internship = target.internship;
-  const id = target._id.toString();
+  const id = target._id;
   if (!internship) {
     return (
       <Card>

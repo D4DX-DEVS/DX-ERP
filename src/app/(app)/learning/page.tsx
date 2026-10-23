@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import { BookOpen, ExternalLink, FileText, GraduationCap, Link2, ListChecks, PlayCircle } from "lucide-react";
 import type { ReactNode } from "react";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { can, isInternLike, requireUser, type CurrentUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
-import { Department, LearningResource, User, type ILearningResource } from "@/lib/models";
+import { db } from "@/lib/db";
+import { Department, LearningResource, User, type ILearningResource, type Internship } from "@/lib/models";
 import { EXITED_STATUSES, peopleOptions } from "@/lib/people";
 import { param, type SearchParams } from "@/lib/query";
+import { inList, jsonPath, notInList } from "@/lib/sql";
 import { fmtDate, todayKey } from "@/lib/time";
 import { ActionButton } from "@/components/ui/actions";
 import { PersonCell } from "@/components/ui/avatar";
@@ -37,12 +39,11 @@ const KIND_ICONS: Record<string, ReactNode> = {
 
 const AUDIENCE_LABELS: Record<string, string> = { all: "Everyone", employee: "Employees", trainee: "Trainees", intern: "Interns" };
 
-type Resource = ILearningResource & { _id: import("mongoose").Types.ObjectId };
+type Resource = ILearningResource;
 
 export default async function LearningPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
   const sp = await searchParams;
-  await connectDB();
   const manager = can(user, "interns.manage");
   const learner = isInternLike(user);
 
@@ -69,8 +70,11 @@ export default async function LearningPage({ searchParams }: { searchParams: Pro
 }
 
 async function ManagerActions() {
-  const [departments, people] = await Promise.all([Department.find({ active: true }, { name: 1 }).sort({ name: 1 }).lean(), peopleOptions()]);
-  return <ResourceFormButton departments={departments.map((d) => ({ id: d._id.toString(), name: d.name }))} people={people} />;
+  const [departments, people] = await Promise.all([
+    db().select({ _id: Department._id, name: Department.name }).from(Department).where(eq(Department.active, true)).orderBy(asc(Department.name)),
+    peopleOptions(),
+  ]);
+  return <ResourceFormButton departments={departments.map((d) => ({ id: d._id, name: d.name }))} people={people} />;
 }
 
 /* ---------------------------------------------------------------- */
@@ -78,28 +82,34 @@ async function ManagerActions() {
 async function LibraryView({ user, manager }: { user: CurrentUser; manager: boolean }) {
   const today = todayKey();
   const me = { id: user.id, personType: user.personType, department: user.departmentId };
-  const resources = (
-    manager
-      ? await LearningResource.find({}).sort({ active: -1, createdAt: -1 }).limit(200).lean()
-      : await LearningResource.find(visibleResourceFilter({ id: user._id, personType: user.personType, department: user.departmentId })).sort({ dueDate: 1, createdAt: -1 }).limit(200).lean()
-  ) as Resource[];
+  const resources: Resource[] = manager
+    ? await db().select().from(LearningResource).orderBy(desc(LearningResource.active), desc(LearningResource.createdAt)).limit(200)
+    : await db()
+        .select()
+        .from(LearningResource)
+        .where(visibleResourceFilter({ id: user._id, personType: user.personType, department: user.departmentId }))
+        .orderBy(asc(LearningResource.dueDate), desc(LearningResource.createdAt))
+        .limit(200);
 
   const [departments, people, learners] = manager
     ? await Promise.all([
-        Department.find({}, { name: 1, active: 1 }).sort({ name: 1 }).lean(),
+        db().select({ _id: Department._id, name: Department.name, active: Department.active }).from(Department).orderBy(asc(Department.name)),
         peopleOptions(),
-        User.find({ personType: { $in: ["employee", "trainee", "intern"] }, status: { $nin: EXITED_STATUSES } }, { personType: 1, department: 1 }).lean(),
+        db()
+          .select({ _id: User._id, personType: User.personType, department: User.department })
+          .from(User)
+          .where(and(inList(User.personType, ["employee", "trainee", "intern"]), notInList(User.status, EXITED_STATUSES))),
       ])
     : [[], [], []];
-  const deptName = new Map(departments.map((d) => [d._id.toString(), d.name]));
+  const deptName = new Map(departments.map((d) => [d._id, d.name]));
 
   const mineApplies = (r: Resource) => resourceAppliesTo(r, me);
-  const mineDone = (r: Resource) => r.completions.find((c) => c.user.toString() === user.id);
+  const mineDone = (r: Resource) => r.completions.find((c) => c.user === user.id);
   const mine = resources.filter((r) => r.active && mineApplies(r));
   const done = mine.filter((r) => mineDone(r)).length;
   const overdue = mine.filter((r) => !mineDone(r) && r.dueDate && r.dueDate < today).length;
 
-  const departmentOptions = departments.filter((d) => d.active).map((d) => ({ id: d._id.toString(), name: d.name }));
+  const departmentOptions = departments.filter((d) => d.active).map((d) => ({ id: d._id, name: d.name }));
 
   return (
     <div className="flex flex-col gap-4">
@@ -130,7 +140,7 @@ async function LibraryView({ user, manager }: { user: CurrentUser; manager: bool
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {resources.map((r) => {
-            const id = r._id.toString();
+            const id = r._id;
             const completion = mineDone(r);
             const applies = r.active && mineApplies(r);
             const late = applies && !completion && r.dueDate && r.dueDate < today;
@@ -139,26 +149,26 @@ async function LibraryView({ user, manager }: { user: CurrentUser; manager: bool
             if (manager) {
               const ids = new Set<string>();
               for (const l of learners) {
-                if (resourceAppliesTo(r, { id: l._id.toString(), personType: l.personType, department: l.department?.toString() })) {
-                  ids.add(l._id.toString());
+                if (resourceAppliesTo(r, { id: l._id, personType: l.personType, department: l.department ?? undefined })) {
+                  ids.add(l._id);
                 }
               }
               applicable = ids.size;
-              completed = r.completions.filter((c) => ids.has(c.user.toString())).length;
+              completed = r.completions.filter((c) => ids.has(c.user)).length;
             }
             const initial: ResourceFormValues | undefined = manager
               ? {
                   id,
                   title: r.title,
-                  description: r.description,
+                  description: r.description ?? undefined,
                   kind: r.kind,
-                  url: r.url,
-                  attachments: r.attachments.map((a) => ({ id: a.file.toString(), name: a.name, size: a.size ?? 0, mime: a.mime ?? "" })),
+                  url: r.url ?? undefined,
+                  attachments: r.attachments.map((a) => ({ id: a.file, name: a.name, size: a.size ?? 0, mime: a.mime ?? "" })),
                   audience: r.audience,
-                  department: r.department?.toString(),
-                  assignedTo: r.assignedTo.map((a) => a.toString()),
-                  dueDate: r.dueDate,
-                  estimatedHours: r.estimatedHours,
+                  department: r.department ?? undefined,
+                  assignedTo: r.assignedTo,
+                  dueDate: r.dueDate ?? undefined,
+                  estimatedHours: r.estimatedHours ?? undefined,
                 }
               : undefined;
             return (
@@ -182,7 +192,7 @@ async function LibraryView({ user, manager }: { user: CurrentUser; manager: bool
                       <ExternalLink className="size-3.5 shrink-0" /> Open resource
                     </a>
                   )}
-                  {r.attachments.length > 0 && <AttachmentList files={r.attachments.map((a) => ({ file: a.file.toString(), name: a.name, size: a.size }))} />}
+                  {r.attachments.length > 0 && <AttachmentList files={r.attachments.map((a) => ({ file: a.file, name: a.name, size: a.size }))} />}
                   {manager && (
                     <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted">
                       {r.audience.map((a) => (
@@ -190,7 +200,7 @@ async function LibraryView({ user, manager }: { user: CurrentUser; manager: bool
                           {AUDIENCE_LABELS[a] ?? a}
                         </Tag>
                       ))}
-                      {r.department && <Tag tone="gray">{deptName.get(r.department.toString()) ?? "Department"}</Tag>}
+                      {r.department && <Tag tone="gray">{deptName.get(r.department) ?? "Department"}</Tag>}
                       {r.assignedTo.length > 0 && <span>{r.assignedTo.length} assigned</span>}
                     </div>
                   )}
@@ -235,11 +245,19 @@ async function LibraryView({ user, manager }: { user: CurrentUser; manager: bool
 
 async function MatrixView() {
   const [resources, people] = await Promise.all([
-    LearningResource.find({ active: true }).sort({ createdAt: -1 }).limit(12).lean() as Promise<Resource[]>,
-    User.find({ personType: { $in: ["trainee", "intern"] }, status: { $nin: EXITED_STATUSES }, "internship.status": { $in: ["registered", "active", "extended"] } }, { name: 1, photo: 1, employeeId: 1, personType: 1, department: 1 })
-      .sort({ name: 1 })
-      .limit(150)
-      .lean(),
+    db().select().from(LearningResource).where(eq(LearningResource.active, true)).orderBy(desc(LearningResource.createdAt)).limit(12),
+    db()
+      .select({ _id: User._id, name: User.name, photo: User.photo, employeeId: User.employeeId, personType: User.personType, department: User.department })
+      .from(User)
+      .where(
+        and(
+          inList(User.personType, ["trainee", "intern"]),
+          notInList(User.status, EXITED_STATUSES),
+          inList(jsonPath(User.internship, "status"), ["registered", "active", "extended"]),
+        ),
+      )
+      .orderBy(asc(User.name))
+      .limit(150),
   ]);
   const today = todayKey();
 
@@ -253,7 +271,7 @@ async function MatrixView() {
           <THead>
             <Th>Intern / trainee</Th>
             {resources.map((r) => (
-              <Th key={r._id.toString()} align="center" className="max-w-28 !whitespace-normal" title={r.title}>
+              <Th key={r._id} align="center" className="max-w-28 !whitespace-normal" title={r.title}>
                 <span className="line-clamp-2">{r.title}</span>
               </Th>
             ))}
@@ -261,24 +279,24 @@ async function MatrixView() {
           </THead>
           <tbody>
             {people.map((p) => {
-              const pid = p._id.toString();
+              const pid = p._id;
               let applicable = 0;
               let completed = 0;
               const cells = resources.map((r) => {
-                if (!resourceAppliesTo(r, { id: pid, personType: p.personType, department: p.department?.toString() })) return <Td key={r._id.toString()} align="center" className="text-subtle">–</Td>;
+                if (!resourceAppliesTo(r, { id: pid, personType: p.personType, department: p.department ?? undefined })) return <Td key={r._id} align="center" className="text-subtle">–</Td>;
                 applicable++;
-                const c = r.completions.find((x) => x.user.toString() === pid);
+                const c = r.completions.find((x) => x.user === pid);
                 if (c) {
                   completed++;
                   return (
-                    <Td key={r._id.toString()} align="center" className="font-semibold text-success" title={`Completed ${fmtDate(c.at)}`}>
+                    <Td key={r._id} align="center" className="font-semibold text-success" title={`Completed ${fmtDate(c.at)}`}>
                       ✓
                     </Td>
                   );
                 }
                 const late = r.dueDate && r.dueDate < today;
                 return (
-                  <Td key={r._id.toString()} align="center" className={late ? "font-semibold text-danger" : "text-muted"} title={late ? "Overdue" : "Pending"}>
+                  <Td key={r._id} align="center" className={late ? "font-semibold text-danger" : "text-muted"} title={late ? "Overdue" : "Pending"}>
                     {late ? "!" : "·"}
                   </Td>
                 );
@@ -286,7 +304,7 @@ async function MatrixView() {
               return (
                 <Tr key={pid}>
                   <Td>
-                    <PersonCell name={p.name} sub={p.employeeId} photo={p.photo} href={`/interns/${pid}`} />
+                    <PersonCell name={p.name} sub={p.employeeId} photo={p.photo ?? undefined} href={`/interns/${pid}`} />
                   </Td>
                   {cells}
                   <Td align="right" className="tabular">
@@ -307,7 +325,12 @@ async function MatrixView() {
 
 async function InternshipView({ user }: { user: CurrentUser }) {
   const today = todayKey();
-  const me = await User.findById(user._id).select("-salary -salaryHistory -bank -googleSub -internship.stipend -internship.stipendHistory").lean();
+  // The stipend is left out of the read (never needed on this page).
+  const [me] = await db()
+    .select({ internship: sql<Internship | null>`json_remove(${User.internship}, '$.stipend', '$.stipendHistory')`.mapWith(User.internship) })
+    .from(User)
+    .where(eq(User._id, user._id))
+    .limit(1);
   const internship = me?.internship;
   if (!me || !internship) {
     return (
@@ -316,12 +339,14 @@ async function InternshipView({ user }: { user: CurrentUser }) {
       </Card>
     );
   }
-  const [mentor, reviews] = await Promise.all([
-    internship.mentor ? User.findById(internship.mentor, { name: 1, photo: 1, employeeId: 1, email: 1, designation: 1 }).lean() : null,
+  const [[mentor], reviews] = await Promise.all([
+    internship.mentor
+      ? db().select({ name: User.name, photo: User.photo, employeeId: User.employeeId, email: User.email }).from(User).where(eq(User._id, internship.mentor)).limit(1)
+      : Promise.resolve([]),
     loadReviews(user._id, true),
   ]);
   const progress = internshipProgress(internship.startDate, internship.endDate, today);
-  const objectives = internship.objectives.map((o) => ({ id: o._id?.toString() ?? o.text, text: o.text, status: o.status }));
+  const objectives = internship.objectives.map((o) => ({ id: o._id ?? o.text, text: o.text, status: o.status }));
   const achieved = objectives.filter((o) => o.status === "achieved").length;
   const pending = reviews.filter((r) => !r.acknowledgedAt).length;
 
@@ -362,7 +387,7 @@ async function InternshipView({ user }: { user: CurrentUser }) {
           <CardBody className="flex flex-col gap-3">
             {mentor ? (
               <>
-                <PersonCell name={mentor.name} sub={mentor.employeeId} photo={mentor.photo} />
+                <PersonCell name={mentor.name} sub={mentor.employeeId} photo={mentor.photo ?? undefined} />
                 <a href={`mailto:${mentor.email}`} className="inline-flex h-10 items-center justify-center rounded-[10px] border border-line-strong text-[13px] font-semibold text-ink hover:bg-field">
                   Message mentor
                 </a>

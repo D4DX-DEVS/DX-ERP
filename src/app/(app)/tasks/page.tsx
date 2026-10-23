@@ -1,10 +1,12 @@
 import { Plus } from "lucide-react";
+import { and, desc, eq, gte, lt, lte } from "drizzle-orm";
 import { can, requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
-import { PRIORITIES, Project, Task, Types } from "@/lib/models";
+import { db } from "@/lib/db";
+import { PRIORITIES, Project, Task } from "@/lib/models";
 import { peopleOptions } from "@/lib/people";
-import { idParam, pageParam, PAGE_SIZE, param, searchRegex, withParams, type SearchParams } from "@/lib/query";
+import { idParam, pageParam, PAGE_SIZE, param, withParams, type SearchParams } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
+import { jsonHas, notInList, searchAny } from "@/lib/sql";
 import { addDays, todayKey, weekStart } from "@/lib/time";
 import { keysInCategories, projectFilter, taskFilter, TASK_CLOSED_CATEGORIES, type Filter } from "@/lib/work-access";
 import { Card } from "@/components/ui/card";
@@ -12,9 +14,9 @@ import { ButtonLink } from "@/components/ui/button";
 import { ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter } from "@/components/ui/filters";
 import { PageBody, PageHeader } from "@/components/ui/page";
 import { Segmented } from "@/components/ui/tabs";
-import { queryTasks } from "./_components/task-query";
+import { queryTaskBoard, queryTasks } from "./_components/task-query";
 import { toTaskRows } from "./_components/task-rows";
-import { TaskBoard, TaskTable, type BoardColumn } from "./_components/task-ui";
+import { TaskBoard, TaskTable } from "./_components/task-ui";
 import { PRIORITY_OPTIONS } from "./_components/options";
 
 export const metadata = { title: "Tasks" };
@@ -24,7 +26,6 @@ const BOARD_COLUMN_LIMIT = 30;
 export default async function TasksPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
   const sp = await searchParams;
-  await connectDB();
   const settings = await getSettings();
   const statuses = settings.taskStatuses;
   const closedKeys = keysInCategories(statuses, TASK_CLOSED_CATEGORIES);
@@ -34,39 +35,44 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const view = param(sp, "view") === "board" ? "board" : "list";
   const visible = await taskFilter(user);
 
-  const and: Filter[] = [visible];
-  if (scope === "mine") and.push({ assignees: user._id });
+  const conds: Filter[] = [visible];
+  if (scope === "mine") conds.push(jsonHas(Task.assignees, user._id));
   const projectId = idParam(sp, "project");
-  if (projectId) and.push({ project: new Types.ObjectId(projectId) });
+  if (projectId) conds.push(eq(Task.project, projectId));
   const assigneeId = idParam(sp, "assignee");
-  if (assigneeId) and.push({ assignees: new Types.ObjectId(assigneeId) });
+  if (assigneeId) conds.push(jsonHas(Task.assignees, assigneeId));
   const priority = param(sp, "priority");
-  if ((PRIORITIES as string[]).includes(priority)) and.push({ priority });
+  if ((PRIORITIES as string[]).includes(priority)) conds.push(eq(Task.priority, priority as (typeof PRIORITIES)[number]));
   const status = param(sp, "status");
-  if (statuses.some((s) => s.key === status)) and.push({ status });
+  if (statuses.some((s) => s.key === status)) conds.push(eq(Task.status, status));
   const due = param(sp, "due");
-  if (due === "overdue") and.push({ dueDate: { $lt: today }, status: { $nin: closedKeys } });
+  if (due === "overdue") conds.push(lt(Task.dueDate, today), notInList(Task.status, closedKeys));
   if (due === "week") {
     const monday = weekStart(today);
-    and.push({ dueDate: { $gte: monday, $lte: addDays(monday, 6) }, status: { $nin: closedKeys } });
+    conds.push(gte(Task.dueDate, monday), lte(Task.dueDate, addDays(monday, 6)), notInList(Task.status, closedKeys));
   }
   const q = param(sp, "q");
-  const rx = searchRegex(q);
-  if (rx) and.push({ $or: [{ title: rx }, { taskNo: rx }] });
-  const filter: Filter = { $and: and };
+  conds.push(searchAny(q, Task.title, Task.taskNo));
+  const filter: Filter = and(...conds);
 
   const page = pageParam(sp);
-  const sortedPage = (match: Filter, skip: number, limit: number) => queryTasks(match, closedKeys, skip, limit);
 
   const [projects, people, canCreateAny] = await Promise.all([
-    Project.find(projectFilter(user), { projectNo: 1, title: 1 }).sort({ projectNo: -1 }).limit(300).lean(),
+    db().select({ _id: Project._id, projectNo: Project.projectNo, title: Project.title }).from(Project).where(projectFilter(user)).orderBy(desc(Project.projectNo)).limit(300),
     peopleOptions(),
-    can(user, "tasks.manage") ? Promise.resolve(true) : Project.exists({ manager: user._id }).then(Boolean),
+    can(user, "tasks.manage")
+      ? Promise.resolve(true)
+      : db()
+          .select({ id: Project._id })
+          .from(Project)
+          .where(eq(Project.manager, user._id))
+          .limit(1)
+          .then((rows) => rows.length > 0),
   ]);
 
   let body;
   if (view === "list") {
-    const [tasks, total] = await Promise.all([sortedPage(filter, (page - 1) * PAGE_SIZE, PAGE_SIZE), Task.countDocuments(filter)]);
+    const [tasks, total] = await Promise.all([queryTasks(filter, closedKeys, (page - 1) * PAGE_SIZE, PAGE_SIZE), db().$count(Task, filter)]);
     const rows = await toTaskRows(user, tasks, settings);
     body = (
       <Card>
@@ -75,13 +81,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
       </Card>
     );
   } else {
-    const columns: BoardColumn[] = await Promise.all(
-      statuses.map(async (s) => {
-        const colFilter: Filter = { $and: [...and, { status: s.key }] };
-        const [tasks, total] = await Promise.all([sortedPage(colFilter, 0, BOARD_COLUMN_LIMIT), Task.countDocuments(colFilter)]);
-        return { status: s, rows: await toTaskRows(user, tasks, settings), total };
-      }),
-    );
+    const columns = await queryTaskBoard(user, settings, filter, closedKeys, BOARD_COLUMN_LIMIT);
     body = <TaskBoard columns={columns} statuses={statuses} />;
   }
 
@@ -116,7 +116,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
       </div>
       <FilterBar>
         <SearchInput placeholder="Search tasks" />
-        <SelectFilter param="project" allLabel="All projects" label="Project" options={projects.map((p) => ({ value: p._id.toString(), label: `${p.projectNo} · ${p.title}` }))} className="w-48" />
+        <SelectFilter param="project" allLabel="All projects" label="Project" options={projects.map((p) => ({ value: p._id, label: `${p.projectNo} · ${p.title}` }))} className="w-48" />
         <SelectFilter param="assignee" allLabel="Any assignee" label="Assignee" options={people.map((p) => ({ value: p.id, label: p.name }))} className="w-44" />
         <SelectFilter param="priority" allLabel="Any priority" label="Priority" options={PRIORITY_OPTIONS} />
         {view === "list" && <SelectFilter param="status" allLabel="Any status" label="Status" options={statuses.map((s) => ({ value: s.key, label: s.label }))} />}

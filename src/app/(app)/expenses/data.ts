@@ -1,7 +1,9 @@
 import "server-only";
-import { Types } from "mongoose";
+import { and, eq, gte, lte, ne, type SQL } from "drizzle-orm";
 import { can, isStaff, type CurrentUser } from "@/lib/auth/session";
-import { dateParam, idParam, param, searchRegex, type SearchParams } from "@/lib/query";
+import { Expense } from "@/lib/models";
+import { dateParam, idParam, param, type SearchParams } from "@/lib/query";
+import { searchAny } from "@/lib/sql";
 
 export type ExpenseView = "mine" | "all" | "approve" | "pay";
 
@@ -26,32 +28,36 @@ export function resolveView(user: CurrentUser, requested: string): ExpenseView |
 }
 
 /**
- * Mongo filters for an expense list. `filter` is what the list shows; `withoutStatus` ignores the status chip so the
+ * SQL conditions for an expense list. `filter` is what the list shows; `withoutStatus` ignores the status chip so the
  * chips can show counts for every status. Scoping to the viewer's own records / the queue is done here, on the server.
  */
-export function expenseFilters(user: CurrentUser, view: ExpenseView, sp: SearchParams): { filter: Record<string, unknown>; withoutStatus: Record<string, unknown> } {
-  const base: Record<string, unknown> =
-    view === "mine" ? { user: user._id } : view === "approve" ? { status: "submitted", user: { $ne: user._id } } : view === "pay" ? { status: "approved" } : {};
+export function expenseFilters(user: CurrentUser, view: ExpenseView, sp: SearchParams): { filter: SQL | undefined; withoutStatus: SQL | undefined } {
+  const base =
+    view === "mine"
+      ? eq(Expense.user, user._id)
+      : view === "approve"
+        ? and(eq(Expense.status, "submitted"), ne(Expense.user, user._id))
+        : view === "pay"
+          ? eq(Expense.status, "approved")
+          : undefined;
 
-  const conds: Record<string, unknown>[] = [];
   const category = param(sp, "category");
-  if (category) conds.push({ category });
   const project = idParam(sp, "project");
-  // Ids are real ObjectIds because these filters are also used in aggregations, which do not cast strings.
-  if (project) conds.push({ project: new Types.ObjectId(project) });
   const department = idParam(sp, "department");
-  if (department) conds.push({ department: new Types.ObjectId(department) });
   const person = idParam(sp, "person");
-  if (person && view !== "mine") conds.push({ user: new Types.ObjectId(person) });
   const from = dateParam(sp, "from");
-  if (from) conds.push({ date: { $gte: from } });
   const to = dateParam(sp, "to");
-  if (to) conds.push({ date: { $lte: to } });
-  const q = searchRegex(param(sp, "q"));
-  if (q) conds.push({ $or: [{ expenseNo: q }, { description: q }, { vendor: q }] });
-
-  const withoutStatus = { $and: [base, ...conds] };
+  const withoutStatus = and(
+    base,
+    category ? eq(Expense.category, category) : undefined,
+    project ? eq(Expense.project, project) : undefined,
+    department ? eq(Expense.department, department) : undefined,
+    person && view !== "mine" ? eq(Expense.user, person) : undefined,
+    from ? gte(Expense.date, from) : undefined,
+    to ? lte(Expense.date, to) : undefined,
+    searchAny(param(sp, "q"), Expense.expenseNo, Expense.description, Expense.vendor),
+  );
   const status = param(sp, "status");
   const useStatus = (view === "mine" || view === "all") && (EXPENSE_STATUSES as readonly string[]).includes(status);
-  return { withoutStatus, filter: useStatus ? { $and: [base, ...conds, { status }] } : withoutStatus };
+  return { withoutStatus, filter: useStatus ? and(withoutStatus, eq(Expense.status, status as (typeof EXPENSE_STATUSES)[number])) : withoutStatus };
 }

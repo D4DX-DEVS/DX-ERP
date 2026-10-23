@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { FileSignature, FileText, FolderKanban, Info, Lock, MessagesSquare, Paperclip, Pencil, Plus, Receipt, Target } from "lucide-react";
+import { and, desc, eq, ne, sql } from "drizzle-orm";
 import { can, requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Activity, Contract, Invoice, Lead, Project, Proposal } from "@/lib/models";
 import { namesFor, peopleOptions } from "@/lib/people";
 import { param, type SearchParams } from "@/lib/query";
+import { inList } from "@/lib/sql";
 import { getSettings } from "@/lib/settings";
 import { inr } from "@/lib/format";
 import { fmtDate } from "@/lib/time";
@@ -36,7 +38,6 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
   const sp = await searchParams;
   const user = await requirePagePermission("crm.view");
   const client = await pageClient(user, id);
-  await connectDB();
   const settings = await getSettings();
 
   const canManage = can(user, "crm.manage");
@@ -49,26 +50,31 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
   const tab: Tab = available.includes(requested) ? requested : "activity";
 
   const [leadCount, proposalCount, contractCount, projectCount, invoiceCount, openLeads, owner] = await Promise.all([
-    Lead.countDocuments({ client: client._id }),
-    canProposals ? Proposal.countDocuments({ client: client._id }) : 0,
-    canContracts ? Contract.countDocuments({ client: client._id }) : 0,
-    Project.countDocuments({ $and: [{ client: client._id }, projectFilter(user)] }),
-    canInvoices ? Invoice.countDocuments({ client: client._id, status: { $ne: "draft" } }) : 0,
-    Lead.find({ client: client._id, status: "open" }, { expectedValue: 1 }).lean(),
+    db().$count(Lead, eq(Lead.client, client._id)),
+    canProposals ? db().$count(Proposal, eq(Proposal.client, client._id)) : 0,
+    canContracts ? db().$count(Contract, eq(Contract.client, client._id)) : 0,
+    db().$count(Project, and(eq(Project.client, client._id), projectFilter(user))),
+    canInvoices ? db().$count(Invoice, and(eq(Invoice.client, client._id), ne(Invoice.status, "draft"))) : 0,
+    db().select({ expectedValue: Lead.expectedValue }).from(Lead).where(and(eq(Lead.client, client._id), eq(Lead.status, "open"))),
     client.owner ? userCards([client.owner]) : new Map(),
   ]);
-  const ownerName = client.owner ? owner.get(client.owner.toString())?.name : undefined;
+  const ownerName = client.owner ? owner.get(client.owner)?.name : undefined;
   const openDealValue = openLeads.reduce((s, l) => s + (l.expectedValue ?? 0), 0);
 
   let money: { billed: number; outstanding: number } | null = null;
   if (canInvoices) {
-    const rows = await Invoice.aggregate<{ _id: string; total: number; balance: number }>([
-      { $match: { client: client._id, status: { $in: ["issued", "partially_paid", "paid", "overdue"] } } },
-      { $group: { _id: "$status", total: { $sum: "$total" }, balance: { $sum: "$balance" } } },
-    ]);
+    const rows = await db()
+      .select({
+        status: Invoice.status,
+        total: sql<number>`coalesce(sum(${Invoice.total}), 0)`.mapWith(Number),
+        balance: sql<number>`coalesce(sum(${Invoice.balance}), 0)`.mapWith(Number),
+      })
+      .from(Invoice)
+      .where(and(eq(Invoice.client, client._id), inList(Invoice.status, ["issued", "partially_paid", "paid", "overdue"])))
+      .groupBy(Invoice.status);
     money = {
       billed: rows.reduce((s, r) => s + r.total, 0),
-      outstanding: rows.filter((r) => r._id !== "paid").reduce((s, r) => s + r.balance, 0),
+      outstanding: rows.filter((r) => r.status !== "paid").reduce((s, r) => s + r.balance, 0),
     };
   }
 
@@ -89,24 +95,49 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
   let content: React.ReactNode = null;
 
   if (tab === "activity") {
-    const [activities, people] = await Promise.all([Activity.find({ client: client._id }).sort({ at: -1 }).limit(300).lean(), canManage ? peopleOptions() : []]);
-    const leadIds = [...new Set(activities.map((a) => a.lead?.toString()).filter(Boolean))] as string[];
-    const [leads, names] = await Promise.all([leadIds.length ? Lead.find({ _id: { $in: leadIds } }, { leadNo: 1 }).lean() : [], namesFor(activities.map((a) => a.assignedTo))]);
-    const leadNo = new Map(leads.map((l) => [l._id.toString(), l.leadNo]));
+    const [activities, people] = await Promise.all([
+      db()
+        .select({
+          _id: Activity._id,
+          type: Activity.type,
+          subject: Activity.subject,
+          notes: Activity.notes,
+          at: Activity.at,
+          dueAt: Activity.dueAt,
+          done: Activity.done,
+          doneAt: Activity.doneAt,
+          outcome: Activity.outcome,
+          byName: Activity.byName,
+          by: Activity.by,
+          assignedTo: Activity.assignedTo,
+          lead: Activity.lead,
+        })
+        .from(Activity)
+        .where(eq(Activity.client, client._id))
+        .orderBy(desc(Activity.at))
+        .limit(300),
+      canManage ? peopleOptions() : [],
+    ]);
+    const leadIds = [...new Set(activities.map((a) => a.lead).filter((l): l is string => Boolean(l)))];
+    const [leads, names] = await Promise.all([
+      leadIds.length ? db().select({ _id: Lead._id, leadNo: Lead.leadNo }).from(Lead).where(inList(Lead._id, leadIds)) : [],
+      namesFor(activities.map((a) => a.assignedTo)),
+    ]);
+    const leadNo = new Map(leads.map((l) => [l._id, l.leadNo]));
     const feed: FeedItem[] = activities.map((a) => ({
-      id: a._id.toString(),
+      id: a._id,
       type: a.type,
       subject: a.subject,
-      notes: a.notes,
+      notes: a.notes ?? undefined,
       at: a.at,
-      dueAt: a.dueAt,
+      dueAt: a.dueAt ?? undefined,
       done: a.done,
-      doneAt: a.doneAt,
-      outcome: a.outcome,
-      byName: a.byName,
-      assigneeName: a.assignedTo ? names.get(a.assignedTo.toString()) : undefined,
-      lead: a.lead && leadNo.get(a.lead.toString()) ? { id: a.lead.toString(), leadNo: leadNo.get(a.lead.toString()) as string } : undefined,
-      canComplete: canManage || [a.assignedTo, a.by].some((p) => p?.toString() === user.id),
+      doneAt: a.doneAt ?? undefined,
+      outcome: a.outcome ?? undefined,
+      byName: a.byName ?? undefined,
+      assigneeName: a.assignedTo ? names.get(a.assignedTo) : undefined,
+      lead: a.lead && leadNo.get(a.lead) ? { id: a.lead, leadNo: leadNo.get(a.lead) as string } : undefined,
+      canComplete: canManage || [a.assignedTo, a.by].some((p) => p === user.id),
     }));
     content = (
       <Card>
@@ -120,7 +151,12 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
       </Card>
     );
   } else if (tab === "leads") {
-    const leads = await Lead.find({ client: client._id }).sort({ createdAt: -1 }).limit(100).lean();
+    const leads = await db()
+      .select({ _id: Lead._id, title: Lead.title, leadNo: Lead.leadNo, stage: Lead.stage, expectedValue: Lead.expectedValue, createdAt: Lead.createdAt })
+      .from(Lead)
+      .where(eq(Lead.client, client._id))
+      .orderBy(desc(Lead.createdAt))
+      .limit(100);
     content = (
       <Card>
         <TableWrap tablet={[1, 2, 3, 4]}>
@@ -133,7 +169,7 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
           <tbody>
             {leads.length === 0 && <EmptyRow colSpan={4}>No leads for this client yet.</EmptyRow>}
             {leads.map((l) => (
-              <Tr key={l._id.toString()}>
+              <Tr key={l._id}>
                 <Td>
                   <Link href={`/crm/leads/${l._id}`} className="font-semibold text-ink hover:text-brand-600">
                     {l.title}
@@ -154,7 +190,12 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
       </Card>
     );
   } else if (tab === "proposals") {
-    const rows = await Proposal.find({ client: client._id }).sort({ createdAt: -1 }).limit(100).lean();
+    const rows = await db()
+      .select({ _id: Proposal._id, title: Proposal.title, proposalNo: Proposal.proposalNo, version: Proposal.version, total: Proposal.total, validUntil: Proposal.validUntil, status: Proposal.status })
+      .from(Proposal)
+      .where(eq(Proposal.client, client._id))
+      .orderBy(desc(Proposal.createdAt))
+      .limit(100);
     content = (
       <Card>
         <TableWrap tablet={[1, 2, 3, 4]}>
@@ -167,7 +208,7 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
           <tbody>
             {rows.length === 0 && <EmptyRow colSpan={4}>No proposals for this client yet.</EmptyRow>}
             {rows.map((p) => (
-              <Tr key={p._id.toString()}>
+              <Tr key={p._id}>
                 <Td>
                   <Link href={`/proposals/${p._id}`} className="font-semibold text-ink hover:text-brand-600">
                     {p.title}
@@ -188,7 +229,23 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
       </Card>
     );
   } else if (tab === "contracts") {
-    const rows = await Contract.find({ client: client._id }).sort({ createdAt: -1 }).limit(100).lean();
+    const rows = await db()
+      .select({
+        _id: Contract._id,
+        title: Contract.title,
+        contractNo: Contract.contractNo,
+        type: Contract.type,
+        startDate: Contract.startDate,
+        endDate: Contract.endDate,
+        value: Contract.value,
+        status: Contract.status,
+        confidential: Contract.confidential,
+        createdBy: Contract.createdBy,
+      })
+      .from(Contract)
+      .where(eq(Contract.client, client._id))
+      .orderBy(desc(Contract.createdAt))
+      .limit(100);
     content = (
       <Card>
         <TableWrap tablet={[1, 2, 3, 4]}>
@@ -203,7 +260,7 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
             {rows.map((c) => {
               const secrets = canSeeContractSecrets(user, c);
               return (
-                <Tr key={c._id.toString()}>
+                <Tr key={c._id}>
                   <Td>
                     <Link href={`/contracts/${c._id}`} className="flex items-center gap-1.5 font-semibold text-ink hover:text-brand-600">
                       {c.title}
@@ -229,7 +286,12 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
       </Card>
     );
   } else if (tab === "projects") {
-    const rows = await Project.find({ $and: [{ client: client._id }, projectFilter(user)] }, { projectNo: 1, title: 1, status: 1, targetDate: 1, budget: 1 }).sort({ createdAt: -1 }).limit(100).lean();
+    const rows = await db()
+      .select({ _id: Project._id, projectNo: Project.projectNo, title: Project.title, status: Project.status, targetDate: Project.targetDate, budget: Project.budget })
+      .from(Project)
+      .where(and(eq(Project.client, client._id), projectFilter(user)))
+      .orderBy(desc(Project.createdAt))
+      .limit(100);
     const showBudget = can(user, "projects.financials");
     content = (
       <Card>
@@ -243,7 +305,7 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
           <tbody>
             {rows.length === 0 && <EmptyRow colSpan={showBudget ? 4 : 3}>No projects for this client yet.</EmptyRow>}
             {rows.map((p) => (
-              <Tr key={p._id.toString()}>
+              <Tr key={p._id}>
                 <Td>
                   <Link href={`/projects/${p._id}`} className="font-semibold text-ink hover:text-brand-600">
                     {p.title}
@@ -262,7 +324,21 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
       </Card>
     );
   } else if (tab === "invoices") {
-    const rows = await Invoice.find({ client: client._id, status: { $ne: "draft" } }).sort({ issueDate: -1 }).limit(50).lean();
+    const rows = await db()
+      .select({
+        _id: Invoice._id,
+        invoiceNo: Invoice.invoiceNo,
+        draftNo: Invoice.draftNo,
+        issueDate: Invoice.issueDate,
+        dueDate: Invoice.dueDate,
+        total: Invoice.total,
+        balance: Invoice.balance,
+        status: Invoice.status,
+      })
+      .from(Invoice)
+      .where(and(eq(Invoice.client, client._id), ne(Invoice.status, "draft")))
+      .orderBy(desc(Invoice.issueDate))
+      .limit(50);
     content = (
       <Card>
         {money && (
@@ -289,7 +365,7 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
           <tbody>
             {rows.length === 0 && <EmptyRow colSpan={6}>No invoices issued to this client yet.</EmptyRow>}
             {rows.map((i) => (
-              <Tr key={i._id.toString()}>
+              <Tr key={i._id}>
                 <Td>
                   <Link href={`/invoices/${i._id}`} className="font-semibold text-ink hover:text-brand-600">
                     {i.invoiceNo ?? i.draftNo}
@@ -320,7 +396,7 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
             remove={removeAttachment.bind(null, "client", id)}
             canManage={canManage}
             confidential={client.confidential}
-            files={client.attachments.map((a) => ({ refId: a._id?.toString() ?? a.file.toString(), file: a.file.toString(), name: a.name, size: a.size }))}
+            files={client.attachments.map((a) => ({ refId: a._id ?? a.file, file: a.file, name: a.name, size: a.size }))}
           />
         </CardBody>
       </Card>
@@ -427,8 +503,8 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
               <ContactsCard
                 clientId={id}
                 canManage={canManage}
-                primary={client.contactPerson ? { name: client.contactPerson, designation: client.contactDesignation, email: client.email, phone: client.phone } : undefined}
-                contacts={client.contacts.map((c) => ({ id: c._id?.toString() ?? c.name, name: c.name, designation: c.designation, email: c.email, phone: c.phone }))}
+                primary={client.contactPerson ? { name: client.contactPerson, designation: client.contactDesignation ?? undefined, email: client.email ?? undefined, phone: client.phone ?? undefined } : undefined}
+                contacts={client.contacts.map((c) => ({ id: c._id ?? c.name, name: c.name, designation: c.designation, email: c.email, phone: c.phone }))}
               />
             </CardBody>
           </Card>

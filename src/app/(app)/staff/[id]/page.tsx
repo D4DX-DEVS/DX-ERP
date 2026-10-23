@@ -3,13 +3,15 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { forbidden, notFound } from "next/navigation";
 import { FileText, GraduationCap, History, LayoutDashboard, Pencil, ShieldCheck, Wallet } from "lucide-react";
+import { and, asc, eq } from "drizzle-orm";
 import { can, requireUser } from "@/lib/auth/session";
 import { cn } from "@/lib/cn";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Asset, Department, Designation, User } from "@/lib/models";
 import { peopleOptions } from "@/lib/people";
 import { param, type SearchParams } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
+import { jsonPath } from "@/lib/sql";
 import { statusTone } from "@/lib/status";
 import { diffDays, fmtDate, todayKey } from "@/lib/time";
 import { isObjectId } from "@/lib/validation";
@@ -22,6 +24,7 @@ import { DeletePersonButton } from "../_components/access-controls";
 import { LifecycleActions, LifecycleProvider, type LifecycleProps } from "../_components/lifecycle-actions";
 import { PhotoUpload } from "../_components/photo-upload";
 import { tenureLabel } from "../_lib/constants";
+import { personProfileColumns } from "../_lib/columns";
 import { personAccess } from "../_lib/people-access";
 import { AccessTab } from "./_tabs/access";
 import { DocumentsTab } from "./_tabs/documents";
@@ -37,10 +40,9 @@ export default async function StaffProfilePage({ params, searchParams }: { param
   const { id } = await params;
   const sp = await searchParams;
   if (!isObjectId(id)) notFound();
-  await connectDB();
 
   // Salary, salary history, bank details and the Google subject are never loaded here.
-  const person = await User.findById(id).select("-salary -salaryHistory -bank -googleSub").lean();
+  const [person] = await db().select(personProfileColumns).from(User).where(eq(User._id, id)).limit(1);
   if (!person || person.personType === "admin") notFound();
   const access = personAccess(user, person);
   if (!access.canView) forbidden();
@@ -48,14 +50,16 @@ export default async function StaffProfilePage({ params, searchParams }: { param
   const settings = await getSettings();
   const today = todayKey();
   const mentorId = person.internship?.mentor;
+  const personRow = (userId: string) =>
+    db().select({ _id: User._id, name: User.name, photo: User.photo, employeeId: User.employeeId }).from(User).where(eq(User._id, userId)).limit(1).then((r) => r[0]);
   const [department, designation, managerDoc, mentorDoc] = await Promise.all([
-    person.department ? Department.findById(person.department, { name: 1 }).lean() : null,
-    person.designation ? Designation.findById(person.designation, { name: 1 }).lean() : null,
-    person.reportingManager ? User.findById(person.reportingManager, { name: 1, photo: 1, employeeId: 1 }).lean() : null,
-    mentorId ? User.findById(mentorId, { name: 1, photo: 1, employeeId: 1 }).lean() : null,
+    person.department ? db().select({ name: Department.name }).from(Department).where(eq(Department._id, person.department)).limit(1).then((r) => r[0]) : undefined,
+    person.designation ? db().select({ name: Designation.name }).from(Designation).where(eq(Designation._id, person.designation)).limit(1).then((r) => r[0]) : undefined,
+    person.reportingManager ? personRow(person.reportingManager) : undefined,
+    mentorId ? personRow(mentorId) : undefined,
   ]);
-  const toRef = (u: { _id: { toString(): string }; name: string; photo?: string; employeeId: string } | null): PersonRef | undefined =>
-    u ? { id: u._id.toString(), name: u.name, photo: u.photo, sub: u.employeeId } : undefined;
+  const toRef = (u: { _id: string; name: string; photo: string | null; employeeId: string } | undefined): PersonRef | undefined =>
+    u ? { id: u._id, name: u.name, photo: u.photo ?? undefined, sub: u.employeeId } : undefined;
   const manager = toRef(managerDoc);
   const mentor = toRef(mentorDoc);
 
@@ -75,12 +79,12 @@ export default async function StaffProfilePage({ params, searchParams }: { param
   let lifecycle: LifecycleProps | null = null;
   if (access.canEdit) {
     const [designations, departments, people, assets, reports, mentees] = await Promise.all([
-      Designation.find({ active: true }, { name: 1 }).sort({ name: 1 }).lean(),
-      Department.find({ active: true }, { name: 1 }).sort({ name: 1 }).lean(),
+      db().select({ _id: Designation._id, name: Designation.name }).from(Designation).where(eq(Designation.active, true)).orderBy(asc(Designation.name)),
+      db().select({ _id: Department._id, name: Department.name }).from(Department).where(eq(Department.active, true)).orderBy(asc(Department.name)),
       peopleOptions(),
-      Asset.countDocuments({ assignedTo: person._id, status: "assigned" }),
-      User.countDocuments({ reportingManager: person._id }),
-      User.countDocuments({ "internship.mentor": person._id }),
+      db().$count(Asset, and(eq(Asset.assignedTo, person._id), eq(Asset.status, "assigned"))),
+      db().$count(User, eq(User.reportingManager, person._id)),
+      db().$count(User, eq(jsonPath(User.internship, "mentor"), person._id)),
     ]);
     lifecycle = {
       userId: id,
@@ -92,8 +96,8 @@ export default async function StaffProfilePage({ params, searchParams }: { param
       currentDesignation: designation?.name,
       currentDepartment: department?.name,
       currentManager: manager?.name,
-      designations: designations.map((d) => ({ id: d._id.toString(), name: d.name })),
-      departments: departments.map((d) => ({ id: d._id.toString(), name: d.name })),
+      designations: designations.map((d) => ({ id: d._id, name: d.name })),
+      departments: departments.map((d) => ({ id: d._id, name: d.name })),
       people,
       statuses: settings.employmentStatuses.map((s) => ({ key: s.key, label: s.label, category: s.category })),
       counts: { assets, reports, mentees },
@@ -120,7 +124,7 @@ export default async function StaffProfilePage({ params, searchParams }: { param
 
       <Card className="p-5 sm:p-6">
         <div className="flex flex-wrap items-center gap-5">
-          <PhotoUpload userId={id} name={person.name} photo={person.photo} canEdit={access.isSelf || access.canEdit} />
+          <PhotoUpload userId={id} name={person.name} photo={person.photo ?? undefined} canEdit={access.isSelf || access.canEdit} />
           <div className="flex min-w-0 flex-1 basis-72 flex-col gap-2">
             <div className="flex flex-wrap items-center gap-2.5">
               <h1 className="font-display text-[24px] leading-tight font-semibold text-ink sm:text-[26px]">{person.name}</h1>

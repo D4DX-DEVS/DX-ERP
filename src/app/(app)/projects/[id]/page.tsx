@@ -1,12 +1,14 @@
 import Link from "next/link";
 import { forbidden, notFound } from "next/navigation";
 import { Bug, CheckSquare, Flag, History, KeyRound, LayoutDashboard, Paperclip, Pencil, Plus, Users } from "lucide-react";
+import { and, eq } from "drizzle-orm";
 import { can, requireUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
-import { Client, Contract, Invoice, Issue, Project, Proposal, Task, TimesheetEntry, type IProject, type ObjectId } from "@/lib/models";
+import { db } from "@/lib/db";
+import { Client, Contract, Invoice, Issue, Project, Proposal, Task, TimesheetEntry, type FileRef, type IProject } from "@/lib/models";
 import { peopleOptions } from "@/lib/people";
 import { param, type SearchParams } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
+import { inList, notInList } from "@/lib/sql";
 import { inr } from "@/lib/format";
 import { statusLabel } from "@/lib/status";
 import { fmtDate, todayKey } from "@/lib/time";
@@ -63,8 +65,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
   if (!isObjectId(id)) notFound();
   const sp = await searchParams;
   const user = await requireUser();
-  await connectDB();
-  const project = await Project.findById(id).lean();
+  const [project] = await db().select().from(Project).where(eq(Project._id, id)).limit(1);
   if (!project) notFound();
   const caps = projectCaps(user, project);
   if (!caps.view) forbidden();
@@ -83,17 +84,24 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
   const [stats, people, client, contract, proposal, taskCount, openIssues, hasWork] = await Promise.all([
     projectTaskStats([project._id], settings),
     peopleMap([project.manager, ...project.team.map((m) => m.user)]),
-    project.client && !caps.restricted ? Client.findById(project.client, { name: 1, confidential: 1, owner: 1 }).lean() : null,
-    project.contract && can(user, "contracts.view") ? Contract.findById(project.contract, { contractNo: 1 }).lean() : null,
-    project.proposal && can(user, "proposals.view") ? Proposal.findById(project.proposal, { proposalNo: 1 }).lean() : null,
-    Task.countDocuments({ $and: [{ project: project._id }, visibleTasks] }),
-    (async () => Issue.countDocuments({ $and: [{ project: project._id }, caps.restricted ? await issueFilter(user) : {}, { status: { $nin: ISSUE_RESOLVED_STATUSES } }] }))(),
-    canDeleteProject ? Promise.all([Task.exists({ project: project._id }), TimesheetEntry.exists({ project: project._id })]).then(([t, e]) => Boolean(t || e)) : false,
+    project.client && !caps.restricted
+      ? db().select({ name: Client.name, confidential: Client.confidential, owner: Client.owner }).from(Client).where(eq(Client._id, project.client)).limit(1).then((r) => r[0])
+      : undefined,
+    project.contract && can(user, "contracts.view") ? db().select({ contractNo: Contract.contractNo }).from(Contract).where(eq(Contract._id, project.contract)).limit(1).then((r) => r[0]) : undefined,
+    project.proposal && can(user, "proposals.view") ? db().select({ proposalNo: Proposal.proposalNo }).from(Proposal).where(eq(Proposal._id, project.proposal)).limit(1).then((r) => r[0]) : undefined,
+    db().$count(Task, and(eq(Task.project, project._id), visibleTasks)),
+    (async () => db().$count(Issue, and(eq(Issue.project, project._id), caps.restricted ? await issueFilter(user) : undefined, notInList(Issue.status, ISSUE_RESOLVED_STATUSES))))(),
+    canDeleteProject
+      ? Promise.all([
+          db().select({ id: Task._id }).from(Task).where(eq(Task.project, project._id)).limit(1),
+          db().select({ id: TimesheetEntry._id }).from(TimesheetEntry).where(eq(TimesheetEntry.project, project._id)).limit(1),
+        ]).then(([t, e]) => t.length > 0 || e.length > 0)
+      : false,
   ]);
   const progress = stats.get(id) ?? { progress: 0, total: 0, done: 0 };
-  const health = projectHealth({ category, startDate: project.startDate, targetDate: project.targetDate, progress: progress.progress, milestones: project.milestones, today });
+  const health = projectHealth({ category, startDate: project.startDate ?? undefined, targetDate: project.targetDate ?? undefined, progress: progress.progress, milestones: project.milestones, today });
   const current = settings.projectStatuses.find((s) => s.key === project.status);
-  const manager = project.manager ? people.get(project.manager.toString()) : undefined;
+  const manager = project.manager ? people.get(project.manager) : undefined;
   const clientName = project.internal ? "Internal" : client ? (canSeeClient(user, client) ? client.name : "Restricted client") : undefined;
 
   const tabIcon = "size-[18px]";
@@ -213,32 +221,35 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
   );
 }
 
-async function projectFiles(attachments: { _id?: ObjectId; file: ObjectId; name: string; size?: number; uploadedAt?: Date; uploadedBy?: ObjectId }[], canManage: boolean, userId: string): Promise<ProjectFileView[]> {
+async function projectFiles(attachments: FileRef[], canManage: boolean, userId: string): Promise<ProjectFileView[]> {
   const people = await peopleMap(attachments.map((a) => a.uploadedBy));
   return [...attachments].reverse().map((a, i) => ({
-    refId: a._id?.toString() ?? String(i),
-    file: a.file.toString(),
+    refId: a._id ?? String(i),
+    file: a.file,
     name: a.name,
     size: a.size,
-    by: (a.uploadedBy && people.get(a.uploadedBy.toString())?.name) || "Unknown",
+    by: (a.uploadedBy && people.get(a.uploadedBy)?.name) || "Unknown",
     when: fmtDate(a.uploadedAt),
-    canRemove: canManage || a.uploadedBy?.toString() === userId,
+    canRemove: canManage || a.uploadedBy === userId,
   }));
 }
 
 async function MilestonesTab({ project, caps, today }: { project: Pick<IProject, "_id" | "milestones">; caps: ProjectCaps; today: string }) {
-  const invoiceIds = project.milestones.map((m) => m.invoice).filter((x): x is ObjectId => Boolean(x));
-  const invoices = caps.financials && invoiceIds.length ? await Invoice.find({ _id: { $in: invoiceIds } }, { invoiceNo: 1, draftNo: 1, status: 1 }).lean() : [];
-  const invoiceMap = new Map(invoices.map((i) => [i._id.toString(), i]));
+  const invoiceIds = project.milestones.map((m) => m.invoice).filter((x): x is string => Boolean(x));
+  const invoices =
+    caps.financials && invoiceIds.length
+      ? await db().select({ _id: Invoice._id, invoiceNo: Invoice.invoiceNo, draftNo: Invoice.draftNo, status: Invoice.status }).from(Invoice).where(inList(Invoice._id, invoiceIds))
+      : [];
+  const invoiceMap = new Map(invoices.map((i) => [i._id, i]));
   const views: MilestoneView[] = [...project.milestones]
     .sort((a, b) => (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999"))
     .map((m) => {
       const overdue = milestoneOverdue(m, today);
-      const inv = m.invoice ? invoiceMap.get(m.invoice.toString()) : undefined;
+      const inv = m.invoice ? invoiceMap.get(m.invoice) : undefined;
       const idx = FLOW.indexOf(m.status);
       const next = m.status === "delayed" ? "in_progress" : FLOW[idx + 1];
       return {
-        id: m._id.toString(),
+        id: m._id,
         title: m.title,
         description: m.description ?? "",
         dueDate: m.dueDate ?? "",
@@ -257,7 +268,7 @@ async function MilestonesTab({ project, caps, today }: { project: Pick<IProject,
         nextLabel: next ? statusLabel("milestone", next) : undefined,
       };
     });
-  return <MilestonesPanel projectId={project._id.toString()} milestones={views} canManage={caps.manage} showAmount={caps.financials} />;
+  return <MilestonesPanel projectId={project._id} milestones={views} canManage={caps.manage} showAmount={caps.financials} />;
 }
 
 async function TeamTab({
@@ -272,23 +283,24 @@ async function TeamTab({
   people: Awaited<ReturnType<typeof peopleMap>>;
 }) {
   const [openRows, options] = await Promise.all([
-    Task.aggregate<{ _id: ObjectId; n: number }>([
-      { $match: { project: project._id, status: { $nin: closedTaskKeys } } },
-      { $unwind: "$assignees" },
-      { $group: { _id: "$assignees", n: { $sum: 1 } } },
-    ]),
+    db()
+      .select({ assignees: Task.assignees })
+      .from(Task)
+      .where(and(eq(Task.project, project._id), notInList(Task.status, closedTaskKeys))),
     caps.manage ? peopleOptions() : [],
   ]);
-  const openMap = new Map(openRows.map((r) => [r._id.toString(), r.n]));
+  // Open tasks per assignee (a task counts once for each of its assignees).
+  const openMap = new Map<string, number>();
+  for (const row of openRows) for (const a of row.assignees) openMap.set(a, (openMap.get(a) ?? 0) + 1);
   const members: TeamMemberView[] = project.team.map((m) => ({
-    userId: m.user.toString(),
-    name: people.get(m.user.toString())?.name ?? "Unknown",
-    photo: people.get(m.user.toString())?.photo,
+    userId: m.user,
+    name: people.get(m.user)?.name ?? "Unknown",
+    photo: people.get(m.user)?.photo,
     role: m.role ?? "",
     allocation: m.allocation,
-    openTasks: openMap.get(m.user.toString()) ?? 0,
+    openTasks: openMap.get(m.user) ?? 0,
   }));
   const onTeam = new Set(members.map((m) => m.userId));
-  const manager = project.manager ? people.get(project.manager.toString()) : undefined;
-  return <TeamPanel projectId={project._id.toString()} manager={manager ? { name: manager.name, photo: manager.photo } : undefined} members={members} people={options.filter((p) => !onTeam.has(p.id))} canManage={caps.manage} />;
+  const manager = project.manager ? people.get(project.manager) : undefined;
+  return <TeamPanel projectId={project._id} manager={manager ? { name: manager.name, photo: manager.photo } : undefined} members={members} people={options.filter((p) => !onTeam.has(p.id))} canManage={caps.manage} />;
 }
