@@ -1,4 +1,5 @@
-import { defineModel, HistorySchema, ObjectIdType, Schema, type HistoryEntry, type ObjectId } from "./_base";
+import { index, sqliteTable, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { bool, date, int, json, pk, ref, text, timestamps, type HistoryEntry, type Id } from "./_base";
 
 /** Movement status (where the person is) — FRS §8.6. */
 export type MovementStatus = "draft" | "out" | "returned" | "cancelled";
@@ -6,8 +7,8 @@ export type MovementStatus = "draft" | "out" | "returned" | "cancelled";
 export type MovementApproval = "not_required" | "pending" | "approved" | "rejected" | "correction_requested";
 
 export interface MovementCorrection {
-  _id?: ObjectId;
-  requestedBy: ObjectId;
+  _id?: Id;
+  requestedBy: Id;
   requestedByName: string;
   requestedAt: Date;
   reason: string;
@@ -18,112 +19,62 @@ export interface MovementCorrection {
   /** Approval status before the correction was requested (restored on rejection). */
   previousApprovalStatus?: MovementApproval;
   status: "pending" | "approved" | "rejected";
-  reviewedBy?: ObjectId;
+  reviewedBy?: Id;
   reviewedByName?: string;
   reviewedAt?: Date;
   reviewNote?: string;
 }
 
-export interface IMovement {
-  _id: ObjectId;
-  movementNo: string;
-  user: ObjectId;
-  date: string;
-  outTime?: Date;
-  expectedReturn?: Date;
-  inTime?: Date;
-  /** Final duration in minutes; only set once In-Time is recorded or the record is resolved. */
-  durationMinutes?: number;
-  category: string;
-  categoryLabel: string;
-  official: boolean;
-  purpose: string;
-  destination?: string;
-  project?: ObjectId;
-  client?: ObjectId;
-  remarks?: string;
-  status: MovementStatus;
-  approvalStatus: MovementApproval;
-  approver?: ObjectId;
-  approvedBy?: ObjectId;
-  approvedByName?: string;
-  approvedAt?: Date;
-  approvalNote?: string;
-  /** "live" = recorded at the time; "alternative" = entered afterwards by the person or an authorised user (§8.4). */
-  entryMode: "live" | "alternative";
-  enteredBy?: ObjectId;
-  enteredByName?: string;
-  alternativeReason?: string;
-  resolvedBy?: ObjectId;
-  resolvedByName?: string;
-  resolutionNote?: string;
-  overdueNotifiedAt?: Date;
-  corrections: MovementCorrection[];
-  history: HistoryEntry[];
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-const CorrectionSchema = new Schema<MovementCorrection>({
-  requestedBy: { type: ObjectIdType, ref: "User", required: true },
-  requestedByName: String,
-  requestedAt: { type: Date, default: Date.now },
-  reason: { type: String, required: true, maxlength: 1000 },
-  proposedOutTime: Date,
-  proposedInTime: Date,
-  originalOutTime: Date,
-  originalInTime: Date,
-  previousApprovalStatus: String,
-  status: { type: String, enum: ["pending", "approved", "rejected"], default: "pending" },
-  reviewedBy: { type: ObjectIdType, ref: "User" },
-  reviewedByName: String,
-  reviewedAt: Date,
-  reviewNote: String,
-});
-
-const MovementSchema = new Schema<IMovement>(
+export const Movement = sqliteTable(
+  "movements",
   {
-    movementNo: { type: String, required: true, unique: true },
-    user: { type: ObjectIdType, ref: "User", required: true, index: true },
-    date: { type: String, required: true, index: true },
-    outTime: Date,
-    expectedReturn: Date,
-    inTime: Date,
-    durationMinutes: Number,
-    category: { type: String, required: true },
-    categoryLabel: { type: String, required: true },
-    official: { type: Boolean, default: true },
-    purpose: { type: String, required: true, maxlength: 500 },
-    destination: { type: String, maxlength: 300 },
-    project: { type: ObjectIdType, ref: "Project" },
-    client: { type: ObjectIdType, ref: "Client" },
-    remarks: { type: String, maxlength: 1000 },
-    status: { type: String, enum: ["draft", "out", "returned", "cancelled"], default: "out", index: true },
-    approvalStatus: {
-      type: String,
-      enum: ["not_required", "pending", "approved", "rejected", "correction_requested"],
-      default: "not_required",
-      index: true,
-    },
-    approver: { type: ObjectIdType, ref: "User" },
-    approvedBy: { type: ObjectIdType, ref: "User" },
-    approvedByName: String,
-    approvedAt: Date,
-    approvalNote: String,
-    entryMode: { type: String, enum: ["live", "alternative"], default: "live" },
-    enteredBy: { type: ObjectIdType, ref: "User" },
-    enteredByName: String,
-    alternativeReason: String,
-    resolvedBy: { type: ObjectIdType, ref: "User" },
-    resolvedByName: String,
-    resolutionNote: String,
-    overdueNotifiedAt: Date,
-    corrections: { type: [CorrectionSchema], default: [] },
-    history: { type: [HistorySchema], default: [] },
+    _id: pk(),
+    movementNo: text().notNull(),
+    user: ref().notNull(),
+    date: text().notNull(),
+    outTime: date(),
+    expectedReturn: date(),
+    inTime: date(),
+    /** Final duration in minutes; only set once In-Time is recorded or the record is resolved. */
+    durationMinutes: int(),
+    category: text().notNull(),
+    categoryLabel: text().notNull(),
+    official: bool().notNull().default(true),
+    purpose: text().notNull(),
+    destination: text(),
+    project: ref(),
+    client: ref(),
+    remarks: text(),
+    status: text().$type<MovementStatus>().notNull().default("out"),
+    approvalStatus: text().$type<MovementApproval>().notNull().default("not_required"),
+    approver: ref(),
+    approvedBy: ref(),
+    approvedByName: text(),
+    approvedAt: date(),
+    approvalNote: text(),
+    /** "live" = recorded at the time; "alternative" = entered afterwards by the person or an authorised user (§8.4). */
+    entryMode: text().$type<"live" | "alternative">().notNull().default("live"),
+    enteredBy: ref(),
+    enteredByName: text(),
+    alternativeReason: text(),
+    resolvedBy: ref(),
+    resolvedByName: text(),
+    resolutionNote: text(),
+    overdueNotifiedAt: date(),
+    corrections: json<MovementCorrection[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    history: json<HistoryEntry[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    ...timestamps(),
   },
-  { timestamps: true },
+  (t) => [
+    uniqueIndex("movements_movement_no").on(t.movementNo),
+    index("movements_user_date").on(t.user, t.date),
+    index("movements_date").on(t.date),
+    index("movements_status_expected_return").on(t.status, t.expectedReturn),
+    index("movements_approval_status").on(t.approvalStatus),
+  ],
 );
-MovementSchema.index({ user: 1, date: 1 });
-MovementSchema.index({ status: 1, expectedReturn: 1 });
-
-export const Movement = defineModel<IMovement>("Movement", MovementSchema);
+export type IMovement = typeof Movement.$inferSelect;

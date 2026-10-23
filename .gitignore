@@ -41,3 +41,11 @@ yarn-error.log*
 next-env.d.ts
 
 !.env.example
+
+# cloudflare
+/.open-next/
+/.wrangler/
+.dev.vars*
+
+# local data exports (personal data)
+/.data/

@@ -1,4 +1,5 @@
 import path from "node:path";
+import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 import type { NextConfig } from "next";
 
 // The Content-Security-Policy is set per request in `src/proxy.ts` (nonce-based), not here.
@@ -17,7 +18,7 @@ const nextConfig: NextConfig = {
   // Dev-only: Next logs every Server Function call with its arguments — that would print vault secrets,
   // salaries and the super admin password to the terminal.
   logging: { serverFunctions: false },
-  serverExternalPackages: ["mongoose", "exceljs", "jspdf", "jspdf-autotable", "nodemailer"],
+  serverExternalPackages: ["exceljs", "jspdf", "jspdf-autotable", "nodemailer"],
   experimental: {
     authInterrupts: true,
     serverActions: {
@@ -40,3 +41,6 @@ const nextConfig: NextConfig = {
 };
 
 export default nextConfig;
+
+// Makes the Cloudflare bindings (local D1 / R2 in .wrangler/state) available to `next dev`.
+initOpenNextCloudflareForDev();

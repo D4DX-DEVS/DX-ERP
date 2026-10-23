@@ -1,20 +1,6 @@
 import "server-only";
 
-export * from "./_base";
-export * from "./user";
-export * from "./org";
-export * from "./system";
-export * from "./attendance";
-export * from "./movement";
-export * from "./leave";
-export * from "./payroll";
-export * from "./project";
-export * from "./work";
-export * from "./crm";
-export * from "./sales";
-export * from "./finance";
-export * from "./ops";
-export * from "./vault";
+export * from "./_tables";
 
 import { User } from "./user";
 import { Department, Designation, Role, Holiday } from "./org";
@@ -32,10 +18,10 @@ import { Asset, Notification, Announcement, LearningResource, Review } from "./o
 import { ProjectVault, VaultItem, VaultEvent } from "./vault";
 
 /**
- * Business collections included in backups / restores. Sessions, login attempts, job locks and
+ * Business tables included in backups / restores. Sessions, login attempts, job locks and
  * the backup index itself are intentionally excluded.
  */
-export const BACKUP_MODELS = {
+export const BACKUP_TABLES = {
   User,
   Department,
   Designation,

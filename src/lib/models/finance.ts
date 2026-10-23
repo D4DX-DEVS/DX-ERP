@@ -1,201 +1,147 @@
-import {
-  defineModel,
-  FileRefSchema,
-  HistorySchema,
-  LineItemSchema,
-  ObjectIdType,
-  Schema,
-  type FileRef,
-  type HistoryEntry,
-  type LineItem,
-  type ObjectId,
-} from "./_base";
+import { index, sqliteTable, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { date, int, json, num, pk, ref, text, timestamps, type FileRef, type HistoryEntry, type Id, type LineItem } from "./_base";
 
 export type InvoiceStatus = "draft" | "issued" | "partially_paid" | "paid" | "overdue" | "cancelled";
 
-export interface IInvoice {
-  _id: ObjectId;
-  invoiceNo?: string;
-  draftNo: string;
-  client: ObjectId;
-  project?: ObjectId;
-  contract?: ObjectId;
-  milestone?: ObjectId;
-  issueDate: string;
-  dueDate: string;
-  paymentTermDays: number;
-  items: LineItem[];
-  subtotal: number;
-  discount: number;
-  taxTotal: number;
-  total: number;
-  amountPaid: number;
-  amountRefunded: number;
-  adjustments: number;
-  balance: number;
-  status: InvoiceStatus;
-  notes?: string;
-  terms?: string;
-  placeOfSupply?: string;
-  billingSnapshot?: { name: string; address?: string; gstin?: string; email?: string };
-  issuedAt?: Date;
-  cancelledAt?: Date;
-  cancelReason?: string;
-  overdueNotifiedAt?: Date;
-  dueReminderSentAt?: Date;
-  history: HistoryEntry[];
-  createdBy?: ObjectId;
-  createdAt: Date;
-  updatedAt: Date;
+export interface BillingSnapshot {
+  name: string;
+  address?: string;
+  gstin?: string;
+  email?: string;
 }
 
-const InvoiceSchema = new Schema<IInvoice>(
+export const Invoice = sqliteTable(
+  "invoices",
   {
-    invoiceNo: { type: String, unique: true, sparse: true },
-    draftNo: { type: String, required: true, unique: true },
-    client: { type: ObjectIdType, ref: "Client", required: true, index: true },
-    project: { type: ObjectIdType, ref: "Project", index: true },
-    contract: { type: ObjectIdType, ref: "Contract" },
-    milestone: { type: ObjectIdType },
-    issueDate: { type: String, required: true },
-    dueDate: { type: String, required: true, index: true },
-    paymentTermDays: { type: Number, default: 15 },
-    items: { type: [LineItemSchema], default: [] },
-    subtotal: { type: Number, default: 0 },
-    discount: { type: Number, default: 0 },
-    taxTotal: { type: Number, default: 0 },
-    total: { type: Number, default: 0 },
-    amountPaid: { type: Number, default: 0 },
-    amountRefunded: { type: Number, default: 0 },
-    adjustments: { type: Number, default: 0 },
-    balance: { type: Number, default: 0 },
-    status: {
-      type: String,
-      enum: ["draft", "issued", "partially_paid", "paid", "overdue", "cancelled"],
-      default: "draft",
-      index: true,
-    },
-    notes: String,
-    terms: String,
-    placeOfSupply: String,
-    billingSnapshot: { name: String, address: String, gstin: String, email: String },
-    issuedAt: Date,
-    cancelledAt: Date,
-    cancelReason: String,
-    overdueNotifiedAt: Date,
-    dueReminderSentAt: Date,
-    history: { type: [HistorySchema], default: [] },
-    createdBy: { type: ObjectIdType, ref: "User" },
+    _id: pk(),
+    invoiceNo: text(),
+    draftNo: text().notNull(),
+    client: ref().notNull(),
+    project: ref(),
+    contract: ref(),
+    milestone: ref(),
+    issueDate: text().notNull(),
+    dueDate: text().notNull(),
+    paymentTermDays: int().notNull().default(15),
+    items: json<LineItem[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    subtotal: num().notNull().default(0),
+    discount: num().notNull().default(0),
+    taxTotal: num().notNull().default(0),
+    total: num().notNull().default(0),
+    amountPaid: num().notNull().default(0),
+    amountRefunded: num().notNull().default(0),
+    adjustments: num().notNull().default(0),
+    balance: num().notNull().default(0),
+    status: text().$type<InvoiceStatus>().notNull().default("draft"),
+    notes: text(),
+    terms: text(),
+    placeOfSupply: text(),
+    billingSnapshot: json<BillingSnapshot>(),
+    issuedAt: date(),
+    cancelledAt: date(),
+    cancelReason: text(),
+    overdueNotifiedAt: date(),
+    dueReminderSentAt: date(),
+    history: json<HistoryEntry[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    createdBy: ref(),
+    ...timestamps(),
   },
-  { timestamps: true },
+  (t) => [
+    // Drafts have no invoiceNo (NULL); NULLs are distinct in SQLite unique indexes.
+    uniqueIndex("invoices_invoice_no").on(t.invoiceNo),
+    uniqueIndex("invoices_draft_no").on(t.draftNo),
+    index("invoices_client").on(t.client),
+    index("invoices_project").on(t.project),
+    index("invoices_due_date").on(t.dueDate),
+    index("invoices_status").on(t.status),
+  ],
 );
-
-export const Invoice = defineModel<IInvoice>("Invoice", InvoiceSchema);
+export type IInvoice = typeof Invoice.$inferSelect;
 
 export type PaymentType = "payment" | "refund" | "adjustment";
 
-export interface IPayment {
-  _id: ObjectId;
-  paymentNo: string;
-  invoice: ObjectId;
-  client: ObjectId;
-  project?: ObjectId;
-  type: PaymentType;
-  date: string;
-  amount: number;
-  method: string;
-  reference?: string;
-  note?: string;
-  recordedBy: ObjectId;
-  recordedByName: string;
-  createdAt: Date;
-}
-
-const PaymentSchema = new Schema<IPayment>(
+export const Payment = sqliteTable(
+  "payments",
   {
-    paymentNo: { type: String, required: true, unique: true },
-    invoice: { type: ObjectIdType, ref: "Invoice", required: true, index: true },
-    client: { type: ObjectIdType, ref: "Client", required: true, index: true },
-    project: { type: ObjectIdType, ref: "Project" },
-    type: { type: String, enum: ["payment", "refund", "adjustment"], default: "payment" },
-    date: { type: String, required: true, index: true },
-    amount: { type: Number, required: true },
-    method: { type: String, required: true },
-    reference: String,
-    note: String,
-    recordedBy: { type: ObjectIdType, ref: "User", required: true },
-    recordedByName: String,
+    _id: pk(),
+    paymentNo: text().notNull(),
+    invoice: ref().notNull(),
+    client: ref().notNull(),
+    project: ref(),
+    type: text().$type<PaymentType>().notNull().default("payment"),
+    date: text().notNull(),
+    amount: num().notNull(),
+    method: text().notNull(),
+    reference: text(),
+    note: text(),
+    recordedBy: ref().notNull(),
+    recordedByName: text(),
+    ...timestamps(),
   },
-  { timestamps: true },
+  (t) => [
+    uniqueIndex("payments_payment_no").on(t.paymentNo),
+    index("payments_invoice").on(t.invoice),
+    index("payments_client").on(t.client),
+    index("payments_date").on(t.date),
+  ],
 );
-
-export const Payment = defineModel<IPayment>("Payment", PaymentSchema);
+export type IPayment = typeof Payment.$inferSelect;
 
 export type ExpenseStatus = "draft" | "submitted" | "approved" | "rejected" | "paid";
 
-export interface IExpense {
-  _id: ObjectId;
-  expenseNo: string;
-  /** Person who incurred / submitted the expense. */
-  user: ObjectId;
-  date: string;
-  category: string;
-  department?: ObjectId;
-  project?: ObjectId;
-  client?: ObjectId;
-  vendor?: string;
-  amount: number;
-  taxAmount: number;
-  description: string;
-  /** reimbursable = paid by the employee and owed back; company = paid directly by the company. */
-  type: "reimbursable" | "company";
-  paymentMode?: string;
-  receipts: FileRef[];
-  status: ExpenseStatus;
-  submittedAt?: Date;
-  approver?: ObjectId;
-  approverName?: string;
-  decidedAt?: Date;
-  decisionNote?: string;
-  payment?: { date?: string; method?: string; reference?: string; viaPayroll?: boolean; by?: ObjectId; byName?: string };
-  history: HistoryEntry[];
-  createdAt: Date;
-  updatedAt: Date;
+export interface ExpensePayment {
+  date?: string;
+  method?: string;
+  reference?: string;
+  viaPayroll?: boolean;
+  by?: Id;
+  byName?: string;
 }
 
-const ExpenseSchema = new Schema<IExpense>(
+export const Expense = sqliteTable(
+  "expenses",
   {
-    expenseNo: { type: String, required: true, unique: true },
-    user: { type: ObjectIdType, ref: "User", required: true, index: true },
-    date: { type: String, required: true, index: true },
-    category: { type: String, required: true },
-    department: { type: ObjectIdType, ref: "Department" },
-    project: { type: ObjectIdType, ref: "Project", index: true },
-    client: { type: ObjectIdType, ref: "Client" },
-    vendor: String,
-    amount: { type: Number, required: true, min: 0 },
-    taxAmount: { type: Number, default: 0 },
-    description: { type: String, required: true, maxlength: 2000 },
-    type: { type: String, enum: ["reimbursable", "company"], default: "reimbursable" },
-    paymentMode: String,
-    receipts: { type: [FileRefSchema], default: [] },
-    status: { type: String, enum: ["draft", "submitted", "approved", "rejected", "paid"], default: "draft", index: true },
-    submittedAt: Date,
-    approver: { type: ObjectIdType, ref: "User" },
-    approverName: String,
-    decidedAt: Date,
-    decisionNote: String,
-    payment: {
-      date: String,
-      method: String,
-      reference: String,
-      viaPayroll: Boolean,
-      by: { type: ObjectIdType, ref: "User" },
-      byName: String,
-    },
-    history: { type: [HistorySchema], default: [] },
+    _id: pk(),
+    expenseNo: text().notNull(),
+    /** Person who incurred / submitted the expense. */
+    user: ref().notNull(),
+    date: text().notNull(),
+    category: text().notNull(),
+    department: ref(),
+    project: ref(),
+    client: ref(),
+    vendor: text(),
+    amount: num().notNull(),
+    taxAmount: num().notNull().default(0),
+    description: text().notNull(),
+    /** reimbursable = paid by the employee and owed back; company = paid directly by the company. */
+    type: text().$type<"reimbursable" | "company">().notNull().default("reimbursable"),
+    paymentMode: text(),
+    receipts: json<FileRef[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    status: text().$type<ExpenseStatus>().notNull().default("draft"),
+    submittedAt: date(),
+    approver: ref(),
+    approverName: text(),
+    decidedAt: date(),
+    decisionNote: text(),
+    payment: json<ExpensePayment>(),
+    history: json<HistoryEntry[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    ...timestamps(),
   },
-  { timestamps: true },
+  (t) => [
+    uniqueIndex("expenses_expense_no").on(t.expenseNo),
+    index("expenses_user").on(t.user),
+    index("expenses_date").on(t.date),
+    index("expenses_project").on(t.project),
+    index("expenses_status").on(t.status),
+  ],
 );
-
-export const Expense = defineModel<IExpense>("Expense", ExpenseSchema);
+export type IExpense = typeof Expense.$inferSelect;

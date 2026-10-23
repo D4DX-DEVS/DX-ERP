@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dx-erp",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "dx-erp" }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dx-erp",
+      // Replaced with the real id from `wrangler d1 create dx-erp` before the first remote deploy.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "drizzle"
+    }
+  ],
+  "r2_buckets": [
+    // Private files (documents, receipts, backups) — streamed by /api/files after a permission check.
+    { "binding": "FILES", "bucket_name": "dx-erp-files" },
+    // Public files (avatars, company logo) — served from the bucket's public URL (PUBLIC_FILES_URL).
+    { "binding": "PUBLIC_FILES", "bucket_name": "dx-erp-public" }
+  ],
+  "observability": { "enabled": true }
+}

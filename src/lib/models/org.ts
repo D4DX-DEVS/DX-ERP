@@ -1,83 +1,63 @@
-import { defineModel, ObjectIdType, Schema, type ObjectId } from "./_base";
+import { sqliteTable, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { bool, int, json, pk, ref, text, timestamps } from "./_base";
 
-export interface IDepartment {
-  _id: ObjectId;
-  name: string;
-  code?: string;
-  head?: ObjectId;
-  description?: string;
-  active: boolean;
-}
-
-const DepartmentSchema = new Schema<IDepartment>(
+/** Writes must trim `name` and store `code` trimmed + uppercased. */
+export const Department = sqliteTable(
+  "departments",
   {
-    name: { type: String, required: true, unique: true, trim: true },
-    code: { type: String, trim: true, uppercase: true },
-    head: { type: ObjectIdType, ref: "User" },
-    description: String,
-    active: { type: Boolean, default: true },
+    _id: pk(),
+    name: text().notNull(),
+    code: text(),
+    head: ref(),
+    description: text(),
+    active: bool().notNull().default(true),
+    ...timestamps(),
   },
-  { timestamps: true },
+  (t) => [uniqueIndex("departments_name").on(t.name)],
 );
+export type IDepartment = typeof Department.$inferSelect;
 
-export const Department = defineModel<IDepartment>("Department", DepartmentSchema);
-
-export interface IDesignation {
-  _id: ObjectId;
-  name: string;
-  department?: ObjectId;
-  level?: number;
-  active: boolean;
-}
-
-const DesignationSchema = new Schema<IDesignation>(
+/** Writes must trim `name`. */
+export const Designation = sqliteTable(
+  "designations",
   {
-    name: { type: String, required: true, unique: true, trim: true },
-    department: { type: ObjectIdType, ref: "Department" },
-    level: Number,
-    active: { type: Boolean, default: true },
+    _id: pk(),
+    name: text().notNull(),
+    department: ref(),
+    level: int(),
+    active: bool().notNull().default(true),
+    ...timestamps(),
   },
-  { timestamps: true },
+  (t) => [uniqueIndex("designations_name").on(t.name)],
 );
+export type IDesignation = typeof Designation.$inferSelect;
 
-export const Designation = defineModel<IDesignation>("Designation", DesignationSchema);
-
-export interface IRole {
-  _id: ObjectId;
-  key: string;
-  name: string;
-  description?: string;
-  permissions: string[];
-  system: boolean;
-}
-
-const RoleSchema = new Schema<IRole>(
+/** Writes must store `key` trimmed + lowercased and trim `name`. */
+export const Role = sqliteTable(
+  "roles",
   {
-    key: { type: String, required: true, unique: true, lowercase: true, trim: true },
-    name: { type: String, required: true, trim: true },
-    description: String,
-    permissions: { type: [String], default: [] },
-    system: { type: Boolean, default: false },
+    _id: pk(),
+    key: text().notNull(),
+    name: text().notNull(),
+    description: text(),
+    permissions: json<string[]>().notNull().$defaultFn(() => []),
+    system: bool().notNull().default(false),
+    ...timestamps(),
   },
-  { timestamps: true },
+  (t) => [uniqueIndex("roles_key").on(t.key)],
 );
+export type IRole = typeof Role.$inferSelect;
 
-export const Role = defineModel<IRole>("Role", RoleSchema);
-
-export interface IHoliday {
-  _id: ObjectId;
-  date: string;
-  name: string;
-  optional: boolean;
-}
-
-const HolidaySchema = new Schema<IHoliday>(
+/** Writes must trim `name`. */
+export const Holiday = sqliteTable(
+  "holidays",
   {
-    date: { type: String, required: true, unique: true },
-    name: { type: String, required: true, trim: true },
-    optional: { type: Boolean, default: false },
+    _id: pk(),
+    date: text().notNull(),
+    name: text().notNull(),
+    optional: bool().notNull().default(false),
+    ...timestamps(),
   },
-  { timestamps: true },
+  (t) => [uniqueIndex("holidays_date").on(t.date)],
 );
-
-export const Holiday = defineModel<IHoliday>("Holiday", HolidaySchema);
+export type IHoliday = typeof Holiday.$inferSelect;

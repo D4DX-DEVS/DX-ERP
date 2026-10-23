@@ -1,103 +1,73 @@
-import { defineModel, HistorySchema, ObjectIdType, Schema, type HistoryEntry, type ObjectId } from "./_base";
+import { index, sqliteTable, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { bool, date, int, json, pk, ref, text, timestamps, type HistoryEntry, type Id } from "./_base";
 
 export type AttendanceStatus = "present" | "half_day" | "absent" | "on_leave" | "holiday" | "weekend";
 
 export interface BreakEntry {
-  _id?: ObjectId;
+  _id?: Id;
   start: Date;
   end?: Date;
 }
 
-export interface IAttendance {
-  _id: ObjectId;
-  user: ObjectId;
-  date: string;
+export const Attendance = sqliteTable(
+  "attendances",
+  {
+    _id: pk(),
+    user: ref().notNull(),
+    date: text().notNull(),
+    checkIn: date(),
+    checkOut: date(),
+    breaks: json<BreakEntry[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    breakMinutes: int().notNull().default(0),
+    /** Net working minutes = (checkOut − checkIn) − breaks − deducted personal movement time (per policy). */
+    workMinutes: int().notNull().default(0),
+    movementMinutes: int().notNull().default(0),
+    status: text().$type<AttendanceStatus>().notNull().default("present"),
+    late: bool().notNull().default(false),
+    lateMinutes: int().notNull().default(0),
+    earlyDeparture: bool().notNull().default(false),
+    earlyMinutes: int().notNull().default(0),
+    missingCheckout: bool().notNull().default(false),
+    source: text().$type<"self" | "manual" | "correction" | "system">().notNull().default("self"),
+    remarks: text(),
+    locked: bool().notNull().default(false),
+    history: json<HistoryEntry[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    ...timestamps(),
+  },
+  (t) => [uniqueIndex("attendances_user_date").on(t.user, t.date), index("attendances_date_status").on(t.date, t.status)],
+);
+export type IAttendance = typeof Attendance.$inferSelect;
+
+export interface AttendanceOriginal {
   checkIn?: Date;
   checkOut?: Date;
-  breaks: BreakEntry[];
-  breakMinutes: number;
-  /** Net working minutes = (checkOut − checkIn) − breaks − deducted personal movement time (per policy). */
-  workMinutes: number;
-  movementMinutes: number;
-  status: AttendanceStatus;
-  late: boolean;
-  lateMinutes: number;
-  earlyDeparture: boolean;
-  earlyMinutes: number;
-  missingCheckout: boolean;
-  source: "self" | "manual" | "correction" | "system";
-  remarks?: string;
-  locked: boolean;
-  history: HistoryEntry[];
-  createdAt: Date;
-  updatedAt: Date;
+  status?: string;
 }
 
-const AttendanceSchema = new Schema<IAttendance>(
+export const AttendanceCorrection = sqliteTable(
+  "attendancecorrections",
   {
-    user: { type: ObjectIdType, ref: "User", required: true },
-    date: { type: String, required: true },
-    checkIn: Date,
-    checkOut: Date,
-    breaks: { type: [new Schema<BreakEntry>({ start: { type: Date, required: true }, end: Date })], default: [] },
-    breakMinutes: { type: Number, default: 0 },
-    workMinutes: { type: Number, default: 0 },
-    movementMinutes: { type: Number, default: 0 },
-    status: {
-      type: String,
-      enum: ["present", "half_day", "absent", "on_leave", "holiday", "weekend"],
-      default: "present",
-    },
-    late: { type: Boolean, default: false },
-    lateMinutes: { type: Number, default: 0 },
-    earlyDeparture: { type: Boolean, default: false },
-    earlyMinutes: { type: Number, default: 0 },
-    missingCheckout: { type: Boolean, default: false },
-    source: { type: String, enum: ["self", "manual", "correction", "system"], default: "self" },
-    remarks: String,
-    locked: { type: Boolean, default: false },
-    history: { type: [HistorySchema], default: [] },
+    _id: pk(),
+    user: ref().notNull(),
+    date: text().notNull(),
+    attendance: ref(),
+    requestedCheckIn: date(),
+    requestedCheckOut: date(),
+    original: json<AttendanceOriginal>()
+      .notNull()
+      .$defaultFn(() => ({})),
+    reason: text().notNull(),
+    status: text().$type<"pending" | "approved" | "rejected" | "cancelled">().notNull().default("pending"),
+    reviewer: ref(),
+    reviewerName: text(),
+    reviewedAt: date(),
+    reviewNote: text(),
+    ...timestamps(),
   },
-  { timestamps: true },
+  (t) => [index("attendancecorrections_user").on(t.user), index("attendancecorrections_status").on(t.status)],
 );
-AttendanceSchema.index({ user: 1, date: 1 }, { unique: true });
-AttendanceSchema.index({ date: 1, status: 1 });
-
-export const Attendance = defineModel<IAttendance>("Attendance", AttendanceSchema);
-
-export interface IAttendanceCorrection {
-  _id: ObjectId;
-  user: ObjectId;
-  date: string;
-  attendance?: ObjectId;
-  requestedCheckIn?: Date;
-  requestedCheckOut?: Date;
-  original: { checkIn?: Date; checkOut?: Date; status?: string };
-  reason: string;
-  status: "pending" | "approved" | "rejected" | "cancelled";
-  reviewer?: ObjectId;
-  reviewerName?: string;
-  reviewedAt?: Date;
-  reviewNote?: string;
-  createdAt: Date;
-}
-
-const AttendanceCorrectionSchema = new Schema<IAttendanceCorrection>(
-  {
-    user: { type: ObjectIdType, ref: "User", required: true, index: true },
-    date: { type: String, required: true },
-    attendance: { type: ObjectIdType, ref: "Attendance" },
-    requestedCheckIn: Date,
-    requestedCheckOut: Date,
-    original: { checkIn: Date, checkOut: Date, status: String },
-    reason: { type: String, required: true, maxlength: 1000 },
-    status: { type: String, enum: ["pending", "approved", "rejected", "cancelled"], default: "pending", index: true },
-    reviewer: { type: ObjectIdType, ref: "User" },
-    reviewerName: String,
-    reviewedAt: Date,
-    reviewNote: String,
-  },
-  { timestamps: true },
-);
-
-export const AttendanceCorrection = defineModel<IAttendanceCorrection>("AttendanceCorrection", AttendanceCorrectionSchema);
+export type IAttendanceCorrection = typeof AttendanceCorrection.$inferSelect;

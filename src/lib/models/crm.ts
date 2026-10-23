@@ -1,182 +1,131 @@
-import {
-  AddressSchema,
-  defineModel,
-  FileRefSchema,
-  HistorySchema,
-  ObjectIdType,
-  Schema,
-  type Address,
-  type FileRef,
-  type HistoryEntry,
-  type ObjectId,
-} from "./_base";
+import { index, sqliteTable, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { bool, date, json, num, pk, ref, text, timestamps, type Address, type FileRef, type HistoryEntry, type Id } from "./_base";
 
 export type ClientStatus = "lead" | "prospect" | "active" | "inactive" | "lost";
 
-export interface IClient {
-  _id: ObjectId;
-  clientNo: string;
+export interface ClientContact {
+  _id?: Id;
   name: string;
-  type: "company" | "individual";
-  contactPerson?: string;
-  contactDesignation?: string;
+  designation?: string;
   email?: string;
   phone?: string;
-  altPhone?: string;
-  website?: string;
-  industry?: string;
-  gstin?: string;
-  address?: Address;
-  leadSource?: string;
-  owner?: ObjectId;
-  status: ClientStatus;
-  /** Restricted clients are only visible to users with `crm.confidential` and the owner. */
-  confidential: boolean;
-  notes?: string;
-  contacts: { _id?: ObjectId; name: string; designation?: string; email?: string; phone?: string }[];
-  attachments: FileRef[];
-  createdBy?: ObjectId;
-  createdAt: Date;
-  updatedAt: Date;
 }
 
-const ClientSchema = new Schema<IClient>(
+/** Writes must trim `name`/`phone`, lowercase + trim `email`, uppercase + trim `gstin`. */
+export const Client = sqliteTable(
+  "clients",
   {
-    clientNo: { type: String, required: true, unique: true },
-    name: { type: String, required: true, trim: true, maxlength: 200 },
-    type: { type: String, enum: ["company", "individual"], default: "company" },
-    contactPerson: String,
-    contactDesignation: String,
-    email: { type: String, lowercase: true, trim: true },
-    phone: { type: String, trim: true },
-    altPhone: String,
-    website: String,
-    industry: String,
-    gstin: { type: String, uppercase: true, trim: true },
-    address: AddressSchema,
-    leadSource: String,
-    owner: { type: ObjectIdType, ref: "User", index: true },
-    status: { type: String, enum: ["lead", "prospect", "active", "inactive", "lost"], default: "prospect", index: true },
-    confidential: { type: Boolean, default: false },
-    notes: String,
-    contacts: {
-      type: [new Schema({ name: { type: String, required: true }, designation: String, email: String, phone: String })],
-      default: [],
-    },
-    attachments: { type: [FileRefSchema], default: [] },
-    createdBy: { type: ObjectIdType, ref: "User" },
+    _id: pk(),
+    clientNo: text().notNull(),
+    name: text().notNull(),
+    type: text().$type<"company" | "individual">().notNull().default("company"),
+    contactPerson: text(),
+    contactDesignation: text(),
+    email: text(),
+    phone: text(),
+    altPhone: text(),
+    website: text(),
+    industry: text(),
+    gstin: text(),
+    address: json<Address>(),
+    leadSource: text(),
+    owner: ref(),
+    status: text().$type<ClientStatus>().notNull().default("prospect"),
+    /** Restricted clients are only visible to users with `crm.confidential` and the owner. */
+    confidential: bool().notNull().default(false),
+    notes: text(),
+    contacts: json<ClientContact[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    attachments: json<FileRef[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    createdBy: ref(),
+    ...timestamps(),
   },
-  { timestamps: true },
+  (t) => [uniqueIndex("clients_client_no").on(t.clientNo), index("clients_owner").on(t.owner), index("clients_status").on(t.status)],
 );
-ClientSchema.index({ name: "text", contactPerson: "text", email: "text", clientNo: "text" });
+export type IClient = typeof Client.$inferSelect;
 
-export const Client = defineModel<IClient>("Client", ClientSchema);
-
-export interface ILead {
-  _id: ObjectId;
-  leadNo: string;
-  title: string;
-  client?: ObjectId;
-  companyName: string;
-  contactName?: string;
-  email?: string;
-  phone?: string;
-  requirement?: string;
-  budget?: number;
-  expectedValue?: number;
-  source?: string;
-  assignedTo?: ObjectId;
-  stage: string;
-  status: "open" | "won" | "lost";
-  lostReason?: string;
-  nextFollowUp?: Date;
-  expectedCloseDate?: string;
-  proposal?: ObjectId;
-  project?: ObjectId;
-  convertedAt?: Date;
-  /** When the lead was closed (marked won or lost). */
-  closedAt?: Date;
-  attachments: FileRef[];
-  history: HistoryEntry[];
-  createdBy?: ObjectId;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-const LeadSchema = new Schema<ILead>(
+/** Writes must trim `title`/`companyName`/`phone` and lowercase + trim `email`. */
+export const Lead = sqliteTable(
+  "leads",
   {
-    leadNo: { type: String, required: true, unique: true },
-    title: { type: String, required: true, trim: true, maxlength: 200 },
-    client: { type: ObjectIdType, ref: "Client", index: true },
-    companyName: { type: String, required: true, trim: true },
-    contactName: String,
-    email: { type: String, lowercase: true, trim: true },
-    phone: { type: String, trim: true },
-    requirement: String,
-    budget: Number,
-    expectedValue: Number,
-    source: String,
-    assignedTo: { type: ObjectIdType, ref: "User", index: true },
-    stage: { type: String, required: true, index: true },
-    status: { type: String, enum: ["open", "won", "lost"], default: "open", index: true },
-    lostReason: String,
-    nextFollowUp: { type: Date, index: true },
-    expectedCloseDate: String,
-    proposal: { type: ObjectIdType, ref: "Proposal" },
-    project: { type: ObjectIdType, ref: "Project" },
-    convertedAt: Date,
-    closedAt: Date,
-    attachments: { type: [FileRefSchema], default: [] },
-    history: { type: [HistorySchema], default: [] },
-    createdBy: { type: ObjectIdType, ref: "User" },
+    _id: pk(),
+    leadNo: text().notNull(),
+    title: text().notNull(),
+    client: ref(),
+    companyName: text().notNull(),
+    contactName: text(),
+    email: text(),
+    phone: text(),
+    requirement: text(),
+    budget: num(),
+    expectedValue: num(),
+    source: text(),
+    assignedTo: ref(),
+    stage: text().notNull(),
+    status: text().$type<"open" | "won" | "lost">().notNull().default("open"),
+    lostReason: text(),
+    nextFollowUp: date(),
+    expectedCloseDate: text(),
+    proposal: ref(),
+    project: ref(),
+    convertedAt: date(),
+    /** When the lead was closed (marked won or lost). */
+    closedAt: date(),
+    attachments: json<FileRef[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    history: json<HistoryEntry[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    createdBy: ref(),
+    ...timestamps(),
   },
-  { timestamps: true },
+  (t) => [
+    uniqueIndex("leads_lead_no").on(t.leadNo),
+    index("leads_client").on(t.client),
+    index("leads_assigned_to").on(t.assignedTo),
+    index("leads_stage").on(t.stage),
+    index("leads_status").on(t.status),
+    index("leads_next_follow_up").on(t.nextFollowUp),
+  ],
 );
-LeadSchema.index({ title: "text", companyName: "text", contactName: "text", leadNo: "text" });
-
-export const Lead = defineModel<ILead>("Lead", LeadSchema);
+export type ILead = typeof Lead.$inferSelect;
 
 export type ActivityType = "call" | "meeting" | "email" | "note" | "follow_up" | "whatsapp";
 
-export interface IActivity {
-  _id: ObjectId;
-  client?: ObjectId;
-  lead?: ObjectId;
-  type: ActivityType;
-  subject: string;
-  notes?: string;
-  at: Date;
-  dueAt?: Date;
-  done: boolean;
-  doneAt?: Date;
-  outcome?: string;
-  attachments: FileRef[];
-  by: ObjectId;
-  byName: string;
-  assignedTo?: ObjectId;
-  reminderSentAt?: Date;
-  createdAt: Date;
-}
-
-const ActivitySchema = new Schema<IActivity>(
+export const Activity = sqliteTable(
+  "activities",
   {
-    client: { type: ObjectIdType, ref: "Client", index: true },
-    lead: { type: ObjectIdType, ref: "Lead", index: true },
-    type: { type: String, enum: ["call", "meeting", "email", "note", "follow_up", "whatsapp"], required: true },
-    subject: { type: String, required: true, maxlength: 300 },
-    notes: { type: String, maxlength: 10000 },
-    at: { type: Date, default: Date.now },
-    dueAt: { type: Date, index: true },
-    done: { type: Boolean, default: true },
-    doneAt: Date,
-    outcome: String,
-    attachments: { type: [FileRefSchema], default: [] },
-    by: { type: ObjectIdType, ref: "User", required: true },
-    byName: String,
-    assignedTo: { type: ObjectIdType, ref: "User", index: true },
-    reminderSentAt: Date,
+    _id: pk(),
+    client: ref(),
+    lead: ref(),
+    type: text().$type<ActivityType>().notNull(),
+    subject: text().notNull(),
+    notes: text(),
+    at: date()
+      .notNull()
+      .$defaultFn(() => new Date()),
+    dueAt: date(),
+    done: bool().notNull().default(true),
+    doneAt: date(),
+    outcome: text(),
+    attachments: json<FileRef[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    by: ref().notNull(),
+    byName: text(),
+    assignedTo: ref(),
+    reminderSentAt: date(),
+    ...timestamps(),
   },
-  { timestamps: true },
+  (t) => [
+    index("activities_client").on(t.client),
+    index("activities_lead").on(t.lead),
+    index("activities_due_at").on(t.dueAt),
+    index("activities_assigned_to").on(t.assignedTo),
+  ],
 );
-
-export const Activity = defineModel<IActivity>("Activity", ActivitySchema);
+export type IActivity = typeof Activity.$inferSelect;

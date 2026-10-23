@@ -1,217 +1,151 @@
-import { defineModel, ObjectIdType, Schema, type ObjectId } from "./_base";
+import { index, sqliteTable, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { bool, createdAt, date, int, json, pk, ref, text, updatedAt } from "./_base";
 
-/** Singleton configuration document (`_id: "global"`), merged over DEFAULT_SETTINGS on read. */
-export interface ISettings {
-  _id: string;
-  value: Record<string, unknown>;
-  updatedBy?: ObjectId;
-  updatedAt: Date;
-}
-
-const SettingsSchema = new Schema<ISettings>(
-  {
-    _id: { type: String, required: true },
-    value: { type: Schema.Types.Mixed, default: {} },
-    updatedBy: { type: ObjectIdType, ref: "User" },
-  },
-  { timestamps: { createdAt: false, updatedAt: true }, minimize: false },
-);
-
-export const Settings = defineModel<ISettings>("Settings", SettingsSchema);
+/** Singleton configuration row (`_id: "global"`), merged over DEFAULT_SETTINGS on read. */
+export const Settings = sqliteTable("settings", {
+  _id: text().primaryKey(),
+  value: json<Record<string, unknown>>().notNull().$defaultFn(() => ({})),
+  updatedBy: ref(),
+  updatedAt: updatedAt(),
+});
+export type ISettings = typeof Settings.$inferSelect;
 
 /** Atomic sequence numbers for human-readable IDs (EMP-0001, MOV-000123, INV-2026-27-0001 …). */
-export interface ICounter {
-  _id: string;
-  seq: number;
-}
-
-const CounterSchema = new Schema<ICounter>({
-  _id: { type: String, required: true },
-  seq: { type: Number, default: 0 },
+export const Counter = sqliteTable("counters", {
+  _id: text().primaryKey(),
+  seq: int().notNull().default(0),
 });
+export type ICounter = typeof Counter.$inferSelect;
 
-export const Counter = defineModel<ICounter>("Counter", CounterSchema);
+/** Expired sessions are purged by the admin job one day after expiry (MongoDB used a TTL index). */
+export const Session = sqliteTable(
+  "sessions",
+  {
+    _id: pk(),
+    sid: text().notNull(),
+    user: ref().notNull(),
+    createdAt: createdAt(),
+    lastSeenAt: date()
+      .notNull()
+      .$defaultFn(() => new Date()),
+    expiresAt: date().notNull(),
+    ip: text(),
+    userAgent: text(),
+    method: text().$type<"google" | "password">().notNull(),
+    revokedAt: date(),
+    revokedReason: text(),
+  },
+  (t) => [uniqueIndex("sessions_sid").on(t.sid), index("sessions_user").on(t.user), index("sessions_expires_at").on(t.expiresAt)],
+);
+export type ISession = typeof Session.$inferSelect;
 
-export interface ISession {
-  _id: ObjectId;
-  sid: string;
-  user: ObjectId;
-  createdAt: Date;
-  lastSeenAt: Date;
-  expiresAt: Date;
-  ip?: string;
-  userAgent?: string;
-  method: "google" | "password";
-  revokedAt?: Date;
-  revokedReason?: string;
-}
-
-const SessionSchema = new Schema<ISession>({
-  sid: { type: String, required: true, unique: true },
-  user: { type: ObjectIdType, ref: "User", required: true, index: true },
-  createdAt: { type: Date, default: Date.now },
-  lastSeenAt: { type: Date, default: Date.now },
-  expiresAt: { type: Date, required: true },
-  ip: String,
-  userAgent: String,
-  method: { type: String, enum: ["google", "password"], required: true },
-  revokedAt: Date,
-  revokedReason: String,
-});
-// Expired sessions are purged automatically one day after expiry.
-SessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 86_400 });
-
-export const Session = defineModel<ISession>("Session", SessionSchema);
-
-/** Failed sign-in attempts for rate limiting (auto-expire after 1 hour). */
-export interface ILoginAttempt {
-  _id: ObjectId;
-  key: string;
-  at: Date;
-}
-
-const LoginAttemptSchema = new Schema<ILoginAttempt>({
-  key: { type: String, required: true, index: true },
-  at: { type: Date, default: Date.now },
-});
-LoginAttemptSchema.index({ at: 1 }, { expireAfterSeconds: 3600 });
-
-export const LoginAttempt = defineModel<ILoginAttempt>("LoginAttempt", LoginAttemptSchema);
+/** Failed sign-in attempts for rate limiting (purged after 1 hour by the admin job; reads ignore older rows). */
+export const LoginAttempt = sqliteTable(
+  "loginattempts",
+  {
+    _id: pk(),
+    key: text().notNull(),
+    at: date()
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => [index("loginattempts_key").on(t.key), index("loginattempts_at").on(t.at)],
+);
+export type ILoginAttempt = typeof LoginAttempt.$inferSelect;
 
 /** Lock + last-run bookkeeping for scheduled jobs (reminders, backups, retention). */
-export interface ISystemJob {
-  _id: string;
-  lastRunAt?: Date;
-  lockedUntil?: Date;
-  lastResult?: string;
-}
-
-const SystemJobSchema = new Schema<ISystemJob>({
-  _id: { type: String, required: true },
-  lastRunAt: Date,
-  lockedUntil: Date,
-  lastResult: String,
+export const SystemJob = sqliteTable("systemjobs", {
+  _id: text().primaryKey(),
+  lastRunAt: date(),
+  lockedUntil: date(),
+  lastResult: text(),
 });
+export type ISystemJob = typeof SystemJob.$inferSelect;
 
-export const SystemJob = defineModel<ISystemJob>("SystemJob", SystemJobSchema);
-
-export interface IAuditLog {
-  _id: ObjectId;
-  actor?: ObjectId;
-  actorName: string;
-  actorRole?: string;
-  action: string;
-  entity: string;
-  entityId?: string;
-  ref?: string;
-  summary: string;
-  changes?: { field: string; from?: string; to?: string }[];
-  ip?: string;
-  userAgent?: string;
-  at: Date;
+export interface AuditChange {
+  field: string;
+  from?: string;
+  to?: string;
 }
 
-const AuditLogSchema = new Schema<IAuditLog>({
-  actor: { type: ObjectIdType, ref: "User", index: true },
-  actorName: { type: String, required: true },
-  actorRole: String,
-  action: { type: String, required: true, index: true },
-  entity: { type: String, required: true, index: true },
-  entityId: { type: String, index: true },
-  ref: String,
-  summary: { type: String, required: true },
-  changes: {
-    type: [new Schema({ field: String, from: String, to: String }, { _id: false })],
-    default: undefined,
+export const AuditLog = sqliteTable(
+  "auditlogs",
+  {
+    _id: pk(),
+    actor: ref(),
+    actorName: text().notNull(),
+    actorRole: text(),
+    action: text().notNull(),
+    entity: text().notNull(),
+    entityId: text(),
+    ref: text(),
+    summary: text().notNull(),
+    changes: json<AuditChange[]>(),
+    ip: text(),
+    userAgent: text(),
+    at: date()
+      .notNull()
+      .$defaultFn(() => new Date()),
   },
-  ip: String,
-  userAgent: String,
-  at: { type: Date, default: Date.now, index: true },
+  (t) => [
+    index("auditlogs_actor").on(t.actor),
+    index("auditlogs_action").on(t.action),
+    index("auditlogs_entity").on(t.entity),
+    index("auditlogs_entity_id").on(t.entityId),
+    index("auditlogs_at").on(t.at),
+  ],
+);
+export type IAuditLog = typeof AuditLog.$inferSelect;
+
+export const StoredFile = sqliteTable(
+  "storedfiles",
+  {
+    _id: pk(),
+    key: text().notNull(),
+    name: text().notNull(),
+    size: int().notNull().default(0),
+    mime: text().notNull().default("application/octet-stream"),
+    /** Public files (avatars, company logo) live in the public bucket; everything else is streamed after a permission check. */
+    isPublic: bool().notNull().default(false),
+    url: text(),
+    entityType: text().notNull(),
+    entityId: text(),
+    category: text(),
+    confidential: bool().notNull().default(false),
+    expiryDate: text(),
+    notes: text(),
+    version: int().notNull().default(1),
+    replaces: ref(),
+    replacedBy: ref(),
+    uploadedBy: ref(),
+    uploadedByName: text(),
+    deletedAt: date(),
+    deletedBy: ref(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("storedfiles_key").on(t.key),
+    index("storedfiles_entity_type").on(t.entityType),
+    index("storedfiles_entity_id").on(t.entityId),
+  ],
+);
+export type IStoredFile = typeof StoredFile.$inferSelect;
+
+export const Backup = sqliteTable("backups", {
+  _id: pk(),
+  key: text().notNull(),
+  size: int().notNull().default(0),
+  /** Per-table row counts (kept as `collections` for continuity with MongoDB-era backups). */
+  collections: json<{ name: string; count: number }[]>()
+    .notNull()
+    .$defaultFn(() => []),
+  trigger: text().$type<"manual" | "scheduled" | "pre_restore">().notNull().default("manual"),
+  by: ref(),
+  byName: text(),
+  status: text().$type<"completed" | "failed">().notNull().default("completed"),
+  error: text(),
+  restoredAt: date(),
+  restoredBy: text(),
+  createdAt: createdAt(),
 });
-
-export const AuditLog = defineModel<IAuditLog>("AuditLog", AuditLogSchema);
-
-export interface IStoredFile {
-  _id: ObjectId;
-  key: string;
-  name: string;
-  size: number;
-  mime: string;
-  /** Public files (avatars, company logo) are served from the CDN; everything else via signed URLs. */
-  isPublic: boolean;
-  url?: string;
-  entityType: string;
-  entityId?: string;
-  category?: string;
-  confidential: boolean;
-  expiryDate?: string;
-  notes?: string;
-  version: number;
-  replaces?: ObjectId;
-  replacedBy?: ObjectId;
-  uploadedBy?: ObjectId;
-  uploadedByName?: string;
-  deletedAt?: Date;
-  deletedBy?: ObjectId;
-  createdAt: Date;
-}
-
-const StoredFileSchema = new Schema<IStoredFile>(
-  {
-    key: { type: String, required: true, unique: true },
-    name: { type: String, required: true },
-    size: { type: Number, default: 0 },
-    mime: { type: String, default: "application/octet-stream" },
-    isPublic: { type: Boolean, default: false },
-    url: String,
-    entityType: { type: String, required: true, index: true },
-    entityId: { type: String, index: true },
-    category: String,
-    confidential: { type: Boolean, default: false },
-    expiryDate: String,
-    notes: String,
-    version: { type: Number, default: 1 },
-    replaces: { type: ObjectIdType, ref: "StoredFile" },
-    replacedBy: { type: ObjectIdType, ref: "StoredFile" },
-    uploadedBy: { type: ObjectIdType, ref: "User" },
-    uploadedByName: String,
-    deletedAt: Date,
-    deletedBy: { type: ObjectIdType, ref: "User" },
-  },
-  { timestamps: { createdAt: true, updatedAt: false } },
-);
-
-export const StoredFile = defineModel<IStoredFile>("StoredFile", StoredFileSchema);
-
-export interface IBackup {
-  _id: ObjectId;
-  key: string;
-  size: number;
-  collections: { name: string; count: number }[];
-  trigger: "manual" | "scheduled" | "pre_restore";
-  by?: ObjectId;
-  byName?: string;
-  status: "completed" | "failed";
-  error?: string;
-  restoredAt?: Date;
-  restoredBy?: string;
-  createdAt: Date;
-}
-
-const BackupSchema = new Schema<IBackup>(
-  {
-    key: { type: String, required: true },
-    size: { type: Number, default: 0 },
-    collections: { type: [new Schema({ name: String, count: Number }, { _id: false })], default: [] },
-    trigger: { type: String, enum: ["manual", "scheduled", "pre_restore"], default: "manual" },
-    by: { type: ObjectIdType, ref: "User" },
-    byName: String,
-    status: { type: String, enum: ["completed", "failed"], default: "completed" },
-    error: String,
-    restoredAt: Date,
-    restoredBy: String,
-  },
-  { timestamps: { createdAt: true, updatedAt: false } },
-);
-
-export const Backup = defineModel<IBackup>("Backup", BackupSchema);
+export type IBackup = typeof Backup.$inferSelect;

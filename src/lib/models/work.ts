@@ -1,228 +1,160 @@
-import {
-  CommentSchema,
-  defineModel,
-  FileRefSchema,
-  HistorySchema,
-  ObjectIdType,
-  Schema,
-  type CommentEntry,
-  type FileRef,
-  type HistoryEntry,
-  type ObjectId,
-} from "./_base";
+import { index, sqliteTable, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { bool, date, int, json, num, pk, ref, text, timestamps, type CommentEntry, type FileRef, type HistoryEntry, type Id } from "./_base";
 import type { Priority } from "./project";
 
 export interface TaskSubmission {
-  _id?: ObjectId;
+  _id?: Id;
   note: string;
   attachments: FileRef[];
   link?: string;
-  submittedBy: ObjectId;
+  submittedBy: Id;
   submittedByName: string;
   submittedAt: Date;
   reviewStatus: "pending" | "approved" | "changes_requested";
   reviewNote?: string;
-  reviewedBy?: ObjectId;
+  reviewedBy?: Id;
   reviewedByName?: string;
   reviewedAt?: Date;
   rating?: number;
 }
 
-export interface ITask {
-  _id: ObjectId;
-  taskNo: string;
-  project?: ObjectId;
-  milestone?: ObjectId;
-  parent?: ObjectId;
-  title: string;
-  description?: string;
-  assignees: ObjectId[];
-  /** Users who may see the task without being assignees (FRS §11.4 explicitly shared tasks). */
-  sharedWith: ObjectId[];
-  reporter?: ObjectId;
-  reviewer?: ObjectId;
-  priority: Priority;
-  status: string;
-  startDate?: string;
-  dueDate?: string;
-  completedAt?: Date;
-  estimateHours: number;
-  progress: number;
-  dependencies: ObjectId[];
-  blocker?: string;
-  isLearning: boolean;
-  attachments: FileRef[];
-  comments: CommentEntry[];
-  submissions: TaskSubmission[];
-  history: HistoryEntry[];
-  deadlineNotifiedAt?: Date;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-const SubmissionSchema = new Schema<TaskSubmission>({
-  note: { type: String, required: true, maxlength: 5000 },
-  attachments: { type: [FileRefSchema], default: [] },
-  link: String,
-  submittedBy: { type: ObjectIdType, ref: "User", required: true },
-  submittedByName: String,
-  submittedAt: { type: Date, default: Date.now },
-  reviewStatus: { type: String, enum: ["pending", "approved", "changes_requested"], default: "pending" },
-  reviewNote: String,
-  reviewedBy: { type: ObjectIdType, ref: "User" },
-  reviewedByName: String,
-  reviewedAt: Date,
-  rating: { type: Number, min: 1, max: 5 },
-});
-
-const TaskSchema = new Schema<ITask>(
+/** Writes must trim `title`. Assignee / sharedWith membership is queried with `jsonHas(...)`. */
+export const Task = sqliteTable(
+  "tasks",
   {
-    taskNo: { type: String, required: true, unique: true },
-    project: { type: ObjectIdType, ref: "Project", index: true },
-    milestone: { type: ObjectIdType },
-    parent: { type: ObjectIdType, ref: "Task", index: true },
-    title: { type: String, required: true, trim: true, maxlength: 300 },
-    description: { type: String, maxlength: 20000 },
-    assignees: { type: [{ type: ObjectIdType, ref: "User" }], default: [], index: true },
-    sharedWith: { type: [{ type: ObjectIdType, ref: "User" }], default: [] },
-    reporter: { type: ObjectIdType, ref: "User" },
-    reviewer: { type: ObjectIdType, ref: "User" },
-    priority: { type: String, enum: ["low", "medium", "high", "urgent"], default: "medium" },
-    status: { type: String, required: true, index: true },
-    startDate: String,
-    dueDate: { type: String, index: true },
-    completedAt: Date,
-    estimateHours: { type: Number, default: 0 },
-    progress: { type: Number, default: 0, min: 0, max: 100 },
-    dependencies: { type: [{ type: ObjectIdType, ref: "Task" }], default: [] },
-    blocker: String,
-    isLearning: { type: Boolean, default: false },
-    attachments: { type: [FileRefSchema], default: [] },
-    comments: { type: [CommentSchema], default: [] },
-    submissions: { type: [SubmissionSchema], default: [] },
-    history: { type: [HistorySchema], default: [] },
-    deadlineNotifiedAt: Date,
+    _id: pk(),
+    taskNo: text().notNull(),
+    project: ref(),
+    milestone: ref(),
+    parent: ref(),
+    title: text().notNull(),
+    description: text(),
+    assignees: json<Id[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    /** Users who may see the task without being assignees (FRS §11.4 explicitly shared tasks). */
+    sharedWith: json<Id[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    reporter: ref(),
+    reviewer: ref(),
+    priority: text().$type<Priority>().notNull().default("medium"),
+    status: text().notNull(),
+    startDate: text(),
+    dueDate: text(),
+    completedAt: date(),
+    estimateHours: num().notNull().default(0),
+    progress: num().notNull().default(0),
+    dependencies: json<Id[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    blocker: text(),
+    isLearning: bool().notNull().default(false),
+    attachments: json<FileRef[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    comments: json<CommentEntry[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    submissions: json<TaskSubmission[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    history: json<HistoryEntry[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    deadlineNotifiedAt: date(),
+    ...timestamps(),
   },
-  { timestamps: true },
+  (t) => [
+    uniqueIndex("tasks_task_no").on(t.taskNo),
+    index("tasks_project").on(t.project),
+    index("tasks_parent").on(t.parent),
+    index("tasks_status").on(t.status),
+    index("tasks_due_date").on(t.dueDate),
+  ],
 );
-TaskSchema.index({ title: "text", taskNo: "text" });
-
-export const Task = defineModel<ITask>("Task", TaskSchema);
+export type ITask = typeof Task.$inferSelect;
 
 export type TimesheetStatus = "draft" | "submitted" | "approved" | "rejected";
 
-export interface ITimesheetEntry {
-  _id: ObjectId;
-  user: ObjectId;
-  date: string;
-  weekStart: string;
-  project?: ObjectId;
-  task?: ObjectId;
-  minutes: number;
-  description: string;
-  billable: boolean;
-  status: TimesheetStatus;
-  submittedAt?: Date;
-  reviewer?: ObjectId;
-  reviewerName?: string;
-  reviewedAt?: Date;
-  reviewNote?: string;
-  history: HistoryEntry[];
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-const TimesheetEntrySchema = new Schema<ITimesheetEntry>(
+export const TimesheetEntry = sqliteTable(
+  "timesheetentries",
   {
-    user: { type: ObjectIdType, ref: "User", required: true },
-    date: { type: String, required: true },
-    weekStart: { type: String, required: true },
-    project: { type: ObjectIdType, ref: "Project", index: true },
-    task: { type: ObjectIdType, ref: "Task", index: true },
-    minutes: { type: Number, required: true, min: 1, max: 24 * 60 },
-    description: { type: String, required: true, maxlength: 2000 },
-    billable: { type: Boolean, default: true },
-    status: { type: String, enum: ["draft", "submitted", "approved", "rejected"], default: "draft", index: true },
-    submittedAt: Date,
-    reviewer: { type: ObjectIdType, ref: "User" },
-    reviewerName: String,
-    reviewedAt: Date,
-    reviewNote: String,
-    history: { type: [HistorySchema], default: [] },
+    _id: pk(),
+    user: ref().notNull(),
+    date: text().notNull(),
+    weekStart: text().notNull(),
+    project: ref(),
+    task: ref(),
+    minutes: int().notNull(),
+    description: text().notNull(),
+    billable: bool().notNull().default(true),
+    status: text().$type<TimesheetStatus>().notNull().default("draft"),
+    submittedAt: date(),
+    reviewer: ref(),
+    reviewerName: text(),
+    reviewedAt: date(),
+    reviewNote: text(),
+    history: json<HistoryEntry[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    ...timestamps(),
   },
-  { timestamps: true },
+  (t) => [
+    index("timesheetentries_project").on(t.project),
+    index("timesheetentries_task").on(t.task),
+    index("timesheetentries_status").on(t.status),
+    index("timesheetentries_user_week").on(t.user, t.weekStart),
+    index("timesheetentries_user_date").on(t.user, t.date),
+  ],
 );
-TimesheetEntrySchema.index({ user: 1, weekStart: 1 });
-TimesheetEntrySchema.index({ user: 1, date: 1 });
-
-export const TimesheetEntry = defineModel<ITimesheetEntry>("TimesheetEntry", TimesheetEntrySchema);
+export type ITimesheetEntry = typeof TimesheetEntry.$inferSelect;
 
 export type IssueStatus = "open" | "assigned" | "in_progress" | "fixed" | "ready_for_testing" | "reopened" | "verified" | "closed";
 export const ISSUE_STATUSES: IssueStatus[] = ["open", "assigned", "in_progress", "fixed", "ready_for_testing", "reopened", "verified", "closed"];
 export type IssueSeverity = "critical" | "major" | "minor" | "trivial";
 
-export interface IIssue {
-  _id: ObjectId;
-  issueNo: string;
-  project: ObjectId;
-  task?: ObjectId;
-  title: string;
-  description?: string;
-  severity: IssueSeverity;
-  priority: Priority;
-  stepsToReproduce?: string;
-  environment?: string;
-  attachments: FileRef[];
-  assignee?: ObjectId;
-  team?: string;
-  reporter: ObjectId;
-  reportedDate: string;
-  targetDate?: string;
-  status: IssueStatus;
-  resolution?: string;
-  resolvedAt?: Date;
-  verifiedBy?: ObjectId;
-  closedAt?: Date;
-  reopenCount: number;
-  comments: CommentEntry[];
-  history: HistoryEntry[];
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-const IssueSchema = new Schema<IIssue>(
+/** Writes must trim `title`. */
+export const Issue = sqliteTable(
+  "issues",
   {
-    issueNo: { type: String, required: true, unique: true },
-    project: { type: ObjectIdType, ref: "Project", required: true, index: true },
-    task: { type: ObjectIdType, ref: "Task" },
-    title: { type: String, required: true, trim: true, maxlength: 300 },
-    description: { type: String, maxlength: 20000 },
-    severity: { type: String, enum: ["critical", "major", "minor", "trivial"], default: "minor" },
-    priority: { type: String, enum: ["low", "medium", "high", "urgent"], default: "medium" },
-    stepsToReproduce: { type: String, maxlength: 10000 },
-    environment: String,
-    attachments: { type: [FileRefSchema], default: [] },
-    assignee: { type: ObjectIdType, ref: "User", index: true },
-    team: String,
-    reporter: { type: ObjectIdType, ref: "User", required: true },
-    reportedDate: { type: String, required: true },
-    targetDate: String,
-    status: {
-      type: String,
-      enum: ["open", "assigned", "in_progress", "fixed", "ready_for_testing", "reopened", "verified", "closed"],
-      default: "open",
-      index: true,
-    },
-    resolution: String,
-    resolvedAt: Date,
-    verifiedBy: { type: ObjectIdType, ref: "User" },
-    closedAt: Date,
-    reopenCount: { type: Number, default: 0 },
-    comments: { type: [CommentSchema], default: [] },
-    history: { type: [HistorySchema], default: [] },
+    _id: pk(),
+    issueNo: text().notNull(),
+    project: ref().notNull(),
+    task: ref(),
+    title: text().notNull(),
+    description: text(),
+    severity: text().$type<IssueSeverity>().notNull().default("minor"),
+    priority: text().$type<Priority>().notNull().default("medium"),
+    stepsToReproduce: text(),
+    environment: text(),
+    attachments: json<FileRef[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    assignee: ref(),
+    team: text(),
+    reporter: ref().notNull(),
+    reportedDate: text().notNull(),
+    targetDate: text(),
+    status: text().$type<IssueStatus>().notNull().default("open"),
+    resolution: text(),
+    resolvedAt: date(),
+    verifiedBy: ref(),
+    closedAt: date(),
+    reopenCount: int().notNull().default(0),
+    comments: json<CommentEntry[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    history: json<HistoryEntry[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    ...timestamps(),
   },
-  { timestamps: true },
+  (t) => [
+    uniqueIndex("issues_issue_no").on(t.issueNo),
+    index("issues_project").on(t.project),
+    index("issues_assignee").on(t.assignee),
+    index("issues_status").on(t.status),
+  ],
 );
-IssueSchema.index({ title: "text", issueNo: "text" });
-
-export const Issue = defineModel<IIssue>("Issue", IssueSchema);
+export type IIssue = typeof Issue.$inferSelect;
