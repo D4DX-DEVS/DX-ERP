@@ -1,7 +1,7 @@
 import "server-only";
 import { and, eq, isNotNull, ne, or, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { Issue, Project, Task, TimesheetEntry, User, type HistoryEntry, type Id, type IssueStatus } from "@/lib/models";
+import { Issue, newId, Project, Task, TimesheetEntry, User, type HistoryEntry, type Id, type IssueStatus } from "@/lib/models";
 import { can, isInternLike, type CurrentUser } from "@/lib/auth/session";
 import type { StatusOption } from "@/lib/config-defaults";
 import { inList, jsonHas, jsonHasAny, jsonHasField, jsonPath } from "@/lib/sql";
@@ -26,7 +26,7 @@ export function historyEntry(
   action: string,
   extra: { note?: string; from?: string; to?: string } = {},
 ): HistoryEntry {
-  return { action, by: user._id, byName: user.name, at: new Date(), ...extra };
+  return { _id: newId(), action, by: user._id, byName: user.name, at: new Date(), ...extra };
 }
 
 export interface PersonLite {
