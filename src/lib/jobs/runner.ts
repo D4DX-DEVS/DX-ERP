@@ -40,11 +40,13 @@ export interface JobRunResult {
 }
 
 /**
- * Runs the due jobs (all of them with `force`), at most `maxJobs` per call. On the Workers Free plan a request
+ * Runs the due jobs (all of them with `force`; pass the first call's `since` to later calls), at most `maxJobs` per call. On the Workers Free plan a request
  * may make 50 D1 queries, so the cron trigger runs a few jobs per request and calls again while `pending > 0`
  * (see cloudflare/worker.ts). Job state is read in one query; each job then costs a lock + release query plus its own work.
  */
-export async function runJobs(opts: { force?: boolean; only?: string[]; maxJobs?: number } = {}): Promise<JobRunResult> {
+export async function runJobs(
+  opts: { force?: boolean; only?: string[]; maxJobs?: number; since?: Date } = {},
+): Promise<JobRunResult> {
   const results: Record<string, string> = {};
   const now = Date.now();
   const state = new Map((await db().select().from(SystemJob)).map((j) => [j._id, j]));
@@ -52,7 +54,9 @@ export async function runJobs(opts: { force?: boolean; only?: string[]; maxJobs?
     if (opts.only && !opts.only.includes(job.name)) return false;
     const s = state.get(job.name);
     if (s?.lockedUntil && s.lockedUntil.getTime() > now) return false;
-    return opts.force || !s?.lastRunAt || s.lastRunAt.getTime() < now - job.intervalMinutes * 60_000;
+    // A forced run spread over several calls skips jobs already run since the first call (`since`).
+    if (opts.force) return !(opts.since && s?.lastRunAt && s.lastRunAt.getTime() >= opts.since.getTime());
+    return !s?.lastRunAt || s.lastRunAt.getTime() < now - job.intervalMinutes * 60_000;
   });
   const batch = due.slice(0, opts.maxJobs ?? due.length);
   for (const job of batch) {

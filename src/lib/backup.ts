@@ -292,7 +292,8 @@ export async function restoreBackup(id: string, actor: BackupActor): Promise<Res
 /** Keeps the newest `keep` completed backups and deletes the rest (objects and records). */
 export async function pruneBackups(keep: number): Promise<number> {
   const limit = Math.max(1, Math.floor(keep) || 1);
-  const stale = await db().select().from(Backup).where(eq(Backup.status, "completed")).orderBy(desc(Backup.createdAt)).limit(-1).offset(limit);
+  // Only a handful of backup rows exist; SQLite also needs a LIMIT before OFFSET, which Drizzle omits for "no limit".
+  const stale = (await db().select().from(Backup).where(eq(Backup.status, "completed")).orderBy(desc(Backup.createdAt))).slice(limit);
   let removed = 0;
   for (const backup of stale) {
     try {

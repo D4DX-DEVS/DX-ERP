@@ -29,10 +29,16 @@ async function handle(request: Request): Promise<NextResponse> {
   const only = params.get("only")?.split(",").map((s) => s.trim()).filter(Boolean);
   // Jobs per request (D1 allows 50 queries per request on the free plan); the caller repeats while `pending > 0`.
   const max = Number.parseInt(params.get("max") ?? "", 10);
+  // Forced runs continue across calls: later calls pass back the `since` of the first one.
+  const sinceParam = new Date(params.get("since") ?? "");
   try {
     const startedAt = new Date();
-    const { results, pending } = await runJobs({ force, only: only?.length ? only : undefined, maxJobs: Number.isFinite(max) && max > 0 ? max : 3 });
-    return NextResponse.json({ ok: true, startedAt: startedAt.toISOString(), force, results, pending }, { headers: { "Cache-Control": "no-store" } });
+    const since = force ? (Number.isNaN(sinceParam.getTime()) ? startedAt : sinceParam) : undefined;
+    const { results, pending } = await runJobs({ force, only: only?.length ? only : undefined, maxJobs: Number.isFinite(max) && max > 0 ? max : 3, since });
+    return NextResponse.json(
+      { ok: true, startedAt: startedAt.toISOString(), force, since: since?.toISOString(), results, pending },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     console.error("[cron] run failed", error);
     return NextResponse.json({ ok: false, error: "Job run failed" }, { status: 500, headers: { "Cache-Control": "no-store" } });
