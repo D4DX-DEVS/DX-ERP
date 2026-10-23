@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Project dashboard</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="management" active="projects" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="management" hint-size="100%,64px"></dc-import>
+    <main style="padding:24px 32px 48px;display:flex;flex-direction:column;gap:20px;width:100%;max-width:1280px;box-sizing:border-box">
+      <nav aria-label="Breadcrumb" style="font-size:13px;color:#5E6583"><a href="Projects.dc.html" style="text-decoration:none">Projects</a> / PRJ-0241</nav>
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-start;gap:16px">
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px"><h1 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">Greenleaf e-commerce revamp</h1><span style="font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:#E2E8FC;color:#1F3CB3">In progress</span><span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#0E6B4B"><span style="width:8px;height:8px;border-radius:999px;background:#0E6B4B"></span>On track</span></div>
+          <div style="display:flex;flex-wrap:wrap;gap:18px;font-size:13px;color:#5E6583"><span>Client <a href="Client.dc.html" style="font-weight:600;text-decoration:none">Greenleaf Organics</a></span><span>PM <strong style="color:#10183A">Aisha Rahman</strong></span><span>4 Aug – 14 Nov 2026</span><span>Priority <strong style="color:#B03A0A">High</strong></span><span>Contract CTR-0032 · from PRP-0051</span></div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <button type="button" style="height:40px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:500;color:#10183A">Release notes</button>
+          <a href="Tasks.dc.html" style="height:40px;padding:0 16px;border-radius:10px;background:#1F3CB3;color:#FFFFFF;font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px;text-decoration:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add task</a>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:4px;border-bottom:1px solid #E2E6F0;overflow-x:auto">
+        <sc-for list="{{tabs}}" as="t" hint-placeholder-count="8"><span style="{{t.s}}">{{t.l}}</span></sc-for>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px">
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:16px"><div style="font-size:13px;color:#5E6583">Progress</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">68%</div><div style="height:6px;border-radius:999px;background:#EDF0F6;margin-top:6px"><div style="width:68%;height:6px;border-radius:999px;background:#284CC7"></div></div></div>
+        <a href="Tasks.dc.html" style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:16px;text-decoration:none;color:#10183A"><div style="font-size:13px;color:#5E6583">Tasks done</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">28 <span style="font-size:14px;color:#5E6583">/ 42</span></div><div style="font-size:12px;color:#B42323;font-weight:600">3 overdue</div></a>
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:16px"><div style="font-size:13px;color:#5E6583">Effort · actual / estimate</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">312 <span style="font-size:14px;color:#5E6583">/ 480 h</span></div><div style="font-size:12px;color:#3D4566">65% used at 68% done</div></div>
+        <a href="Issues.dc.html" style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:16px;text-decoration:none;color:#10183A"><div style="font-size:13px;color:#5E6583">Open QA issues</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">7</div><div style="font-size:12px;color:#B03A0A;font-weight:600">2 high severity</div></a>
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:16px"><div style="display:flex;justify-content:space-between"><span style="font-size:13px;color:#5E6583">Billed</span><span style="font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;background:#0A1450;color:#FFFFFF">FINANCE</span></div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">₹8.7 L</div><div style="font-size:12px;color:#3D4566">of ₹14.5 L contract</div></div>
+      </div>
+
+      <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Milestones &amp; delivery</h2><button type="button" style="height:32px;padding:0 10px;border:1px solid #D5DAE8;border-radius:8px;background:#FFFFFF;font:inherit;font-size:12px;font-weight:600;color:#10183A">+ Milestone</button></div>
+        <ol style="margin:0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0">
+          <sc-for list="{{ms}}" as="m" hint-placeholder-count="6">
+            <li style="display:flex;flex-direction:column;gap:8px;padding-right:12px">
+              <div style="display:flex;align-items:center"><span style="{{m.dot}}"></span><span style="{{m.line}}"></span></div>
+              <div style="font-size:14px;font-weight:600">{{m.n}}</div>
+              <div style="font-size:12px;color:#5E6583">{{m.d}}</div>
+              <span style="{{m.chip}}">{{m.s}}</span>
+            </li>
+          </sc-for>
+        </ol>
+      </section>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
+        <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:14px">
+          <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Task status</h2>
+          <div style="display:flex;height:16px;gap:2px"><span title="Done 28" style="flex:28;background:#0E9F75;border-radius:4px 0 0 4px"></span><span title="Review 3" style="flex:3;background:#D0691F"></span><span title="In progress 5" style="flex:5;background:#284CC7"></span><span title="To do 6" style="flex:6;background:#C9CFDF;border-radius:0 4px 4px 0"></span></div>
+          <div style="display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:#3D4566"><span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:3px;background:#0E9F75"></span>Done 28</span><span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:3px;background:#D0691F"></span>Review 3</span><span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:3px;background:#284CC7"></span>In progress 5</span><span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:3px;background:#C9CFDF"></span>To do 6</span></div>
+          <div style="font-size:13px;font-weight:600;color:#3D4566;padding-top:10px;border-top:1px solid #EEF1F7">Overdue</div>
+          <a href="Task.dc.html" style="display:flex;justify-content:space-between;font-size:13px;text-decoration:none;color:#10183A"><span>TSK-1798 Payment gateway retry logic</span><span style="color:#B42323;font-weight:600">5d</span></a>
+          <a href="Task.dc.html" style="display:flex;justify-content:space-between;font-size:13px;text-decoration:none;color:#10183A"><span>TSK-1789 Product feed sync · blocked</span><span style="color:#B42323;font-weight:600">3d</span></a>
+          <a href="Task.dc.html" style="display:flex;justify-content:space-between;font-size:13px;text-decoration:none;color:#10183A"><span>TSK-1806 Coupon admin screen</span><span style="color:#B42323;font-weight:600">1d</span></a>
+        </section>
+        <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Team workload · this week</h2><span style="font-size:12px;color:#5E6583">logged / capacity</span></div>
+          <sc-for list="{{team}}" as="t" hint-placeholder-count="5">
+            <div style="display:flex;align-items:center;gap:10px;font-size:12px"><span style="width:120px;color:#3D4566;font-weight:500">{{t.n}}</span><span style="flex:1;height:12px;border-radius:4px;background:#F4F6FB"><span style="{{t.bar}}"></span></span><span style="width:58px;text-align:right;color:#3D4566">{{t.v}}</span></div>
+          </sc-for>
+        </section>
+        <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Billing</h2><span style="font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;background:#0A1450;color:#FFFFFF">FINANCE · MGMT</span></div>
+          <sc-for list="{{bill}}" as="b" hint-placeholder-count="4">
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:8px 0;border-top:1px solid #EEF1F7"><span><span style="display:block;font-weight:600">{{b.n}}</span><span style="display:block;font-size:12px;color:#5E6583">{{b.m}}</span></span><span style="text-align:right"><span style="display:block;font-weight:600">{{b.v}}</span><span style="{{b.chip}}">{{b.s}}</span></span></div>
+          </sc-for>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1300}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const T = { green: ['#E2F5EC', '#0E6B4B'], blue: ['#E2E8FC', '#1F3CB3'], gray: ['#EDF0F6', '#4A5270'], amber: ['#FFF1D9', '#8A4F00'] };
+    const chip = (t) => 'align-self:flex-start;display:inline-block;font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;white-space:nowrap;background:' + T[t][0] + ';color:' + T[t][1];
+    const tabs = ['Overview', 'Tasks 42', 'Milestones', 'Team', 'Timesheets', 'QA issues 7', 'Files', 'Billing'];
+    const M = [['Discovery', 'Done 14 Aug', 'Client approved', 'done'], ['Design sign-off', 'Done 5 Sep', 'Client approved', 'done'], ['Catalogue & search', 'Done 3 Oct', 'Released v1.2', 'done'], ['Checkout release', 'Due 28 Oct', 'In progress', 'now'], ['Client UAT', 'Due 7 Nov', 'Upcoming', 'next'], ['Go-live', 'Due 14 Nov', 'Upcoming', 'next']];
+    const C = { done: '#0E9F75', now: '#284CC7', next: '#C9CFDF' };
+    const W = [['Arjun Nair', 17.5, 40], ['Sanjay Varma', 22, 40], ['Fathima Nasrin', 12, 20], ['Anjali George', 14, 20], ['Neha Joseph', 18, 30]];
+    return {
+      tabs: tabs.map((l, i) => ({ l, s: 'padding:12px 12px;font-size:14px;white-space:nowrap;' + (i === 0 ? 'font-weight:600;color:#1F3CB3;border-bottom:2px solid #1F3CB3;margin-bottom:-1px' : 'font-weight:500;color:#5E6583') })),
+      ms: M.map(([n, d, s, k], i) => ({ n, d, s, chip: chip(k === 'done' ? 'green' : k === 'now' ? 'blue' : 'gray'), dot: 'width:16px;height:16px;flex:none;border-radius:999px;box-sizing:border-box;' + (k === 'now' ? 'border:4px solid #284CC7;background:#FFFFFF' : 'background:' + C[k]), line: 'flex:1;height:3px;margin-left:4px;border-radius:2px;background:' + (i === M.length - 1 ? 'transparent' : k === 'done' ? '#0E9F75' : '#E2E6F0') })),
+      team: W.map(([n, a, c]) => ({ n, v: a + ' / ' + c + ' h', bar: 'display:block;height:12px;border-radius:4px;background:#284CC7;width:' + Math.round(a / c * 100) + '%' })),
+      bill: [
+        { n: 'Discovery & design', m: 'INV/2026-27/0098 · 30%', v: '₹4,35,000', s: 'Paid', chip: chip('green') },
+        { n: 'Catalogue & search', m: 'INV/2026-27/0109 · 30%', v: '₹4,35,000', s: 'Partially paid', chip: chip('amber') },
+        { n: 'Checkout release', m: 'Bill on milestone · 25%', v: '₹3,62,500', s: 'Not invoiced', chip: chip('gray') },
+        { n: 'Go-live', m: 'Bill on milestone · 15%', v: '₹2,17,500', s: 'Not invoiced', chip: chip('gray') }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

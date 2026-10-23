@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Daily attendance</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="hr" active="attendance" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="hr" hint-size="100%,64px"></dc-import>
+    <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:20px;width:100%;max-width:1280px;box-sizing:border-box">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px">
+        <div>
+          <div style="font-size:13px;color:#5E6583">Time · HR view</div>
+          <h1 style="margin:2px 0 0;font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">Daily attendance</h1>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px">
+          <button type="button" style="height:40px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:500;color:#10183A;display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM4 10h16M8 3v4M16 3v4"></path></svg>Wed 21 Oct 2026</button>
+          <button type="button" style="height:40px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:500;color:#10183A">Export ▾</button>
+          <button type="button" style="height:40px;padding:0 16px;border:0;border-radius:10px;background:#1F3CB3;font:inherit;font-size:14px;font-weight:600;color:#FFFFFF">Manual entry</button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">
+        <sc-for list="{{kpis}}" as="k" hint-placeholder-count="6">
+          <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:4px"><span style="display:flex;align-items:center;gap:6px;font-size:13px;color:#5E6583"><span style="{{k.dot}}"></span>{{k.l}}</span><span style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">{{k.v}}</span></div>
+        </sc-for>
+      </div>
+
+      <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column;min-width:0">
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:14px 16px;border-bottom:1px solid #EEF1F7">
+          <label style="flex:1 1 220px;max-width:300px;display:flex;align-items:center;gap:8px;height:38px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;color:#5E6583"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4"></path></svg><input type="search" aria-label="Search people" placeholder="Search people" style="flex:1;min-width:0;border:0;outline:none;font:inherit;font-size:14px;color:#10183A"></label>
+          <button type="button" style="height:38px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:500;color:#3D4566">Department ▾</button>
+          <button type="button" style="height:38px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:500;color:#3D4566">Status ▾</button>
+          <button type="button" style="height:38px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:500;color:#3D4566">Type: all ▾</button>
+          <span style="flex:1"></span>
+          <span style="font-size:12px;color:#5E6583">Updated 11:40 · live</span>
+        </div>
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:980px">
+            <thead><tr style="background:#F7F8FC;color:#5E6583;text-align:left"><th style="padding:10px 16px;font-size:12px;font-weight:600">Person</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Check-in</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Check-out</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Break</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Right now</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Worked</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Status</th><th style="padding:10px 16px 10px 8px;font-size:12px;font-weight:600">Flags</th></tr></thead>
+            <tbody>
+              <sc-for list="{{rows}}" as="r" hint-placeholder-count="11">
+                <tr style="border-top:1px solid #EEF1F7">
+                  <td style="padding:10px 16px"><div style="font-weight:600">{{r.n}}</div><div style="font-size:12px;color:#5E6583">{{r.d}}</div></td>
+                  <td style="padding:10px 8px">{{r.i}}</td>
+                  <td style="padding:10px 8px">{{r.o}}</td>
+                  <td style="padding:10px 8px">{{r.b}}</td>
+                  <td style="padding:10px 8px"><span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap"><span style="{{r.nowDot}}"></span>{{r.now}}</span></td>
+                  <td style="padding:10px 8px;font-weight:600">{{r.w}}</td>
+                  <td style="padding:10px 8px"><span style="{{r.chip}}">{{r.s}}</span></td>
+                  <td style="padding:10px 16px 10px 8px;font-size:12px;color:#9A5800;font-weight:600">{{r.f}}</td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
+        <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column;min-width:0">
+          <div style="padding:18px 20px 10px;display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Correction requests <span style="font-size:13px;color:#5E6583;font-weight:500">· 3</span></h2></div>
+          <sc-for list="{{corr}}" as="c" hint-placeholder-count="3">
+            <div style="display:flex;align-items:center;gap:12px;padding:12px 20px;border-top:1px solid #EEF1F7">
+              <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600">{{c.t}}</div><div style="font-size:12px;color:#5E6583">{{c.m}}</div></div>
+              <button type="button" aria-label="Reject" style="width:34px;height:34px;border:1px solid #E2E6F0;border-radius:9px;background:#FFFFFF;color:#B42323;display:flex;align-items:center;justify-content:center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+              <button type="button" aria-label="Approve" style="width:34px;height:34px;border:0;border-radius:9px;background:#0E7A55;color:#FFFFFF;display:flex;align-items:center;justify-content:center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg></button>
+            </div>
+          </sc-for>
+        </section>
+        <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:12px">
+          <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">By department</h2>
+          <sc-for list="{{depts}}" as="d" hint-placeholder-count="6">
+            <div style="display:flex;align-items:center;gap:10px;font-size:12px"><span style="width:110px;color:#3D4566">{{d.n}}</span><span style="flex:1;display:flex;gap:2px;height:14px"><span style="{{d.p}}"></span><span style="{{d.l}}"></span><span style="{{d.a}}"></span></span><span style="width:44px;text-align:right;color:#3D4566">{{d.t}}</span></div>
+          </sc-for>
+          <div style="display:flex;gap:14px;font-size:11px;color:#5E6583"><span style="display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:2px;background:#284CC7"></span>Present</span><span style="display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:2px;background:#0E9F75"></span>On leave</span><span style="display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:2px;background:#D0691F"></span>Absent</span></div>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1250}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const dot = (c) => 'width:8px;height:8px;border-radius:999px;flex:none;background:' + c;
+    const T = { green: ['#E2F5EC', '#0E6B4B'], amber: ['#FFF1D9', '#8A4F00'], red: ['#FDE7E7', '#B42323'], blue: ['#E2E8FC', '#1F3CB3'] };
+    const chip = (t) => 'font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;white-space:nowrap;background:' + T[t][0] + ';color:' + T[t][1];
+    const NOW = { in: ['In office', '#12935F'], out: ['Out · movement', '#C2410C'], off: ['—', '#C4CAD9'] };
+    const R = [
+      ['Arjun Nair', 'Engineering', '09:12', '—', '0m', 'in', '2h 28m', 'Present', 'green', ''],
+      ['Sanjay Varma', 'Engineering', '09:41', '—', '0m', 'out', '1h 59m', 'Late', 'amber', 'Late 11m · overdue return'],
+      ['Anjali George', 'Engineering', '09:08', '—', '0m', 'out', '2h 32m', 'Present', 'green', 'Overdue return'],
+      ['Vivek Menon', 'Engineering', '08:55', '—', '15m', 'in', '2h 30m', 'Present', 'green', ''],
+      ['Fathima Nasrin', 'Design', '09:20', '—', '0m', 'in', '2h 20m', 'Present', 'green', ''],
+      ['Kiran Das', 'QA', '—', '—', '—', 'off', '—', 'Absent', 'red', 'Open movement from Tue'],
+      ['Meera Pillai', 'Marketing', '—', '—', '—', 'off', '—', 'On leave', 'blue', 'Casual · till 27 Oct'],
+      ['Joel Mathew', 'Business Dev.', '09:35', '—', '0m', 'out', '2h 05m', 'Late', 'amber', 'Late 5m'],
+      ['Neha Joseph', 'Engineering · Trainee', '09:00', '—', '0m', 'in', '2h 40m', 'Present', 'green', ''],
+      ['Rahul Menon', 'Design · Intern', '09:26', '—', '0m', 'in', '2h 14m', 'Present', 'green', ''],
+      ['Divya Krishnan', 'Finance', '09:03', '—', '10m', 'in', '2h 27m', 'Present', 'green', 'No check-out Mon']
+    ];
+    const D = [['Engineering', 14, 1, 1], ['Design', 5, 1, 0], ['QA', 3, 0, 1], ['Marketing', 3, 1, 0], ['Business Dev.', 3, 1, 0], ['Finance & HR', 6, 1, 1]];
+    const w = (n, tot, c, last) => 'flex:' + n + ';background:' + c + ';' + (n ? '' : 'display:none;') + 'border-radius:' + (last ? '0 4px 4px 0' : '0');
+    return {
+      kpis: [['Present', '34', '#12935F'], ['Late', '4', '#D0691F'], ['Absent', '3', '#B42323'], ['On leave', '5', '#284CC7'], ['Out on movement', '5', '#C2410C'], ['Corrections', '3', '#6D28D9']].map(([l, v, c]) => ({ l, v, dot: dot(c) })),
+      rows: R.map(([n, d, i, o, b, now, w2, s, t, f]) => ({ n, d, i, o, b, w: w2, s, f, now: NOW[now][0], nowDot: dot(NOW[now][1]), chip: chip(t) })),
+      corr: [
+        { t: 'Sanjay Varma · movement In-Time', m: 'Mon 19 Oct · 15:40 → 15:05 · "Forgot to tap on return"' },
+        { t: 'Divya Krishnan · check-out', m: 'Mon 19 Oct · add 18:20 · "App logged me out"' },
+        { t: 'Adil Basheer · check-in', m: 'Fri 16 Oct · 09:48 → 09:10 · "Badge reader down"' }
+      ],
+      depts: D.map(([n, p, l, a]) => ({ n, t: p + '/' + (p + l + a), p: 'flex:' + p + ';background:#284CC7;border-radius:4px 0 0 4px', l: w(l, 0, '#0E9F75', !a), a: w(a, 0, '#D0691F', 1) }))
+    };
+  }
+}
+</script>
+</body>
+</html>

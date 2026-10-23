@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>My attendance</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="employee" active="attendance" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="employee" hint-size="100%,64px"></dc-import>
+    <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:20px;width:100%;max-width:1280px;box-sizing:border-box">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px">
+        <div>
+          <div style="font-size:13px;color:#5E6583">Time</div>
+          <h1 style="margin:2px 0 0;font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">My attendance</h1>
+        </div>
+        <div style="display:flex;gap:10px">
+          <div style="display:flex;align-items:center;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;height:40px">
+            <button type="button" aria-label="Previous month" style="width:36px;height:38px;border:0;background:transparent;color:#3D4566">‹</button>
+            <span style="font-size:14px;font-weight:600;padding:0 8px">October 2026</span>
+            <button type="button" aria-label="Next month" style="width:36px;height:38px;border:0;background:transparent;color:#3D4566">›</button>
+          </div>
+          <button type="button" style="height:40px;padding:0 16px;border:0;border-radius:10px;background:#1F3CB3;font:inherit;font-size:14px;font-weight:600;color:#FFFFFF">Request correction</button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px">
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:16px"><div style="font-size:13px;color:#5E6583">Present</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">13 <span style="font-size:14px;color:#5E6583">/ 14 days</span></div></div>
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:16px"><div style="font-size:13px;color:#5E6583">Average day</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">8h 21m</div></div>
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:16px"><div style="font-size:13px;color:#5E6583">Late arrivals</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">1</div></div>
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:16px"><div style="font-size:13px;color:#5E6583">Leave taken</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">1</div></div>
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:16px"><div style="font-size:13px;color:#5E6583">Missing check-out</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px;color:#B03A0A">1</div></div>
+      </div>
+
+      <div style="display:flex;gap:10px;padding:12px 16px;border-radius:12px;background:#FFEDE3;color:#7A2A06;font-size:13px;align-items:center">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2"></path></svg>
+        <span style="flex:1"><strong>No check-out on Mon 19 Oct.</strong> Hours for that day stay provisional until a correction is approved.</span>
+        <button type="button" style="height:32px;padding:0 12px;border:1px solid #E9B99B;border-radius:8px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:600;color:#7A2A06">Fix it</button>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start">
+        <section style="grid-column:span 2;background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:12px;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+            <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">October</h2>
+            <div style="display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:#3D4566">
+              <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:3px;background:#E2F5EC;border:1px solid #0E7A55"></span>Present</span>
+              <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:3px;background:#FFF1D9;border:1px solid #9A5800"></span>Late</span>
+              <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:3px;background:#E2E8FC;border:1px solid #1F3CB3"></span>Leave</span>
+              <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:3px;background:#FFEDE3;border:1px solid #C2410C"></span>Missing check-out</span>
+              <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:3px;background:#F4F6FB;border:1px solid #C4CAD9"></span>Holiday / weekend</span>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px">
+            <sc-for list="{{dow}}" as="d" hint-placeholder-count="7"><span style="font-size:12px;font-weight:600;color:#5E6583;text-align:center;padding:4px 0">{{d}}</span></sc-for>
+            <sc-for list="{{cal}}" as="c" hint-placeholder-count="35">
+              <div style="{{c.style}}"><span style="font-size:12px;font-weight:600">{{c.n}}</span><span style="font-size:11px">{{c.h}}</span></div>
+            </sc-for>
+          </div>
+        </section>
+
+        <aside style="display:flex;flex-direction:column;gap:16px;min-width:0">
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:10px">
+            <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Correction requests</h2>
+            <div style="padding:10px 0;border-top:1px solid #EEF1F7;font-size:13px"><div style="display:flex;justify-content:space-between"><strong>Mon 19 Oct · check-out</strong><span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:#EDF0F6;color:#4A5270">Draft</span></div><div style="color:#5E6583;margin-top:2px">Forgot to check out · actual 18:05</div></div>
+            <div style="padding:10px 0;border-top:1px solid #EEF1F7;font-size:13px"><div style="display:flex;justify-content:space-between"><strong>Thu 15 Oct · movement In</strong><span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:#E2F5EC;color:#0E6B4B">Approved</span></div><div style="color:#5E6583;margin-top:2px">12:25 → 12:05 · by Vivek Menon</div></div>
+            <div style="padding:10px 0;border-top:1px solid #EEF1F7;font-size:13px"><div style="display:flex;justify-content:space-between"><strong>Tue 8 Sep · check-in</strong><span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:#FDE7E7;color:#B42323">Rejected</span></div><div style="color:#5E6583;margin-top:2px">Badge log shows 09:44</div></div>
+          </section>
+          <section style="background:#F1F4FE;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:6px;font-size:13px;color:#172E94">
+            <strong>Your policy</strong>
+            <span>Office hours 09:00 – 18:00 · Mon to Fri</span>
+            <span>Grace period 30 min · half day under 4h 30m</span>
+            <span>Movements don't end your working day</span>
+          </section>
+        </aside>
+      </div>
+
+      <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column;min-width:0">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:18px 20px 12px"><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Daily log</h2><button type="button" style="height:34px;padding:0 12px;border:1px solid #D5DAE8;border-radius:8px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:500;color:#10183A">Export</button></div>
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:820px">
+            <thead><tr style="background:#F7F8FC;color:#5E6583;text-align:left"><th style="padding:9px 20px;font-size:12px;font-weight:600">Date</th><th style="padding:9px 8px;font-size:12px;font-weight:600">Check-in</th><th style="padding:9px 8px;font-size:12px;font-weight:600">Check-out</th><th style="padding:9px 8px;font-size:12px;font-weight:600">Break</th><th style="padding:9px 8px;font-size:12px;font-weight:600">Official out</th><th style="padding:9px 8px;font-size:12px;font-weight:600">Personal out</th><th style="padding:9px 8px;font-size:12px;font-weight:600">Worked</th><th style="padding:9px 20px 9px 8px;font-size:12px;font-weight:600">Status</th></tr></thead>
+            <tbody>
+              <sc-for list="{{log}}" as="l" hint-placeholder-count="5">
+                <tr style="border-top:1px solid #EEF1F7"><td style="padding:10px 20px;font-weight:600">{{l.d}}</td><td style="padding:10px 8px">{{l.i}}</td><td style="padding:10px 8px">{{l.o}}</td><td style="padding:10px 8px">{{l.b}}</td><td style="padding:10px 8px">{{l.of}}</td><td style="padding:10px 8px">{{l.pe}}</td><td style="padding:10px 8px;font-weight:600">{{l.w}}</td><td style="padding:10px 20px 10px 8px"><span style="{{l.chip}}">{{l.s}}</span></td></tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1250}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const K = { P: ['#E2F5EC', '#0E6B4B'], L: ['#FFF1D9', '#8A4F00'], V: ['#E2E8FC', '#1F3CB3'], M: ['#FFEDE3', '#B03A0A'], H: ['#F4F6FB', '#5E6583'], W: ['#F4F6FB', '#8A93B2'], T: ['#FFFFFF', '#1F3CB3'], F: ['#FFFFFF', '#A3A9BE'], X: ['transparent', 'transparent'] };
+    const days = {};
+    const set = (list, k, h) => list.forEach((d, i) => { days[d] = [k, h[i] || h[0]]; });
+    set([1, 5, 6, 7, 9, 12, 14, 15, 16, 20], 'P', ['8h 32m', '8h 40m', '8h 12m', '8h 25m', '8h 05m', '8h 18m', '8h 50m', '7h 55m', '8h 30m', '8h 05m']);
+    days[8] = ['L', '7h 58m']; days[13] = ['V', 'Casual']; days[19] = ['M', '—']; days[2] = ['H', 'Holiday']; days[21] = ['T', '2h 28m'];
+    [3, 4, 10, 11, 17, 18, 24, 25, 31].forEach((d) => { days[d] = ['W', '']; });
+    [22, 23, 26, 27, 28, 29, 30].forEach((d) => { days[d] = ['F', '']; });
+    const cal = [];
+    for (let i = 0; i < 3; i++) cal.push({ n: '', h: '', style: 'min-height:58px' });
+    for (let d = 1; d <= 31; d++) {
+      const [k, h] = days[d];
+      const c = K[k];
+      const border = k === 'T' ? '2px solid #1F3CB3' : k === 'F' ? '1px dashed #D5DAE8' : '1px solid transparent';
+      cal.push({ n: d, h, style: 'min-height:58px;box-sizing:border-box;border-radius:10px;padding:6px 8px;display:flex;flex-direction:column;justify-content:space-between;background:' + c[0] + ';color:' + c[1] + ';border:' + border });
+    }
+    const T = { green: ['#E2F5EC', '#0E6B4B'], amber: ['#FFF1D9', '#8A4F00'], orange: ['#FFEDE3', '#B03A0A'], blue: ['#E2E8FC', '#1F3CB3'] };
+    const chip = (t) => 'font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;white-space:nowrap;background:' + T[t][0] + ';color:' + T[t][1];
+    return {
+      dow: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+      cal,
+      log: [
+        { d: 'Wed 21 Oct', i: '09:12', o: '—', b: '0m', of: '—', pe: '—', w: '2h 28m', s: 'In progress', chip: chip('blue') },
+        { d: 'Tue 20 Oct', i: '09:05', o: '18:10', b: '45m', of: '1h 15m', pe: '—', w: '8h 05m', s: 'Present', chip: chip('green') },
+        { d: 'Mon 19 Oct', i: '09:20', o: '—', b: '40m', of: '—', pe: '30m', w: 'Provisional', s: 'Missing check-out', chip: chip('orange') },
+        { d: 'Fri 16 Oct', i: '09:02', o: '18:12', b: '40m', of: '—', pe: '—', w: '8h 30m', s: 'Present', chip: chip('green') },
+        { d: 'Thu 15 Oct', i: '09:15', o: '17:50', b: '40m', of: '1h 35m', pe: '—', w: '7h 55m', s: 'Present', chip: chip('green') },
+        { d: 'Thu 8 Oct', i: '09:41', o: '18:19', b: '40m', of: '—', pe: '—', w: '7h 58m', s: 'Late', chip: chip('amber') }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

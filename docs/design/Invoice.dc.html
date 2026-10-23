@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Invoice &amp; payments</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="management" active="invoices" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="management" hint-size="100%,64px"></dc-import>
+    <main style="padding:24px 32px 48px;display:flex;flex-direction:column;gap:18px;width:100%;max-width:1280px;box-sizing:border-box">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px">
+        <div>
+          <nav aria-label="Breadcrumb" style="font-size:13px;color:#5E6583"><a href="Invoices.dc.html" style="text-decoration:none">Invoices</a> / INV/2026-27/0112</nav>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:4px"><h1 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">INV/2026-27/0112</h1><span style="font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:#FFF1D9;color:#8A4F00">Partially paid</span></div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <button type="button" style="height:40px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:500;color:#10183A">Download PDF</button>
+          <button type="button" style="height:40px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:500;color:#10183A">Send reminder</button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start">
+        <article style="grid-column:span 2;background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:36px 40px;display:flex;flex-direction:column;gap:24px;min-width:0;box-shadow:0 6px 20px rgba(16,24,58,0.06)">
+          <div style="display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap">
+            <div style="display:flex;gap:14px;align-items:center"><img src="/_blob/f1e306324ac504d40e596fdafd905f1c" alt="D4DX" style="height:56px;width:52px;object-fit:contain"><div style="font-size:12px;color:#3D4566;line-height:1.55"><strong style="font-size:14px;color:#10183A">D4DX Innovations LLP</strong><br>[Office address]<br>GSTIN [GSTIN] · LLPIN [LLPIN]</div></div>
+            <div style="text-align:right"><div style="font-family:Montserrat,sans-serif;font-weight:700;font-size:22px;letter-spacing:0.06em;color:#1F3CB3">TAX INVOICE</div><div style="font-size:12px;color:#3D4566;line-height:1.6;margin-top:4px">INV/2026-27/0112<br>Issued 6 Oct 2026 · Due 21 Oct 2026</div></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap;padding:16px 0;border-top:1px solid #EEF1F7;border-bottom:1px solid #EEF1F7">
+            <div style="font-size:12px;color:#3D4566;line-height:1.6"><div style="font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#5E6583">Bill to</div><strong style="font-size:14px;color:#10183A">Greenleaf Organics Pvt Ltd</strong><br>[Client address]<br>GSTIN [Client GSTIN]</div>
+            <div style="font-size:12px;color:#3D4566;line-height:1.6;text-align:right"><div style="font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#5E6583">Reference</div>Project PRJ-0241 · Contract CTR-0032<br>Milestone: Catalogue &amp; search (30%)<br>Place of supply: Kerala</div>
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead><tr style="color:#5E6583;text-align:left;border-bottom:1px solid #E2E6F0"><th style="padding:8px 0;font-size:12px;font-weight:600">Description</th><th style="padding:8px;font-size:12px;font-weight:600">SAC</th><th style="padding:8px 0;font-size:12px;font-weight:600;text-align:right">Amount</th></tr></thead>
+            <tbody>
+              <tr style="border-bottom:1px solid #EEF1F7"><td style="padding:12px 0"><strong>Catalogue &amp; search release</strong><br><span style="color:#5E6583">Product listing, filters, search, CMS for 1,200 SKUs</span></td><td style="padding:12px 8px">998314</td><td style="padding:12px 0;text-align:right">₹4,35,000.00</td></tr>
+            </tbody>
+          </table>
+          <div style="display:flex;justify-content:flex-end">
+            <div style="width:300px;display:flex;flex-direction:column;gap:6px;font-size:13px">
+              <div style="display:flex;justify-content:space-between"><span style="color:#5E6583">Taxable value</span><span>₹4,35,000.00</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:#5E6583">CGST 9%</span><span>₹39,150.00</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="color:#5E6583">SGST 9%</span><span>₹39,150.00</span></div>
+              <div style="display:flex;justify-content:space-between;padding-top:8px;border-top:1px solid #E2E6F0;font-weight:700;font-size:15px"><span>Total</span><span>₹5,13,300.00</span></div>
+              <div style="font-size:11px;color:#5E6583;text-align:right">Rupees five lakh thirteen thousand three hundred only</div>
+            </div>
+          </div>
+          <div style="font-size:12px;color:#5E6583;line-height:1.6;padding-top:16px;border-top:1px solid #EEF1F7">Pay by NEFT to [Bank name] · A/c [Account no.] · IFSC [IFSC]. Please quote the invoice number. Payment due in 15 days.</div>
+        </article>
+
+        <aside style="display:flex;flex-direction:column;gap:16px;min-width:0">
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#5E6583">Invoice total</span><strong>₹5,13,300</strong></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#5E6583">Received</span><strong style="color:#0E6B4B">₹3,09,900</strong></div>
+            <div style="height:8px;border-radius:999px;background:#EDF0F6"><div style="width:60%;height:8px;border-radius:999px;background:#0E9F75"></div></div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-size:13px;color:#5E6583">Balance due today</span><span style="font-family:Montserrat,sans-serif;font-weight:600;font-size:22px">₹2,03,400</span></div>
+          </section>
+          <form style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:12px">
+            <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Record payment</h2>
+            <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:600;color:#3D4566">Amount<input type="text" value="₹2,03,400" style="height:40px;padding:0 10px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;min-width:0"></label>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:600;color:#3D4566">Date<input type="text" value="21 Oct 2026" style="height:40px;padding:0 10px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;min-width:0"></label>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:600;color:#3D4566">Method<select style="height:40px;padding:0 10px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;background:#FFFFFF"><option>NEFT</option><option>UPI</option><option>Cheque</option></select></label>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:600;color:#3D4566">Reference<input type="text" placeholder="UTR / cheque no." style="height:40px;padding:0 10px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;min-width:0"></label>
+            </div>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#3D4566"><input type="checkbox" style="width:16px;height:16px;accent-color:#1F3CB3">TDS deducted by client</label>
+            <button type="button" style="height:42px;border:0;border-radius:10px;background:#1F3CB3;font:inherit;font-size:14px;font-weight:600;color:#FFFFFF">Save payment</button>
+          </form>
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:6px">
+            <h2 style="margin:0 0 6px;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">History</h2>
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:8px 0;border-top:1px solid #EEF1F7"><span><strong>Payment · UPI</strong><br><span style="color:#5E6583">16 Oct · ref 6291…4410</span></span><strong style="color:#0E6B4B">₹1,09,900</strong></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:8px 0;border-top:1px solid #EEF1F7"><span><strong>Payment · NEFT</strong><br><span style="color:#5E6583">12 Oct · UTR …88213</span></span><strong style="color:#0E6B4B">₹2,00,000</strong></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:8px 0;border-top:1px solid #EEF1F7"><span><strong>Issued &amp; emailed</strong><br><span style="color:#5E6583">6 Oct · by Divya Krishnan</span></span><span style="color:#5E6583">viewed 2×</span></div>
+          </section>
+        </aside>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1150}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

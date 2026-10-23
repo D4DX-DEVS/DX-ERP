@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Employee dashboard</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="employee" active="dashboard" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="employee" hint-size="100%,64px"></dc-import>
+    <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:24px;width:100%;max-width:1280px;box-sizing:border-box">
+      <div>
+        <div style="font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#5E6583">Wednesday, 21 October 2026</div>
+        <h1 style="margin:4px 0 0;font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">Good morning, Arjun</h1>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
+        <section style="grid-column:span 2;background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:22px;display:flex;flex-wrap:wrap;gap:28px;min-width:0">
+          <div style="flex:1 1 300px;display:flex;flex-direction:column;gap:16px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Today</h2>
+              <span style="font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:#E2F5EC;color:#0E6B4B">Present · on time</span>
+              <span style="font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:#F1F4FE;color:#1F3CB3">In office</span>
+            </div>
+            <div style="display:flex;gap:32px">
+              <div><div style="font-size:12px;color:#5E6583">Check-in</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">09:12</div></div>
+              <div><div style="font-size:12px;color:#5E6583">Check-out</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px;color:#8A93B2">—</div></div>
+              <div><div style="font-size:12px;color:#5E6583">Worked so far</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">2h 28m</div></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <div style="display:flex;height:10px;border-radius:999px;background:#EDF0F6;overflow:hidden"><span style="width:31%;background:#284CC7"></span></div>
+              <div style="display:flex;justify-content:space-between;font-size:12px;color:#5E6583"><span>09:12 in</span><span>Target 8h 00m · grace until 09:30</span><span>~17:42 out</span></div>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:10px">
+              <a href="Movement-New.dc.html" style="height:40px;padding:0 16px;border-radius:10px;background:#1F3CB3;color:#FFFFFF;font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px;text-decoration:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M9 16l-4-4 4-4M5 12h11"></path></svg>Record movement out</a>
+              <button type="button" style="height:40px;padding:0 16px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:600;color:#10183A">Start break</button>
+              <button type="button" style="height:40px;padding:0 16px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:600;color:#10183A">Check out</button>
+            </div>
+          </div>
+          <div style="flex:1 1 260px;display:flex;flex-direction:column;gap:10px;padding-left:24px;border-left:1px solid #EEF1F7">
+            <div style="font-size:13px;font-weight:600;color:#3D4566">This week</div>
+            <sc-for list="{{week}}" as="d" hint-placeholder-count="5">
+              <div style="display:flex;align-items:center;gap:10px;font-size:12px">
+                <span style="width:30px;color:#3D4566;font-weight:600">{{d.day}}</span>
+                <span style="flex:1;height:12px;border-radius:4px;background:#F4F6FB;display:flex;gap:2px;overflow:hidden"><span style="{{d.office}}"></span><span style="{{d.move}}"></span></span>
+                <span style="width:52px;text-align:right;color:#3D4566">{{d.total}}</span>
+              </div>
+            </sc-for>
+            <div style="display:flex;gap:14px;font-size:11px;color:#5E6583;margin-top:2px"><span style="display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:2px;background:#284CC7"></span>In office</span><span style="display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:2px;background:#D0691F"></span>Official movement</span></div>
+          </div>
+        </section>
+
+        <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Leave balance</h2><a href="Leave.dc.html" style="font-size:13px;font-weight:600;text-decoration:none">Apply →</a></div>
+          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+            <div style="padding:12px;border-radius:12px;background:#F4F6FB"><div style="font-size:12px;color:#5E6583">Casual</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:20px">6 <span style="font-size:12px;color:#5E6583;font-weight:500">/ 12</span></div></div>
+            <div style="padding:12px;border-radius:12px;background:#F4F6FB"><div style="font-size:12px;color:#5E6583">Sick</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:20px">5 <span style="font-size:12px;color:#5E6583;font-weight:500">/ 8</span></div></div>
+            <div style="padding:12px;border-radius:12px;background:#F4F6FB"><div style="font-size:12px;color:#5E6583">Annual</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:20px">9 <span style="font-size:12px;color:#5E6583;font-weight:500">/ 15</span></div></div>
+            <div style="padding:12px;border-radius:12px;background:#F4F6FB"><div style="font-size:12px;color:#5E6583">Comp-off</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:20px">1</div></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;padding-top:10px;border-top:1px solid #EEF1F7">
+            <div style="flex:1"><div style="font-size:13px;font-weight:600">Fri 6 Nov · Casual</div><div style="font-size:12px;color:#5E6583">Waiting for Vivek Menon</div></div>
+            <span style="font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:#FFF1D9;color:#8A4F00">Pending</span>
+          </div>
+        </section>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
+        <section style="grid-column:span 2;background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:18px 20px 12px"><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">My tasks <span style="font-size:13px;color:#5E6583;font-weight:500">· 5 open</span></h2><a href="Tasks.dc.html" style="font-size:13px;font-weight:600;text-decoration:none">Task board →</a></div>
+          <sc-for list="{{tasks}}" as="t" hint-placeholder-count="5">
+            <a href="Task.dc.html" style="display:flex;align-items:center;gap:14px;padding:11px 20px;border-top:1px solid #EEF1F7;text-decoration:none;color:#10183A">
+              <span style="{{t.pri}}">{{t.p}}</span>
+              <span style="flex:1;min-width:0"><span style="display:block;font-size:14px;font-weight:600">{{t.title}}</span><span style="display:block;font-size:12px;color:#5E6583">{{t.id}} · {{t.project}}</span></span>
+              <span style="font-size:12px;color:#3D4566;white-space:nowrap">{{t.status}}</span>
+              <span style="{{t.dueStyle}}">{{t.due}}</span>
+            </a>
+          </sc-for>
+        </section>
+
+        <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Timesheet · week 43</h2><span style="font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:#EDF0F6;color:#4A5270">Draft</span></div>
+          <div><span style="font-family:Montserrat,sans-serif;font-weight:600;font-size:22px">17.5 h</span> <span style="font-size:13px;color:#5E6583">logged of 40 h</span></div>
+          <div style="display:flex;align-items:flex-end;gap:10px;height:90px;padding-bottom:4px;border-bottom:1px solid #C9CFDF">
+            <sc-for list="{{ts}}" as="d" hint-placeholder-count="5"><div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;height:100%"><span style="font-size:11px;color:#3D4566">{{d.h}}</span><span title="{{d.t}}" style="{{d.bar}}"></span></div></sc-for>
+          </div>
+          <div style="display:flex;justify-content:space-around;font-size:12px;color:#5E6583;margin-top:-6px"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span></div>
+          <a href="Timesheet.dc.html" style="height:38px;border-radius:10px;border:1px solid #D5DAE8;color:#10183A;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;text-decoration:none;margin-top:auto">Log time · submit by Fri</a>
+        </section>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
+        <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:18px 20px 12px"><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">My movements</h2><a href="Movement-New.dc.html" style="font-size:13px;font-weight:600;text-decoration:none">History →</a></div>
+          <sc-for list="{{moves}}" as="m" hint-placeholder-count="3">
+            <div style="display:flex;align-items:center;gap:12px;padding:11px 20px;border-top:1px solid #EEF1F7">
+              <span style="width:52px;font-size:12px;color:#5E6583;font-weight:600">{{m.day}}</span>
+              <span style="flex:1;min-width:0"><span style="display:block;font-size:13px;font-weight:600">{{m.purpose}}</span><span style="display:block;font-size:12px;color:#5E6583">{{m.times}}</span></span>
+              <span style="font-size:13px;font-weight:600;white-space:nowrap">{{m.dur}}</span>
+              <span style="{{m.chip}}">{{m.status}}</span>
+            </div>
+          </sc-for>
+        </section>
+        <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:18px 20px 12px"><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Announcements</h2><a href="Notifications.dc.html" style="font-size:13px;font-weight:600;text-decoration:none">Inbox →</a></div>
+          <div style="padding:12px 20px;border-top:1px solid #EEF1F7"><div style="font-size:13px;font-weight:600">Quarterly all-hands · Fri 30 Oct, 4:00 pm</div><div style="font-size:12px;color:#5E6583;margin-top:2px">Conference room and online · posted by Sameer Hassan</div></div>
+          <div style="padding:12px 20px;border-top:1px solid #EEF1F7"><div style="font-size:13px;font-weight:600">Holiday list for Nov – Dec is published</div><div style="font-size:12px;color:#5E6583;margin-top:2px">HR & Admin · 2 days ago</div></div>
+          <div style="padding:12px 20px;border-top:1px solid #EEF1F7"><div style="font-size:13px;font-weight:600">Comp-off must be used within 60 days</div><div style="font-size:12px;color:#5E6583;margin-top:2px">Leave policy update · effective 1 Nov</div></div>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1200}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const seg = (min, c) => 'width:' + (min / 600 * 100).toFixed(1) + '%;background:' + c + ';' + (min ? '' : 'display:none');
+    const W = [['Mon', 522, 0, '8h 42m'], ['Tue', 410, 75, '8h 05m'], ['Wed', 148, 0, '2h 28m'], ['Thu', 0, 0, '—'], ['Fri', 0, 0, '—']];
+    const T = { red: ['#FDE7E7', '#B42323'], orange: ['#FFEDE3', '#B03A0A'], amber: ['#FFF1D9', '#8A4F00'], gray: ['#EDF0F6', '#4A5270'], green: ['#E2F5EC', '#0E6B4B'] };
+    const chip = (t) => 'font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;white-space:nowrap;background:' + T[t][0] + ';color:' + T[t][1];
+    const pri = (t) => chip(t) + ';width:58px;text-align:center;box-sizing:border-box';
+    const due = (late) => 'font-size:12px;font-weight:600;white-space:nowrap;width:72px;text-align:right;color:' + (late ? '#B42323' : '#3D4566');
+    return {
+      week: W.map(([day, o, m, total]) => ({ day, total, office: seg(o, '#284CC7'), move: seg(m, '#D0691F') })),
+      tasks: [
+        { p: 'Urgent', pri: pri('red'), title: 'Payment gateway retry logic', id: 'TSK-1798', project: 'Greenleaf e-commerce', status: 'In progress', due: '5 days late', dueStyle: due(1) },
+        { p: 'High', pri: pri('orange'), title: 'Order history API pagination', id: 'TSK-1832', project: 'Greenleaf e-commerce', status: 'In progress', due: 'Today', dueStyle: due(0) },
+        { p: 'High', pri: pri('orange'), title: 'Fix QA-0412 coupon rounding', id: 'TSK-1840', project: 'Greenleaf e-commerce', status: 'To do', due: 'Thu 22 Oct', dueStyle: due(0) },
+        { p: 'Medium', pri: pri('amber'), title: 'Appointment reminders cron', id: 'TSK-1815', project: 'Nexora patient app', status: 'Review', due: 'Mon 26 Oct', dueStyle: due(0) },
+        { p: 'Low', pri: pri('gray'), title: 'Upgrade Node runtime to 24 LTS', id: 'TSK-1771', project: 'Internal tooling', status: 'To do', due: 'Fri 30 Oct', dueStyle: due(0) }
+      ],
+      ts: [['Mon', 8], ['Tue', 7], ['Wed', 2.5], ['Thu', 0], ['Fri', 0]].map(([t, h]) => ({ h: h ? h + 'h' : '', t: t + ' ' + h + ' h', bar: 'width:100%;max-width:30px;border-radius:4px 4px 0 0;background:#284CC7;height:' + Math.round(h / 9 * 64) + 'px' })),
+      moves: [
+        { day: 'Tue 20', purpose: 'Client meeting · Greenleaf', times: 'Out 14:05 · In 15:20 · official', dur: '1h 15m', status: 'Approved', chip: chip('green') },
+        { day: 'Mon 19', purpose: 'Personal · bank', times: 'Out 12:10 · In 12:40 · personal', dur: '30m', status: 'Returned', chip: chip('gray') },
+        { day: 'Thu 15', purpose: 'Official business · GST office', times: 'Out 10:30 · In 12:05 · corrected', dur: '1h 35m', status: 'Approved', chip: chip('green') }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

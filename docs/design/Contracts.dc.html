@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Contracts &amp; renewals</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="management" active="contracts" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="management" hint-size="100%,64px"></dc-import>
+    <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:18px;width:100%;max-width:1280px;box-sizing:border-box">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px">
+        <div>
+          <div style="font-size:13px;color:#5E6583">Sales</div>
+          <h1 style="margin:2px 0 0;font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">Contracts</h1>
+        </div>
+        <button type="button" style="height:40px;padding:0 16px;border:0;border-radius:10px;background:#1F3CB3;font:inherit;font-size:14px;font-weight:600;color:#FFFFFF;display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20V9M7 14l5-5 5 5M5 4h14"></path></svg>Upload signed contract</button>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px">
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:14px 16px"><div style="font-size:13px;color:#5E6583">Active</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">12</div></div>
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:14px 16px"><div style="font-size:13px;color:#5E6583">Expiring · 60 days</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px;color:#9A5800">3</div></div>
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:14px 16px"><div style="font-size:13px;color:#5E6583">Awaiting signature</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">1</div></div>
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:14px 16px"><div style="display:flex;justify-content:space-between"><span style="font-size:13px;color:#5E6583">Active value</span><span style="font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;background:#0A1450;color:#FFFFFF;height:16px">MGMT</span></div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">₹96.4 L</div></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start">
+        <section style="grid-column:span 2;background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column;min-width:0">
+          <div style="overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:780px">
+              <thead><tr style="background:#F7F8FC;color:#5E6583;text-align:left"><th style="padding:10px 16px;font-size:12px;font-weight:600">Contract</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Type</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Linked to</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Term</th><th style="padding:10px 8px;font-size:12px;font-weight:600;text-align:right">Value</th><th style="padding:10px 16px 10px 8px;font-size:12px;font-weight:600">Status</th></tr></thead>
+              <tbody>
+                <sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+                  <tr style="border-top:1px solid #EEF1F7">
+                    <td style="padding:11px 16px"><div style="display:flex;align-items:center;gap:6px;font-weight:600">{{r.t}}<sc-if value="{{r.lock}}" hint-placeholder-val="{{false}}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#5E6583" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Confidential"><path d="M6 11h12v9H6zM8 11V8a4 4 0 0 1 8 0v3"></path></svg></sc-if></div><div style="font-size:12px;color:#5E6583">{{r.id}} · {{r.c}}</div></td>
+                    <td style="padding:11px 8px"><span style="font-size:11px;font-weight:600;padding:3px 7px;border-radius:6px;background:#EDF0F6;color:#4A5270">{{r.ty}}</span></td>
+                    <td style="padding:11px 8px;font-size:12px;color:#3D4566">{{r.link}}</td>
+                    <td style="padding:11px 8px;font-size:12px;color:#3D4566;white-space:nowrap">{{r.term}}</td>
+                    <td style="padding:11px 8px;text-align:right;font-weight:600">{{r.v}}</td>
+                    <td style="padding:11px 16px 11px 8px"><span style="{{r.chip}}">{{r.s}}</span></td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <aside style="display:flex;flex-direction:column;gap:16px;min-width:0">
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:10px">
+            <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Renewals coming up</h2>
+            <div style="display:flex;gap:12px;align-items:center;padding:10px 0;border-top:1px solid #EEF1F7"><span style="width:44px;text-align:center;flex:none"><span style="display:block;font-size:11px;color:#5E6583">NOV</span><span style="display:block;font-family:Montserrat,sans-serif;font-weight:600;font-size:18px">30</span></span><span style="flex:1;font-size:13px"><strong>Greenleaf AMC</strong><br><span style="color:#5E6583">Reminder sent 21 Oct · renewal in pipeline</span></span></div>
+            <div style="display:flex;gap:12px;align-items:center;padding:10px 0;border-top:1px solid #EEF1F7"><span style="width:44px;text-align:center;flex:none"><span style="display:block;font-size:11px;color:#5E6583">DEC</span><span style="display:block;font-family:Montserrat,sans-serif;font-weight:600;font-size:18px">15</span></span><span style="flex:1;font-size:13px"><strong>Lumen Academy SOW</strong><br><span style="color:#5E6583">Project on hold · discuss extension</span></span></div>
+            <div style="display:flex;gap:12px;align-items:center;padding:10px 0;border-top:1px solid #EEF1F7"><span style="width:44px;text-align:center;flex:none"><span style="display:block;font-size:11px;color:#5E6583">DEC</span><span style="display:block;font-family:Montserrat,sans-serif;font-weight:600;font-size:18px">31</span></span><span style="flex:1;font-size:13px"><strong>Seaside booking engine SOW</strong><br><span style="color:#5E6583">Reminder 1 Dec · 30 days before</span></span></div>
+          </section>
+          <section style="border:1.5px dashed #C4CAD9;border-radius:14px;padding:22px;display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;background:#FFFFFF">
+            <span style="width:44px;height:44px;border-radius:12px;background:#F1F4FE;color:#1F3CB3;display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20V9M7 14l5-5 5 5M5 4h14"></path></svg></span>
+            <span style="font-size:14px;font-weight:600">Drop a signed PDF here</span>
+            <span style="font-size:12px;color:#5E6583">We read the dates and suggest the client and project link</span>
+          </section>
+        </aside>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const T = { green: ['#E2F5EC', '#0E6B4B'], amber: ['#FFF1D9', '#8A4F00'], gray: ['#EDF0F6', '#4A5270'], blue: ['#E2E8FC', '#1F3CB3'], red: ['#FDE7E7', '#B42323'] };
+    const chip = (t) => 'font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;white-space:nowrap;background:' + T[t][0] + ';color:' + T[t][1];
+    const R = [
+      ['Greenleaf e-commerce SOW', 'CTR-0032', 'Greenleaf Organics', 'SOW', 'PRJ-0241', '1 Aug 2026 – 31 Jan 2027', '₹14,50,000', 'Active', 'green', 1],
+      ['Greenleaf AMC', 'CTR-0021', 'Greenleaf Organics', 'AMC', 'Support', '1 Dec 2025 – 30 Nov 2026', '₹2,40,000', 'Expiring', 'amber', 0],
+      ['Nexora master services', 'CTR-0029', 'Nexora Health Clinics', 'MSA', 'PRJ-0238', '1 Jul 2026 – 30 Jun 2028', '₹22,00,000', 'Active', 'green', 1],
+      ['Seaside booking engine SOW', 'CTR-0027', 'Seaside Hospitality', 'SOW', 'PRJ-0229', '2 Jun – 31 Dec 2026', '₹9,80,000', 'Expiring', 'amber', 0],
+      ['Lumen Academy SOW', 'CTR-0024', 'Lumen Academy', 'SOW', 'PRJ-0233', '15 May – 15 Dec 2026', '₹12,40,000', 'Expiring', 'amber', 0],
+      ['BlueTide fleet dashboard SOW', 'CTR-0034', 'BlueTide Logistics', 'SOW', 'PRJ-0244', '19 Oct 2026 – 31 Jan 2027', '₹9,80,000', 'Awaiting signature', 'blue', 0],
+      ['Arabian Spice Traders NDA', 'CTR-0035', 'Arabian Spice Traders', 'NDA', 'PRP-0063', '10 Oct 2026 – 9 Oct 2028', '—', 'Active', 'green', 1],
+      ['Orbit Motors brand site SOW', 'CTR-0016', 'Orbit Motors', 'SOW', 'PRJ-0219', '3 Mar – 30 Jun 2026', '₹8,60,000', 'Completed', 'gray', 0]
+    ];
+    return { rows: R.map(([t, id, c, ty, link, term, v, s, st, lock]) => ({ t, id, c, ty, link, term, v, s, lock: !!lock, chip: chip(st) })) };
+  }
+}
+</script>
+</body>
+</html>

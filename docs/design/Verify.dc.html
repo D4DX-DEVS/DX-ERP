@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Two-step verification &amp; password reset</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;box-sizing:border-box;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A;padding:40px 24px 56px;display:flex;flex-direction:column;align-items:center;gap:32px">
+  <div style="width:100%;max-width:1200px;display:flex;justify-content:space-between;align-items:center">
+    <div style="display:flex;align-items:center;gap:10px">
+      <img src="/_blob/bea72f4d5c269cfc7b6663675f09bdd3" alt="" style="width:40px;height:32px;object-fit:contain">
+      <span style="font-family:Montserrat,sans-serif;font-weight:700;font-size:19px;color:#515151;letter-spacing:0.04em">D4DX</span>
+      <span style="font-size:12px;font-weight:600;padding:2px 7px;border-radius:6px;background:#E2E8FC;color:#1F3CB3">ERP</span>
+    </div>
+    <a href="Login.dc.html" style="font-size:14px;font-weight:600;text-decoration:none">← Back to sign in</a>
+  </div>
+  <div style="width:100%;max-width:1200px">
+    <h1 style="margin:0;font-family:Montserrat,sans-serif;font-weight:700;font-size:30px">Account security</h1>
+    <p style="margin:6px 0 0;font-size:15px;color:#5E6583">Two-step verification, password reset and new password — three states of the same flow.</p>
+  </div>
+  <div style="width:100%;max-width:1200px;display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:24px">
+    <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:20px;padding:32px;display:flex;flex-direction:column;gap:18px">
+      <span style="width:48px;height:48px;border-radius:14px;background:#E2E8FC;color:#1F3CB3;display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM9 12l2 2 4-4"></path></svg></span>
+      <div>
+        <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:21px">Two-step verification</h2>
+        <p style="margin:6px 0 0;font-size:14px;color:#5E6583;line-height:1.5">Enter the 6-digit code from your authenticator app for arjun.nair@d4dx.co.</p>
+      </div>
+      <fieldset style="border:0;padding:0;margin:0;display:flex;gap:8px">
+        <legend style="font-size:13px;font-weight:600;color:#3D4566;margin-bottom:8px">Verification code</legend>
+        <input aria-label="Digit 1" value="4" style="width:44px;height:52px;text-align:center;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:22px;font-weight:600;color:#10183A">
+        <input aria-label="Digit 2" value="8" style="width:44px;height:52px;text-align:center;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:22px;font-weight:600;color:#10183A">
+        <input aria-label="Digit 3" value="1" style="width:44px;height:52px;text-align:center;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:22px;font-weight:600;color:#10183A">
+        <input aria-label="Digit 4" value="0" style="width:44px;height:52px;text-align:center;border:2px solid #284CC7;box-shadow:0 0 0 3px #E2E8FC;border-radius:10px;font:inherit;font-size:22px;font-weight:600;color:#10183A">
+        <input aria-label="Digit 5" value="" style="width:44px;height:52px;text-align:center;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:22px;font-weight:600;color:#10183A">
+        <input aria-label="Digit 6" value="" style="width:44px;height:52px;text-align:center;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:22px;font-weight:600;color:#10183A">
+      </fieldset>
+      <label style="display:flex;align-items:center;gap:10px;font-size:14px;color:#3D4566"><input type="checkbox" style="width:18px;height:18px;accent-color:#1F3CB3">Trust this device for 30 days</label>
+      <a href="Dash-Employee.dc.html" style="height:46px;border-radius:12px;background:#1F3CB3;color:#FFFFFF;font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;text-decoration:none">Verify and continue</a>
+      <div style="font-size:13px;color:#5E6583">Lost your device? <a href="mailto:hr@d4dx.co" style="font-weight:600">Use a backup code</a></div>
+    </section>
+
+    <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:20px;padding:32px;display:flex;flex-direction:column;gap:18px">
+      <span style="width:48px;height:48px;border-radius:14px;background:#FFEDE3;color:#C2410C;display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18v12H3zM3 7l9 6 9-6"></path></svg></span>
+      <div>
+        <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:21px">Forgot password</h2>
+        <p style="margin:6px 0 0;font-size:14px;color:#5E6583;line-height:1.5">We will email a reset link valid for 30 minutes.</p>
+      </div>
+      <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Work email
+        <input type="email" value="arjun.nair@d4dx.co" style="height:44px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:15px;font-weight:400;color:#10183A">
+      </label>
+      <button type="button" style="height:46px;border:0;border-radius:12px;background:#1F3CB3;color:#FFFFFF;font:inherit;font-size:15px;font-weight:600">Send reset link</button>
+      <div style="display:flex;gap:10px;padding:12px 14px;border-radius:10px;background:#E2F5EC;color:#0B5A3F;font-size:13px;line-height:1.5">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;margin-top:1px"><path d="M5 12l5 5 9-10"></path></svg>
+        <span>If an account exists for this email, a link is on its way. Check spam if it has not arrived in 2 minutes.</span>
+      </div>
+    </section>
+
+    <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:20px;padding:32px;display:flex;flex-direction:column;gap:18px">
+      <span style="width:48px;height:48px;border-radius:14px;background:#E2F5EC;color:#0E7A55;display:flex;align-items:center;justify-content:center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 11h12v9H6zM8 11V8a4 4 0 0 1 8 0v3M12 15v2"></path></svg></span>
+      <div>
+        <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:21px">Set a new password</h2>
+        <p style="margin:6px 0 0;font-size:14px;color:#5E6583;line-height:1.5">Other signed-in sessions will be signed out.</p>
+      </div>
+      <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">New password
+        <input type="password" value="••••••••••••" style="height:44px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:15px;font-weight:400;color:#10183A">
+      </label>
+      <div style="display:flex;gap:4px"><span style="flex:1;height:6px;border-radius:999px;background:#0E7A55"></span><span style="flex:1;height:6px;border-radius:999px;background:#0E7A55"></span><span style="flex:1;height:6px;border-radius:999px;background:#0E7A55"></span><span style="flex:1;height:6px;border-radius:999px;background:#E2E6F0"></span></div>
+      <ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px;font-size:13px">
+        <li style="display:flex;gap:8px;align-items:center;color:#0E6B4B"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>At least 12 characters</li>
+        <li style="display:flex;gap:8px;align-items:center;color:#0E6B4B"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>A number and a symbol</li>
+        <li style="display:flex;gap:8px;align-items:center;color:#5E6583"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 12h.01"></path></svg>Not one of your last 3 passwords</li>
+      </ul>
+      <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Confirm password
+        <input type="password" value="••••••••••••" style="height:44px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:15px;font-weight:400;color:#10183A">
+      </label>
+      <a href="Login.dc.html" style="height:46px;border-radius:12px;background:#1F3CB3;color:#FFFFFF;font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;text-decoration:none">Update password</a>
+    </section>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

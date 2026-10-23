@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sales pipeline</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="management" active="leads" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="management" hint-size="100%,64px"></dc-import>
+    <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:18px;width:100%;max-width:1280px;box-sizing:border-box">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px">
+        <div>
+          <div style="font-size:13px;color:#5E6583">Sales</div>
+          <h1 style="margin:2px 0 0;font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">Leads &amp; pipeline</h1>
+        </div>
+        <div style="display:flex;gap:10px">
+          <div role="group" aria-label="View" style="display:inline-flex;padding:3px;border-radius:10px;background:#E7EAF3">
+            <button type="button" style="height:34px;padding:0 12px;border:0;border-radius:8px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:600;color:#10183A;box-shadow:0 1px 2px rgba(16,24,58,0.08)">Pipeline</button>
+            <button type="button" style="height:34px;padding:0 12px;border:0;border-radius:8px;background:transparent;font:inherit;font-size:13px;font-weight:500;color:#3D4566">Clients</button>
+            <button type="button" style="height:34px;padding:0 12px;border:0;border-radius:8px;background:transparent;font:inherit;font-size:13px;font-weight:500;color:#3D4566">Follow-ups</button>
+          </div>
+          <button type="button" style="height:40px;padding:0 16px;border:0;border-radius:10px;background:#1F3CB3;font:inherit;font-size:14px;font-weight:600;color:#FFFFFF;display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New lead</button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:14px 16px"><div style="font-size:13px;color:#5E6583">Open pipeline</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">₹42.6 L</div><div style="font-size:12px;color:#3D4566">22 leads</div></div>
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:14px 16px"><div style="font-size:13px;color:#5E6583">Won · October</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px;color:#0E6B4B">₹11.8 L</div><div style="font-size:12px;color:#3D4566">2 deals</div></div>
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:14px 16px"><div style="font-size:13px;color:#5E6583">Conversion · FY</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">28%</div><div style="font-size:12px;color:#3D4566">enquiry → won</div></div>
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:14px 16px"><div style="font-size:13px;color:#5E6583">Follow-ups due</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px;color:#B42323">4</div><div style="font-size:12px;color:#3D4566">1 overdue</div></div>
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:14px 16px"><div style="font-size:13px;color:#5E6583">Lost · this quarter</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">3</div><div style="font-size:12px;color:#3D4566">top reason: budget</div></div>
+      </div>
+
+      <div style="overflow-x:auto;padding-bottom:4px">
+        <div style="display:grid;grid-template-columns:repeat(6,minmax(220px,1fr));gap:12px;align-items:start;min-width:1340px">
+          <sc-for list="{{cols}}" as="c" hint-placeholder-count="6">
+            <section style="background:#EBEEF5;border-radius:14px;padding:10px;display:flex;flex-direction:column;gap:8px">
+              <div style="padding:4px 6px"><div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0;font-size:13px;font-weight:600">{{c.n}}</h2><span style="font-size:12px;font-weight:600;color:#5E6583">{{c.k}}</span></div><div style="font-size:12px;color:#5E6583;margin-top:2px">{{c.v}}</div></div>
+              <sc-for list="{{c.cards}}" as="d" hint-placeholder-count="2">
+                <a href="Client.dc.html" style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:6px;text-decoration:none;color:#10183A">
+                  <span style="font-size:14px;font-weight:600">{{d.co}}</span>
+                  <span style="font-size:12px;color:#5E6583">{{d.need}}</span>
+                  <span style="display:flex;justify-content:space-between;align-items:center"><span style="font-family:Montserrat,sans-serif;font-weight:600;font-size:15px">{{d.v}}</span><span style="{{d.av}}">{{d.o}}</span></span>
+                  <span style="display:flex;justify-content:space-between;font-size:11px"><span style="color:#5E6583">{{d.src}}</span><span style="{{d.fs}}">{{d.f}}</span></span>
+                  <sc-if value="{{d.dup}}" hint-placeholder-val="{{false}}"><span style="font-size:11px;font-weight:600;color:#9A5800">Possible duplicate of CL-0074</span></sc-if>
+                </a>
+              </sc-for>
+            </section>
+          </sc-for>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const O = { JM: ['#E2F5EC', '#0E6B4B'], SH: ['#E2E8FC', '#1F3CB3'] };
+    const d = (co, need, v, o, src, f, late, dup) => ({ co, need, v, o, src, f, dup, av: 'width:24px;height:24px;border-radius:999px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;background:' + O[o][0] + ';color:' + O[o][1], fs: 'font-weight:600;color:' + (late ? '#B42323' : '#3D4566') });
+    return {
+      cols: [
+        { n: 'New lead', k: '9', v: '₹14.2 L', cards: [d('Harbourline Exports', 'Inventory portal', '₹6.0 L', 'JM', 'Website form', 'Call today', 0, 0), d('Kayal Ayurveda', 'Shopify store + ads', '₹3.5 L', 'JM', 'Referral', 'Thu 22', 0, 1)] },
+        { n: 'Contacted', k: '3', v: '₹4.1 L', cards: [d('Metro Dental Studio', 'Booking app', '₹4.1 L', 'JM', 'LinkedIn', 'Overdue · 19 Oct', 1, 0)] },
+        { n: 'Requirement gathering', k: '2', v: '₹9.8 L', cards: [d('BlueTide Logistics · phase 2', 'Driver app', '₹7.2 L', 'SH', 'Existing client', 'Workshop Fri 23', 0, 0), d('Lumen Academy', 'Mobile LMS add-on', '₹2.6 L', 'JM', 'Existing client', 'Mon 26', 0, 0)] },
+        { n: 'Proposal preparation', k: '2', v: '₹5.9 L', cards: [d('Arabian Spice Traders', 'ERP–store integration', '₹4.4 L', 'JM', 'Trade expo', 'Draft due Fri', 0, 0)] },
+        { n: 'Proposal sent', k: '4', v: '₹11.4 L', cards: [d('Nexora Health · v2', 'Telehealth module', '₹5.8 L', 'SH', 'Existing client', 'Follow-up Wed 28', 0, 0), d('Orbit Motors', 'Dealer portal', '₹3.9 L', 'JM', 'Existing client', 'Thu 29', 0, 0)] },
+        { n: 'Negotiation', k: '2', v: '₹7.2 L', cards: [d('Seaside Hospitality', 'Loyalty programme', '₹4.8 L', 'JM', 'Existing client', 'Meeting today 13:00', 0, 0), d('Greenleaf Organics', 'AMC · 12 months', '₹2.4 L', 'SH', 'Existing client', 'Tue 27', 0, 0)] }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

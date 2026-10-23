@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Roles &amp; permissions</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="management" active="roles" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="management" hint-size="100%,64px"></dc-import>
+    <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:18px;width:100%;max-width:1280px;box-sizing:border-box">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px">
+        <div>
+          <div style="font-size:13px;color:#5E6583">Admin</div>
+          <h1 style="margin:2px 0 0;font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">Roles &amp; permissions</h1>
+        </div>
+        <button type="button" style="height:40px;padding:0 16px;border:0;border-radius:10px;background:#1F3CB3;font:inherit;font-size:14px;font-weight:600;color:#FFFFFF;display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New role</button>
+      </div>
+
+      <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
+        <nav aria-label="Roles" style="flex:0 1 240px;min-width:220px;background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:8px;display:flex;flex-direction:column;gap:2px">
+          <sc-for list="{{roles}}" as="r" hint-placeholder-count="10"><a href="Roles.dc.html" style="{{r.s}}"><span>{{r.n}}</span><span style="{{r.cs}}">{{r.c}}</span></a></sc-for>
+        </nav>
+
+        <section style="flex:999 1 600px;min-width:0;background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column">
+          <div style="padding:20px 22px;display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;border-bottom:1px solid #EEF1F7">
+            <div><div style="display:flex;align-items:center;gap:10px"><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:19px">Intern</h2><span style="font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;background:#F1EAFE;color:#6D28D9">System role</span></div><p style="margin:4px 0 0;font-size:13px;color:#5E6583">Own records and assigned work only. No salary, finance, restricted clients or settings.</p></div>
+            <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px;color:#5E6583">8 people</span><span style="display:flex"><span style="width:28px;height:28px;border-radius:999px;border:2px solid #FFFFFF;background:#F1EAFE;color:#6D28D9;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center">RM</span><span style="width:28px;height:28px;border-radius:999px;border:2px solid #FFFFFF;margin-left:-6px;background:#F1EAFE;color:#6D28D9;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center">SA</span><span style="width:28px;height:28px;border-radius:999px;border:2px solid #FFFFFF;margin-left:-6px;background:#EDF0F6;color:#4A5270;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center">+6</span></span></div>
+          </div>
+          <div style="overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:820px">
+              <thead><tr style="background:#F7F8FC;color:#5E6583"><th scope="col" style="padding:10px 22px;font-size:12px;font-weight:600;text-align:left">Module</th><th scope="col" style="padding:10px 8px;font-size:12px;font-weight:600;text-align:left">Scope</th><sc-for list="{{acts}}" as="a" hint-placeholder-count="7"><th scope="col" style="padding:10px 6px;font-size:12px;font-weight:600;text-align:center">{{a}}</th></sc-for></tr></thead>
+              <tbody>
+                <sc-for list="{{rows}}" as="r" hint-placeholder-count="12">
+                  <tr style="border-top:1px solid #EEF1F7">
+                    <th scope="row" style="padding:9px 22px;font-weight:600;text-align:left">{{r.m}}</th>
+                    <td style="padding:9px 8px"><span style="{{r.ss}}">{{r.scope}}</span></td>
+                    <sc-for list="{{r.cells}}" as="c" hint-placeholder-count="7"><td style="padding:9px 6px;text-align:center"><input type="checkbox" aria-label="{{c.a}}" checked="{{c.on}}" disabled="{{c.locked}}" style="width:18px;height:18px;accent-color:#1F3CB3"></td></sc-for>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center;padding:14px 22px;border-top:1px solid #EEF1F7">
+            <span style="font-size:12px;color:#5E6583">Greyed boxes are blocked for this role by policy · changes need Super Admin and are audited</span>
+            <div style="display:flex;gap:10px"><button type="button" style="height:40px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:600;color:#10183A">Reset to default</button><button type="button" style="height:40px;padding:0 18px;border:0;border-radius:10px;background:#1F3CB3;font:inherit;font-size:14px;font-weight:600;color:#FFFFFF">Save role</button></div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1150}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const RL = [['Super Admin', 1], ['Management', 2], ['HR / Admin', 1], ['Finance / Accounts', 1], ['Business Development', 1], ['Project Manager', 1], ['Team Lead', 3], ['Employee', 21], ['Trainee', 4], ['Intern', 8, 1]];
+    const A = ['View', 'Create / edit', 'Delete', 'Approve', 'Assign', 'Export', 'Confidential'];
+    const S = { Own: ['#F1F4FE', '#1F3CB3'], Assigned: ['#E2F5EC', '#0E6B4B'], None: ['#EDF0F6', '#4A5270'] };
+    const M = [
+      ['Dashboard', 'Own', '1000000', '0111111'],
+      ['Profile & documents', 'Own', '1100000', '0011011'],
+      ['Attendance', 'Own', '1100000', '0011011'],
+      ['Movement register', 'Own', '1100000', '0011011'],
+      ['Leave', 'Own', '1100000', '0011011'],
+      ['Tasks', 'Assigned', '1100000', '0010111'],
+      ['Projects', 'Assigned', '1000000', '0111111'],
+      ['Timesheets', 'Own', '1100000', '0011011'],
+      ['QA & issues', 'Assigned', '1100000', '0011011'],
+      ['Learning & reviews', 'Own', '1000000', '0111111'],
+      ['Clients & CRM', 'None', '0000000', '1111111'],
+      ['Payroll & finance', 'None', '0000000', '1111111'],
+      ['Settings & roles', 'None', '0000000', '1111111']
+    ];
+    return {
+      roles: RL.map(([n, c, on]) => ({ n, c, s: 'display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-radius:10px;font-size:14px;text-decoration:none;' + (on ? 'background:#F1F4FE;color:#1F3CB3;font-weight:600' : 'color:#10183A;font-weight:500'), cs: 'font-size:12px;font-weight:600;color:' + (on ? '#1F3CB3' : '#5E6583') })),
+      acts: A,
+      rows: M.map(([m, scope, on, lock]) => ({ m, scope, ss: 'font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;background:' + S[scope][0] + ';color:' + S[scope][1], cells: A.map((a, i) => ({ a: m + ' · ' + a, on: on[i] === '1', locked: lock[i] === '1' })) }))
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Client record</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="management" active="leads" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="management" hint-size="100%,64px"></dc-import>
+    <main style="padding:24px 32px 48px;display:flex;flex-direction:column;gap:18px;width:100%;max-width:1280px;box-sizing:border-box">
+      <nav aria-label="Breadcrumb" style="font-size:13px;color:#5E6583"><a href="Leads.dc.html" style="text-decoration:none">Leads &amp; clients</a> / CL-0087</nav>
+      <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:22px;display:flex;flex-wrap:wrap;gap:20px;align-items:center">
+        <span style="width:64px;height:64px;border-radius:16px;background:#0A1450;color:#FFFFFF;font-family:Montserrat,sans-serif;font-size:22px;font-weight:600;display:flex;align-items:center;justify-content:center;flex:none">SH</span>
+        <div style="flex:1 1 360px;display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px"><h1 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">Seaside Hospitality Group</h1><span style="font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:#E2F5EC;color:#0E6B4B">Active client</span><span style="font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:#FFF1D9;color:#8A4F00">Deal in negotiation</span></div>
+          <div style="display:flex;flex-wrap:wrap;gap:18px;font-size:13px;color:#5E6583"><span>CL-0087</span><span>Hospitality · Fort Kochi</span><span>Owner <strong style="color:#10183A">Joel Mathew</strong></span><span>Source · referral</span><span>Client since Jun 2025</span></div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <button type="button" style="height:40px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:600;color:#10183A">Log activity</button>
+          <a href="Proposal.dc.html" style="height:40px;padding:0 16px;border-radius:10px;background:#1F3CB3;color:#FFFFFF;font-size:14px;font-weight:600;display:flex;align-items:center;text-decoration:none">New proposal</a>
+        </div>
+      </section>
+
+      <div style="display:flex;gap:4px;border-bottom:1px solid #E2E6F0;overflow-x:auto">
+        <sc-for list="{{tabs}}" as="t" hint-placeholder-count="7"><span style="{{t.s}}">{{t.l}}</span></sc-for>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start">
+        <section style="grid-column:span 2;background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column;min-width:0">
+          <div style="padding:18px 20px;display:flex;flex-direction:column;gap:10px;border-bottom:1px solid #EEF1F7">
+            <div role="group" aria-label="Activity type" style="display:inline-flex;align-self:flex-start;padding:3px;border-radius:10px;background:#EDF0F6">
+              <button type="button" style="height:32px;padding:0 12px;border:0;border-radius:8px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:600;color:#10183A;box-shadow:0 1px 2px rgba(16,24,58,0.08)">Call</button>
+              <button type="button" style="height:32px;padding:0 12px;border:0;border-radius:8px;background:transparent;font:inherit;font-size:13px;font-weight:500;color:#3D4566">Meeting</button>
+              <button type="button" style="height:32px;padding:0 12px;border:0;border-radius:8px;background:transparent;font:inherit;font-size:13px;font-weight:500;color:#3D4566">Email</button>
+              <button type="button" style="height:32px;padding:0 12px;border:0;border-radius:8px;background:transparent;font:inherit;font-size:13px;font-weight:500;color:#3D4566">Note</button>
+            </div>
+            <label style="display:flex;flex-direction:column;gap:6px"><span style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Activity notes</span><textarea rows="2" placeholder="What was discussed?" style="padding:10px 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;color:#10183A;resize:vertical"></textarea></label>
+            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center"><label style="display:flex;align-items:center;gap:8px;font-size:13px;color:#3D4566"><input type="checkbox" checked style="width:16px;height:16px;accent-color:#1F3CB3">Remind me to follow up</label><input type="text" aria-label="Follow-up date" value="Tue 27 Oct, 11:00" style="height:34px;padding:0 10px;border:1px solid #D5DAE8;border-radius:8px;font:inherit;font-size:13px;color:#10183A;width:150px"><span style="flex:1"></span><button type="button" style="height:36px;padding:0 14px;border:0;border-radius:9px;background:#1F3CB3;font:inherit;font-size:13px;font-weight:600;color:#FFFFFF">Save activity</button></div>
+          </div>
+          <ol style="margin:0;padding:8px 20px 12px;list-style:none;display:flex;flex-direction:column">
+            <sc-for list="{{acts}}" as="a" hint-placeholder-count="5">
+              <li style="display:flex;gap:14px;padding:12px 0;border-bottom:1px solid #EEF1F7">
+                <span style="{{a.ic}}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{a.d}}"></path></svg></span>
+                <span style="flex:1;min-width:0"><span style="display:block;font-size:14px;font-weight:600">{{a.t}}</span><span style="display:block;font-size:13px;color:#3D4566;margin-top:2px;line-height:1.5">{{a.b}}</span><span style="display:block;font-size:12px;color:#5E6583;margin-top:4px">{{a.w}}</span></span>
+              </li>
+            </sc-for>
+          </ol>
+        </section>
+
+        <aside style="display:flex;flex-direction:column;gap:16px;min-width:0">
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:12px">
+            <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Contacts</h2>
+            <div style="display:flex;gap:10px;align-items:center"><span style="width:36px;height:36px;border-radius:999px;background:#E2E8FC;color:#1F3CB3;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center">RV</span><div style="flex:1"><div style="font-size:14px;font-weight:600">Ritu Varghese <span style="font-size:10px;font-weight:700;padding:1px 5px;border-radius:4px;background:#E2F5EC;color:#0E6B4B">PRIMARY</span></div><div style="font-size:12px;color:#5E6583">GM Operations · ritu@[client-domain]</div></div></div>
+            <div style="display:flex;gap:10px;align-items:center"><span style="width:36px;height:36px;border-radius:999px;background:#EDF0F6;color:#4A5270;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center">AK</span><div style="flex:1"><div style="font-size:14px;font-weight:600">Anand K</div><div style="font-size:12px;color:#5E6583">IT Manager · +91 ••••• ••327</div></div></div>
+          </section>
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Commercials</h2><span style="font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;background:#0A1450;color:#FFFFFF">RESTRICTED</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#5E6583">Lifetime billed</span><strong>₹18,60,000</strong></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#5E6583">Outstanding</span><strong style="color:#B42323">₹1,95,000</strong></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#5E6583">Open deal</span><strong>₹4,80,000</strong></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#5E6583">GSTIN</span><span>[GSTIN]</span></div>
+          </section>
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:10px">
+            <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Linked work</h2>
+            <a href="Project.dc.html" style="display:flex;justify-content:space-between;font-size:13px;text-decoration:none;color:#10183A"><span>PRJ-0229 Booking engine</span><span style="font-size:11px;font-weight:600;padding:2px 7px;border-radius:999px;background:#FFEDE3;color:#B03A0A">Under review</span></a>
+            <a href="Contracts.dc.html" style="display:flex;justify-content:space-between;font-size:13px;text-decoration:none;color:#10183A"><span>CTR-0027 Booking engine SOW</span><span style="color:#5E6583">ends 31 Dec</span></a>
+            <a href="Proposal.dc.html" style="display:flex;justify-content:space-between;font-size:13px;text-decoration:none;color:#10183A"><span>PRP-0062 Loyalty programme v2</span><span style="font-size:11px;font-weight:600;padding:2px 7px;border-radius:999px;background:#FFF1D9;color:#8A4F00">Negotiation</span></a>
+          </section>
+        </aside>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1150}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const tabs = ['Activity', 'Proposals 3', 'Contracts 2', 'Projects 2', 'Invoices 6', 'Files', 'Details'];
+    const ic = (b, f) => 'width:34px;height:34px;flex:none;border-radius:10px;display:flex;align-items:center;justify-content:center;background:' + b + ';color:' + f;
+    const I = { meet: 'M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM4 10h16M8 3v4M16 3v4', mail: 'M3 6h18v12H3zM3 7l9 6 9-6', call: 'M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z', note: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4', move: 'M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M9 16l-4-4 4-4M5 12h11' };
+    return {
+      tabs: tabs.map((l, i) => ({ l, s: 'padding:12px 12px;font-size:14px;white-space:nowrap;' + (i === 0 ? 'font-weight:600;color:#1F3CB3;border-bottom:2px solid #1F3CB3;margin-bottom:-1px' : 'font-weight:500;color:#5E6583') })),
+      acts: [
+        { t: 'Meeting · negotiation on loyalty programme', b: 'Scheduled today 13:00 at their office. Joel is out on movement MV-2610-0219.', w: 'Today · Joel Mathew', d: I.move, ic: ic('#FFEDE3', '#B03A0A') },
+        { t: 'Email · proposal PRP-0062 v2 sent', b: 'Reduced phase 1 scope; payment split 40 / 40 / 20.', w: 'Sun 18 Oct · Joel Mathew', d: I.mail, ic: ic('#E2E8FC', '#1F3CB3') },
+        { t: 'Call with Ritu Varghese', b: 'Budget approved up to ₹5 L for this year. Wants points to work across both resorts.', w: 'Thu 15 Oct · 22 min · Joel Mathew', d: I.call, ic: ic('#E2F5EC', '#0E6B4B') },
+        { t: 'Note', b: 'Booking engine UAT feedback due 24 Oct — invoice 3 held until sign-off.', w: 'Sat 10 Oct · Aisha Rahman', d: I.note, ic: ic('#EDF0F6', '#4A5270') },
+        { t: 'Meeting · discovery for loyalty programme', b: 'Requirements captured: tiers, partner offers, app wallet.', w: 'Mon 28 Sep · Joel Mathew, Sameer Hassan', d: I.meet, ic: ic('#F1EAFE', '#6D28D9') }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

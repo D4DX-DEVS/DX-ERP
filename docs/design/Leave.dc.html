@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>My leave</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="employee" active="leave" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="employee" hint-size="100%,64px"></dc-import>
+    <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:20px;width:100%;max-width:1280px;box-sizing:border-box">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px">
+        <div>
+          <div style="font-size:13px;color:#5E6583">Time · leave year Apr 2026 – Mar 2027</div>
+          <h1 style="margin:2px 0 0;font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">My leave</h1>
+        </div>
+        <button type="button" style="height:40px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:500;color:#10183A">Leave policy</button>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
+        <sc-for list="{{bal}}" as="b" hint-placeholder-count="5">
+          <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:8px">
+            <span style="font-size:13px;font-weight:600;color:#3D4566">{{b.n}}</span>
+            <span style="font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">{{b.v}} <span style="font-size:13px;color:#5E6583;font-weight:500">{{b.of}}</span></span>
+            <span style="height:6px;border-radius:999px;background:#EDF0F6"><span style="{{b.bar}}"></span></span>
+            <span style="font-size:12px;color:#5E6583">{{b.note}}</span>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start">
+        <form style="grid-column:span 2;background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:18px;min-width:0">
+          <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:19px">Apply for leave</h2>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px 20px">
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Leave type<select style="height:42px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;background:#FFFFFF"><option>Casual leave · 6 left</option></select></label>
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">From<input type="text" value="Thu 5 Nov 2026" style="height:42px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A"></label>
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">To<input type="text" value="Fri 6 Nov 2026" style="height:42px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A"></label>
+          </div>
+          <fieldset style="border:0;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:16px;align-items:center">
+            <legend style="font-size:13px;font-weight:600;color:#3D4566;margin-bottom:8px">Duration</legend>
+            <label style="display:flex;align-items:center;gap:8px;font-size:14px"><input type="radio" name="dur" style="width:18px;height:18px;accent-color:#1F3CB3">Full days</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:14px"><input type="radio" name="dur" checked style="width:18px;height:18px;accent-color:#1F3CB3">Half day on last day</label>
+            <span style="margin-left:auto;font-size:14px;font-weight:600;padding:6px 12px;border-radius:10px;background:#F1F4FE;color:#1F3CB3">1.5 days</span>
+          </fieldset>
+          <div style="display:flex;gap:10px;padding:12px 14px;border-radius:10px;background:#FFF1D9;color:#6E3F00;font-size:13px;line-height:1.5">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;margin-top:1px"><path d="M12 3l10 18H2zM12 10v5M12 18h.01"></path></svg>
+            <span><strong>Overlap:</strong> you already have a pending request for Fri 6 Nov, and Sanjay Varma from your squad is on leave Thu 5 Nov.</span>
+          </div>
+          <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Reason<textarea rows="3" style="padding:10px 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;resize:vertical">Sister's wedding in Thrissur.</textarea></label>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px 20px">
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Work handover to<select style="height:42px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;background:#FFFFFF"><option>Anjali George</option></select></label>
+            <div style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Attachment<span style="height:42px;border:1px dashed #C4CAD9;border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:500;color:#5E6583;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20V9M7 14l5-5 5 5M5 4h14"></path></svg>Optional · medical note for sick leave</span></div>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding-top:14px;border-top:1px solid #EEF1F7">
+            <span style="font-size:13px;color:#3D4566">Approval: <strong>Vivek Menon</strong> → HR only if more than 3 days</span>
+            <button type="button" style="height:44px;padding:0 20px;border:0;border-radius:12px;background:#1F3CB3;font:inherit;font-size:15px;font-weight:600;color:#FFFFFF">Submit request</button>
+          </div>
+        </form>
+
+        <aside style="display:flex;flex-direction:column;gap:16px;min-width:0">
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:6px">
+            <h2 style="margin:0 0 6px;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">My requests</h2>
+            <sc-for list="{{reqs}}" as="r" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid #EEF1F7">
+                <span style="flex:1;min-width:0"><span style="display:block;font-size:13px;font-weight:600">{{r.d}}</span><span style="display:block;font-size:12px;color:#5E6583">{{r.t}}</span></span>
+                <span style="{{r.chip}}">{{r.s}}</span>
+              </div>
+            </sc-for>
+          </section>
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:8px">
+            <h2 style="margin:0 0 6px;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Upcoming holidays</h2>
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:8px 0;border-top:1px solid #EEF1F7"><span>[Holiday name]</span><span style="color:#5E6583">[Date]</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:8px 0;border-top:1px solid #EEF1F7"><span>Christmas</span><span style="color:#5E6583">Fri 25 Dec</span></div>
+            <div style="font-size:12px;color:#5E6583">Holiday list is set by HR in Configuration.</div>
+          </section>
+        </aside>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1150}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const B = [['Casual', 6, 12, 'Accrues 1 / month', '#284CC7'], ['Sick', 5, 8, 'Note needed after 2 days', '#0E9F75'], ['Annual', 9, 15, 'Carry forward up to 5', '#284CC7'], ['Comp-off', 1, 0, 'Use by 18 Dec 2026', '#D0691F'], ['Unpaid', 0, 0, 'Deducted from payroll', '#8A93B2']];
+    const T = { green: ['#E2F5EC', '#0E6B4B'], amber: ['#FFF1D9', '#8A4F00'], red: ['#FDE7E7', '#B42323'], gray: ['#EDF0F6', '#4A5270'] };
+    const chip = (t) => 'font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;white-space:nowrap;background:' + T[t][0] + ';color:' + T[t][1];
+    return {
+      bal: B.map(([n, v, of, note, c]) => ({ n, v: of || n !== 'Unpaid' ? v : '0', of: of ? 'of ' + of : n === 'Unpaid' ? 'used' : 'earned', note, bar: 'display:block;height:6px;border-radius:999px;background:' + c + ';width:' + (of ? Math.round(v / of * 100) : v ? 100 : 0) + '%' })),
+      reqs: [
+        { d: 'Fri 6 Nov · Casual · 1 day', t: 'Submitted 18 Oct · waiting for Vivek', s: 'Pending', chip: chip('amber') },
+        { d: 'Tue 13 Oct · Casual · 1 day', t: 'Approved by Vivek Menon', s: 'Approved', chip: chip('green') },
+        { d: '24–28 Aug · Annual · 5 days', t: 'Approved by Vivek → HR', s: 'Approved', chip: chip('green') },
+        { d: 'Mon 3 Aug · Sick · 0.5 day', t: 'Cancelled by you', s: 'Cancelled', chip: chip('gray') }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

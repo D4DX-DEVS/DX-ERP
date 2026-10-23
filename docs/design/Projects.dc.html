@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Projects</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="management" active="projects" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="management" hint-size="100%,64px"></dc-import>
+    <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:20px;width:100%;max-width:1280px;box-sizing:border-box">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px">
+        <div>
+          <div style="font-size:13px;color:#5E6583">Work</div>
+          <h1 style="margin:2px 0 0;font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">Projects</h1>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <div role="group" aria-label="View" style="display:inline-flex;padding:3px;border-radius:10px;background:#E7EAF3">
+            <button type="button" style="height:34px;padding:0 12px;border:0;border-radius:8px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:600;color:#10183A;box-shadow:0 1px 2px rgba(16,24,58,0.08)">List</button>
+            <button type="button" style="height:34px;padding:0 12px;border:0;border-radius:8px;background:transparent;font:inherit;font-size:13px;font-weight:500;color:#3D4566">Board</button>
+            <button type="button" style="height:34px;padding:0 12px;border:0;border-radius:8px;background:transparent;font:inherit;font-size:13px;font-weight:500;color:#3D4566">Timeline</button>
+          </div>
+          <button type="button" style="height:40px;padding:0 16px;border:0;border-radius:10px;background:#1F3CB3;font:inherit;font-size:14px;font-weight:600;color:#FFFFFF;display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New project</button>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        <sc-for list="{{filters}}" as="f" hint-placeholder-count="7"><span style="{{f.s}}">{{f.l}} <span style="opacity:0.8">{{f.n}}</span></span></sc-for>
+      </div>
+
+      <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column;min-width:0">
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:1060px">
+            <thead><tr style="background:#F7F8FC;color:#5E6583;text-align:left"><th style="padding:10px 16px;font-size:12px;font-weight:600">Project</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Manager · team</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Timeline</th><th style="padding:10px 8px;font-size:12px;font-weight:600;width:170px">Progress</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Effort used</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Status</th><th style="padding:10px 16px 10px 8px;font-size:12px;font-weight:600">Health</th></tr></thead>
+            <tbody>
+              <sc-for list="{{rows}}" as="r" hint-placeholder-count="9">
+                <tr style="border-top:1px solid #EEF1F7">
+                  <td style="padding:12px 16px"><a href="Project.dc.html" style="text-decoration:none;color:#10183A"><span style="display:block;font-weight:600">{{r.t}}</span><span style="display:block;font-size:12px;color:#5E6583">{{r.id}} · {{r.c}}</span></a></td>
+                  <td style="padding:12px 8px"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px">{{r.pm}}</span><span style="display:flex"><sc-for list="{{r.team}}" as="m" hint-placeholder-count="3"><span style="{{m.s}}">{{m.i}}</span></sc-for></span></div></td>
+                  <td style="padding:12px 8px;font-size:12px;color:#3D4566;white-space:nowrap">{{r.tl}}</td>
+                  <td style="padding:12px 8px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px"><span style="color:#5E6583">{{r.ms}}</span><strong>{{r.p}}%</strong></div><div style="height:6px;border-radius:999px;background:#EDF0F6"><div style="{{r.bar}}"></div></div></td>
+                  <td style="padding:12px 8px;font-size:12px;color:#3D4566;white-space:nowrap">{{r.eff}}</td>
+                  <td style="padding:12px 8px"><span style="{{r.chip}}">{{r.s}}</span></td>
+                  <td style="padding:12px 16px 12px 8px"><span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;white-space:nowrap;color:{{r.hc}}"><span style="{{r.hd}}"></span>{{r.h}}</span></td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const T = { blue: ['#E2E8FC', '#1F3CB3'], green: ['#E2F5EC', '#0E6B4B'], amber: ['#FFF1D9', '#8A4F00'], purple: ['#F1EAFE', '#6D28D9'], orange: ['#FFEDE3', '#B03A0A'], gray: ['#EDF0F6', '#4A5270'] };
+    const chip = (t) => 'font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;white-space:nowrap;background:' + T[t][0] + ';color:' + T[t][1];
+    const H = { ok: ['On track', '#0E6B4B'], risk: ['At risk', '#9A5800'], late: ['Delayed', '#B42323'], na: ['—', '#8A93B2'] };
+    const AV = ['#E2E8FC|#1F3CB3', '#FFEDE3|#B03A0A', '#E2F5EC|#0E6B4B', '#F1EAFE|#6D28D9'];
+    const av = (i, k) => { const [b, f] = AV[k % 4].split('|'); return { i, s: 'width:26px;height:26px;border-radius:999px;border:2px solid #FFFFFF;margin-left:-6px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;background:' + b + ';color:' + f }; };
+    const R = [
+      ['Greenleaf e-commerce revamp', 'PRJ-0241', 'Greenleaf Organics', 'Aisha R.', ['AN', 'SV', 'FN', '+2'], '4 Aug – 14 Nov', 'Checkout release · 28 Oct', 68, '312 / 480 h', 'In progress', 'blue', 'ok'],
+      ['Nexora patient app', 'PRJ-0238', 'Nexora Health Clinics', 'Aisha R.', ['AG', 'RM', 'KD', '+1'], '1 Jul – 30 Nov', 'Beta build · 6 days late', 42, '410 / 760 h', 'In progress', 'blue', 'late'],
+      ['Seaside booking engine', 'PRJ-0229', 'Seaside Hospitality', 'Aisha R.', ['SV', 'AG'], '2 Jun – 31 Oct', 'Client UAT', 92, '540 / 560 h', 'Under review', 'orange', 'risk'],
+      ['BlueTide fleet dashboard', 'PRJ-0244', 'BlueTide Logistics', 'Vivek M.', ['AN', 'NJ'], '19 Oct – 31 Jan', 'Discovery', 6, '22 / 380 h', 'Planning', 'purple', 'ok'],
+      ['Orbit Motors social campaign', 'PRJ-0245', 'Orbit Motors', 'Joel M.', ['MP', 'SA'], '1 Oct – 31 Dec', 'Nov content calendar', 30, '48 / 160 h', 'In progress', 'blue', 'ok'],
+      ['D4DX website refresh', 'PRJ-0240', 'Internal', 'Fathima N.', ['FN', 'RM', 'GS'], '1 Sep – 30 Nov', 'Design sign-off', 55, '90 / 200 h', 'In progress', 'blue', 'ok'],
+      ['Lumen Academy LMS', 'PRJ-0233', 'Lumen Academy', 'Vivek M.', ['AG', 'SV'], '15 May – 15 Dec', 'Waiting on client content', 35, '180 / 520 h', 'On hold', 'amber', 'risk'],
+      ['Arabian Spice Traders ERP link', 'PRJ-0246', 'Arabian Spice Traders', '—', [], 'Proposal stage', 'Proposal PRP-0063', 0, '—', 'Enquiry', 'gray', 'na'],
+      ['Orbit Motors brand site', 'PRJ-0219', 'Orbit Motors', 'Aisha R.', ['FN', 'SV'], '3 Mar – 30 Jun', 'Delivered', 100, '402 / 420 h', 'Completed', 'green', 'ok']
+    ];
+    const F = [['Active', 9, 1], ['In progress', 4], ['Planning', 1], ['Under review', 1], ['On hold', 1], ['Enquiry', 1], ['Completed FY', 14]];
+    return {
+      filters: F.map(([l, n, on]) => ({ l, n, s: 'height:32px;padding:0 12px;border-radius:999px;font-size:13px;display:flex;align-items:center;gap:4px;' + (on ? 'background:#1F3CB3;color:#FFFFFF;font-weight:600' : 'border:1px solid #D5DAE8;background:#FFFFFF;color:#3D4566;font-weight:500') })),
+      rows: R.map(([t, id, c, pm, team, tl, ms, p, eff, s, st, h]) => ({ t, id, c, pm, tl, ms, p, eff, s, chip: chip(st), team: team.map((x, k) => av(x, k)), bar: 'height:6px;border-radius:999px;width:' + p + '%;background:' + (h === 'late' ? '#D0691F' : p === 100 ? '#0E9F75' : '#284CC7'), h: H[h][0], hc: H[h][1], hd: 'width:8px;height:8px;border-radius:999px;background:' + H[h][1] }))
+    };
+  }
+}
+</script>
+</body>
+</html>

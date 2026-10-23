@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Design tokens</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div style="width:1440px;height:1400px;box-sizing:border-box;background:#FFFFFF;font-family:Inter,system-ui,sans-serif;color:#10183A;padding:56px 64px;display:flex;flex-direction:column;gap:40px">
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:32px">
+    <div>
+      <div style="font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#1F3CB3">Foundations</div>
+      <h1 style="margin:6px 0 0;font-family:Montserrat,sans-serif;font-weight:700;font-size:36px">Design tokens</h1>
+    </div>
+    <p style="margin:0;max-width:560px;font-size:14px;line-height:1.6;color:#3D4566">Colour comes from the logo: Blue 500 #284CC7 to Blue 800 #0F2291, with graphite #515151 from the wordmark. Montserrat matches the wordmark for headings and figures; Inter carries all interface text.</p>
+  </div>
+
+  <section style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px">
+    <div style="border:1px solid #E2E6F0;border-radius:16px;height:200px;display:flex;align-items:center;justify-content:center;background:#FFFFFF;position:relative">
+      <img src="/_blob/f1e306324ac504d40e596fdafd905f1c" alt="D4DX full logo" style="height:132px;width:auto">
+      <span style="position:absolute;left:16px;bottom:12px;font-size:12px;color:#5E6583">Full logo · light surfaces · min 48 px tall</span>
+    </div>
+    <div style="border-radius:16px;height:200px;display:flex;align-items:center;justify-content:center;gap:14px;background:#0A1450;position:relative">
+      <img src="/_blob/bea72f4d5c269cfc7b6663675f09bdd3" alt="D4DX mark in white" style="height:64px;width:auto;filter:brightness(0) invert(1)">
+      <span style="font-family:Montserrat,sans-serif;font-weight:700;font-size:30px;color:#FFFFFF;letter-spacing:0.04em">D4DX</span>
+      <span style="position:absolute;left:16px;bottom:12px;font-size:12px;color:#A9B3DD">Reversed mark · sidebar, navy surfaces</span>
+    </div>
+    <div style="border-radius:16px;height:200px;display:flex;align-items:center;justify-content:center;background:linear-gradient(120deg,#284CC7,#0F2291);position:relative">
+      <img src="/_blob/bea72f4d5c269cfc7b6663675f09bdd3" alt="D4DX mark on brand gradient" style="height:72px;width:auto;filter:brightness(0) invert(1)">
+      <span style="position:absolute;left:16px;bottom:12px;font-size:12px;color:#D6DEFA">Brand gradient · cover and sign-in only</span>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:20px">Colour</h2>
+    <sc-for list="{{palettes}}" as="p" hint-placeholder-count="3">
+      <div style="display:flex;gap:20px;align-items:flex-start">
+        <div style="width:120px;flex:none;padding-top:8px;font-size:13px;font-weight:600;color:#3D4566">{{p.name}}</div>
+        <div style="flex:1;display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:10px">
+          <sc-for list="{{p.items}}" as="c" hint-placeholder-count="8">
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <div style="{{c.swatch}}"></div>
+              <div style="font-size:12px;font-weight:600">{{c.n}}</div>
+              <div style="font-size:11px;color:#5E6583;font-family:ui-monospace,Menlo,monospace">{{c.hex}}</div>
+              <div style="font-size:11px;color:#5E6583;line-height:1.35">{{c.use}}</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-for>
+  </section>
+
+  <section style="display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:40px">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:20px">Typography</h2>
+      <div style="display:flex;flex-direction:column;border-top:1px solid #EEF1F7">
+        <div style="display:flex;align-items:baseline;gap:20px;padding:10px 0;border-bottom:1px solid #EEF1F7"><span style="width:150px;flex:none;font-size:12px;color:#5E6583">Display · Montserrat 700 · 36/44</span><span style="font-family:Montserrat,sans-serif;font-weight:700;font-size:36px">Good morning, Arjun</span></div>
+        <div style="display:flex;align-items:baseline;gap:20px;padding:10px 0;border-bottom:1px solid #EEF1F7"><span style="width:150px;flex:none;font-size:12px;color:#5E6583">H1 · Montserrat 600 · 26/34</span><span style="font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">Movement register</span></div>
+        <div style="display:flex;align-items:baseline;gap:20px;padding:10px 0;border-bottom:1px solid #EEF1F7"><span style="width:150px;flex:none;font-size:12px;color:#5E6583">H2 · Montserrat 600 · 18/26</span><span style="font-family:Montserrat,sans-serif;font-weight:600;font-size:18px">Pending approvals</span></div>
+        <div style="display:flex;align-items:baseline;gap:20px;padding:10px 0;border-bottom:1px solid #EEF1F7"><span style="width:150px;flex:none;font-size:12px;color:#5E6583">Figure · Montserrat 600 · 30/36</span><span style="font-family:Montserrat,sans-serif;font-weight:600;font-size:30px">₹18,42,500</span></div>
+        <div style="display:flex;align-items:baseline;gap:20px;padding:10px 0;border-bottom:1px solid #EEF1F7"><span style="width:150px;flex:none;font-size:12px;color:#5E6583">Body · Inter 400 · 15/24</span><span style="font-size:15px">Corrections need a reason and are logged in the audit trail.</span></div>
+        <div style="display:flex;align-items:baseline;gap:20px;padding:10px 0;border-bottom:1px solid #EEF1F7"><span style="width:150px;flex:none;font-size:12px;color:#5E6583">UI · Inter 500 · 14/20</span><span style="font-size:14px;font-weight:500">Record In-Time</span></div>
+        <div style="display:flex;align-items:baseline;gap:20px;padding:10px 0;border-bottom:1px solid #EEF1F7"><span style="width:150px;flex:none;font-size:12px;color:#5E6583">Small · Inter 400 · 13/18</span><span style="font-size:13px;color:#3D4566">Expected back 12:30 · Client meeting</span></div>
+        <div style="display:flex;align-items:baseline;gap:20px;padding:10px 0;border-bottom:1px solid #EEF1F7"><span style="width:150px;flex:none;font-size:12px;color:#5E6583">Overline · Inter 600 · 11/16</span><span style="font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#5E6583">Today · Wed 21 Oct</span></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:22px">
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:20px">Spacing · 4 px base</h2>
+        <div style="display:flex;align-items:flex-end;gap:14px">
+          <sc-for list="{{space}}" as="s" hint-placeholder-count="9">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:6px"><div style="{{s.style}}"></div><span style="font-size:11px;color:#5E6583">{{s.v}}</span></div>
+          </sc-for>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:20px">Radius &amp; elevation</h2>
+        <div style="display:flex;gap:16px">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px"><div style="width:64px;height:48px;border-radius:6px;background:#E2E8FC;border:1px solid #C4D0F7"></div><span style="font-size:11px;color:#5E6583">6 · chips</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px"><div style="width:64px;height:48px;border-radius:10px;background:#E2E8FC;border:1px solid #C4D0F7"></div><span style="font-size:11px;color:#5E6583">10 · inputs</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px"><div style="width:64px;height:48px;border-radius:14px;background:#E2E8FC;border:1px solid #C4D0F7"></div><span style="font-size:11px;color:#5E6583">14 · cards</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px"><div style="width:64px;height:48px;border-radius:20px;background:#E2E8FC;border:1px solid #C4D0F7"></div><span style="font-size:11px;color:#5E6583">20 · sheets</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:6px"><div style="width:64px;height:48px;border-radius:999px;background:#E2E8FC;border:1px solid #C4D0F7"></div><span style="font-size:11px;color:#5E6583">pill</span></div>
+        </div>
+        <div style="display:flex;gap:16px;padding:12px;background:#F4F6FB;border-radius:14px">
+          <div style="flex:1;height:64px;border-radius:12px;background:#FFFFFF;border:1px solid #E2E6F0;display:flex;align-items:center;justify-content:center;font-size:12px;color:#3D4566">Card · border only</div>
+          <div style="flex:1;height:64px;border-radius:12px;background:#FFFFFF;box-shadow:0 6px 20px rgba(16,24,58,0.10);display:flex;align-items:center;justify-content:center;font-size:12px;color:#3D4566">Popover · 0 6 20 / 10%</div>
+          <div style="flex:1;height:64px;border-radius:12px;background:#FFFFFF;box-shadow:0 20px 48px rgba(16,24,58,0.18);display:flex;align-items:center;justify-content:center;font-size:12px;color:#3D4566">Modal · 0 20 48 / 18%</div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:20px">Layout &amp; breakpoints</h2>
+        <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px">
+          <div style="border:1px solid #E2E6F0;border-radius:12px;padding:12px"><div style="font-size:13px;font-weight:600">Desktop ≥ 1280</div><div style="font-size:12px;color:#5E6583;margin-top:4px;line-height:1.5">Sidebar 248 · 12 col · margin 32 · gutter 24 · max content 1280</div></div>
+          <div style="border:1px solid #E2E6F0;border-radius:12px;padding:12px"><div style="font-size:13px;font-weight:600">Tablet 768–1279</div><div style="font-size:12px;color:#5E6583;margin-top:4px;line-height:1.5">Icon rail 72 · 8 col · margin 24 · tables scroll in their card</div></div>
+          <div style="border:1px solid #E2E6F0;border-radius:12px;padding:12px"><div style="font-size:13px;font-weight:600">Mobile &lt; 768</div><div style="font-size:12px;color:#5E6583;margin-top:4px;line-height:1.5">Bottom tabs · 4 col · margin 16 · gutter 12 · targets ≥ 44</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1400}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const sw = (hex, border) => 'height:56px;border-radius:10px;background:' + hex + (border ? ';border:1px solid #E2E6F0' : '');
+    const c = (n, hex, use, border) => ({ n, hex, use, swatch: sw(hex, border) });
+    return {
+      palettes: [
+        { name: 'Brand blue', items: [c('Blue 50', '#F1F4FE', 'Selected rows', 1), c('Blue 100', '#E2E8FC', 'Info chips, hover'), c('Blue 200', '#C4D0F7', 'Focus ring, borders'), c('Blue 400', '#5B78E0', 'Charts secondary'), c('Blue 500', '#284CC7', 'Logo start, links'), c('Blue 600', '#1F3CB3', 'Primary actions'), c('Blue 700', '#172E94', 'Pressed state'), c('Blue 800', '#0F2291', 'Logo end'), c('Navy 900', '#0A1450', 'Sidebar, dark surface')] },
+        { name: 'Neutral', items: [c('Ink', '#10183A', 'Primary text'), c('Ink 2', '#3D4566', 'Secondary text'), c('Muted', '#5E6583', 'Labels, meta'), c('Graphite', '#515151', 'Wordmark only'), c('Line', '#E2E6F0', 'Borders', 1), c('Line soft', '#EEF1F7', 'Row dividers', 1), c('Ground', '#F4F6FB', 'App background', 1), c('Surface', '#FFFFFF', 'Cards, sheets', 1), c('Field', '#F7F8FC', 'Input fill', 1)] },
+        { name: 'Status', items: [c('Success', '#0E7A55', 'Present, approved, paid'), c('Success bg', '#E2F5EC', 'Chip fill'), c('Warning', '#9A5800', 'Late, pending, due'), c('Warning bg', '#FFF1D9', 'Chip fill'), c('Danger', '#B42323', 'Absent, overdue, rejected'), c('Danger bg', '#FDE7E7', 'Chip fill'), c('Outside', '#C2410C', 'Out of office, alerts'), c('Outside bg', '#FFEDE3', 'Chip fill'), c('Intern', '#6D28D9', 'Intern / trainee tag')] }
+      ],
+      space: [4, 8, 12, 16, 20, 24, 32, 40, 48].map((v) => ({ v, style: 'width:' + v + 'px;height:' + v + 'px;background:#284CC7;border-radius:3px' }))
+    };
+  }
+}
+</script>
+</body>
+</html>

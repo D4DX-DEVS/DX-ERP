@@ -1,0 +1,153 @@
+@import "tailwindcss";
+
+/* D4DX design tokens (from the Foundations › Design tokens artboard). */
+@theme {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-montserrat), var(--font-inter), ui-sans-serif, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-brand-50: #f1f4fe;
+  --color-brand-100: #e2e8fc;
+  --color-brand-200: #c4d0f7;
+  --color-brand-400: #5b78e0;
+  --color-brand-500: #284cc7;
+  --color-brand-600: #1f3cb3;
+  --color-brand-700: #172e94;
+  --color-brand-800: #0f2291;
+  --color-navy: #0a1450;
+  --color-navy-muted: #8590c2;
+  --color-navy-text: #c3cae8;
+  --color-navy-soft: #a9b3dd;
+
+  --color-ink: #10183a;
+  --color-ink-2: #3d4566;
+  --color-muted: #5e6583;
+  --color-subtle: #8a93b2;
+  --color-graphite: #515151;
+  --color-line: #e2e6f0;
+  --color-line-soft: #eef1f7;
+  --color-line-strong: #d5dae8;
+  --color-ground: #f4f6fb;
+  --color-surface: #ffffff;
+  --color-field: #f7f8fc;
+  --color-track: #edf0f6;
+  --color-segment: #e7eaf3;
+
+  --color-success: #0e7a55;
+  --color-success-bg: #e2f5ec;
+  --color-warning: #9a5800;
+  --color-warning-bg: #fff1d9;
+  --color-danger: #b42323;
+  --color-danger-bg: #fde7e7;
+  --color-outside: #c2410c;
+  --color-outside-bg: #ffede3;
+  --color-intern: #6d28d9;
+
+  --color-tone-blue: #1f3cb3;
+  --color-tone-blue-bg: #e2e8fc;
+  --color-tone-green: #0e6b4b;
+  --color-tone-green-bg: #e2f5ec;
+  --color-tone-amber: #8a4f00;
+  --color-tone-amber-bg: #fff1d9;
+  --color-tone-red: #b42323;
+  --color-tone-red-bg: #fde7e7;
+  --color-tone-orange: #b03a0a;
+  --color-tone-orange-bg: #ffede3;
+  --color-tone-gray: #4a5270;
+  --color-tone-gray-bg: #edf0f6;
+  --color-tone-purple: #6d28d9;
+  --color-tone-purple-bg: #f1eafe;
+
+  --color-chart-1: #284cc7;
+  --color-chart-2: #d0691f;
+  --color-chart-3: #0e9f75;
+
+  --radius-chip: 6px;
+  --radius-input: 10px;
+  --radius-card: 14px;
+  --radius-sheet: 20px;
+
+  --shadow-popover: 0 6px 20px rgba(16, 24, 58, 0.1);
+  --shadow-modal: 0 20px 48px rgba(16, 24, 58, 0.18);
+  --shadow-segment: 0 1px 2px rgba(16, 24, 58, 0.08);
+
+  --animate-fade-in: fade-in 150ms ease-out;
+  --animate-slide-up: slide-up 180ms ease-out;
+  --animate-slide-in-right: slide-in-right 200ms ease-out;
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes slide-up {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  @keyframes slide-in-right {
+    from {
+      transform: translateX(100%);
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background: var(--color-ground);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
+  }
+  a {
+    color: inherit;
+  }
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-brand-500);
+    outline-offset: 2px;
+  }
+  input[type="date"]::-webkit-calendar-picker-indicator,
+  input[type="time"]::-webkit-calendar-picker-indicator,
+  input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+  input[type="month"]::-webkit-calendar-picker-indicator {
+    opacity: 0.6;
+    cursor: pointer;
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #fff;
+  }
+}

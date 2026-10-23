@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Shell · Sidebar</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<nav aria-label="Main" style="width:248px;min-height:1000px;box-sizing:border-box;background:#0A1450;color:#FFFFFF;font-family:Inter,system-ui,sans-serif;display:flex;flex-direction:column;padding:20px 14px 16px">
+  <a href="{{homeHref}}" style="display:flex;align-items:center;gap:10px;padding:2px 8px 18px;text-decoration:none;color:#FFFFFF">
+    <img src="/_blob/bea72f4d5c269cfc7b6663675f09bdd3" alt="" style="width:34px;height:28px;object-fit:contain;filter:brightness(0) invert(1)">
+    <span style="display:flex;flex-direction:column;line-height:1.1">
+      <span style="font-family:Montserrat,sans-serif;font-weight:700;font-size:18px;letter-spacing:0.04em">D4DX <span style="font-weight:600;font-size:11px;letter-spacing:0.06em;padding:2px 6px;border-radius:5px;background:rgba(255,255,255,0.14);vertical-align:3px">ERP</span></span>
+      <span style="font-size:11px;color:#A9B3DD;margin-top:3px">Innovations LLP</span>
+    </span>
+  </a>
+  <div style="flex:1;display:flex;flex-direction:column;gap:2px">
+    <sc-for list="{{sections}}" as="sec" hint-placeholder-count="6">
+      <div style="display:flex;flex-direction:column;gap:2px;margin-bottom:6px">
+        <sc-if value="{{sec.label}}" hint-placeholder-val="{{true}}">
+          <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#8590C2;padding:10px 10px 4px">{{sec.label}}</div>
+        </sc-if>
+        <sc-for list="{{sec.items}}" as="it" hint-placeholder-count="3">
+          <a href="{{it.href}}" style="{{it.style}}">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{it.d}}"></path></svg>
+            <span style="flex:1">{{it.label}}</span>
+            <sc-if value="{{it.badge}}" hint-placeholder-val="{{false}}"><span style="{{it.badgeStyle}}">{{it.badge}}</span></sc-if>
+          </a>
+        </sc-for>
+      </div>
+    </sc-for>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px;padding:12px 8px 0;border-top:1px solid rgba(255,255,255,0.10)">
+    <span style="width:34px;height:34px;border-radius:999px;background:#284CC7;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex:none">{{user.initials}}</span>
+    <span style="flex:1;display:flex;flex-direction:column;min-width:0">
+      <span style="font-size:13px;font-weight:600">{{user.name}}</span>
+      <span style="font-size:12px;color:#A9B3DD">{{user.title}}</span>
+    </span>
+    <a href="Login.dc.html" aria-label="Sign out" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:8px;color:#C3CAE8">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4M15 16l4-4-4-4M19 12H9"></path></svg>
+    </a>
+  </div>
+</nav>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"role":{"editor":"enum","options":["management","hr","employee","intern"],"default":"management"},"active":{"editor":"enum","options":["dashboard","staff","interns","attendance","movement","leave","timesheets","projects","tasks","qa","leads","proposals","contracts","invoices","expenses","claims","payroll","payslips","learning","assets","reports","settings","roles","audit"],"default":"dashboard"},"$preview":{"width":248,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const role = this.props.role ?? 'management';
+    const active = this.props.active ?? 'dashboard';
+    const I = {
+      dashboard: 'M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z',
+      staff: 'M16 20v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM22 20v-1a4 4 0 0 0-3-3.9M16 4.1a3.5 3.5 0 0 1 0 6.8',
+      interns: 'M2 9l10-5 10 5-10 5zM6 11v5c0 1.5 2.7 3 6 3s6-1.5 6-3v-5M22 9v6',
+      attendance: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2',
+      movement: 'M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M9 16l-4-4 4-4M5 12h11',
+      leave: 'M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM4 10h16M8 3v4M16 3v4',
+      timesheets: 'M9 3h6v3H9zM9 4.5H6a1 1 0 0 0-1 1V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V5.5a1 1 0 0 0-1-1h-3M9 12h6M9 16h4',
+      projects: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
+      tasks: 'M9 11l3 3 8-8M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9',
+      qa: 'M8 8a4 4 0 0 1 8 0v1H8zM7 9h10v5a5 5 0 0 1-10 0zM12 14v5M3 12h4M17 12h4M4 7l3 2M20 7l-3 2M4 19l3-2M20 19l-3-2',
+      leads: 'M4 8h16v11H4zM9 8V5h6v3M4 13h16',
+      proposals: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h6',
+      contracts: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM9 12l2 2 4-4',
+      invoices: 'M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6M9 16h3',
+      expenses: 'M4 7h15a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1zM4 7l12-3v3M16 13h2',
+      payroll: 'M3 7h18v10H3zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 10v4M18 10v4',
+      assets: 'M5 5h14v10H5zM2 19h20',
+      reports: 'M5 20V11M11 20V5M17 20v-6M3 20h18',
+      settings: 'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4',
+      roles: 'M6 11h12v9H6zM8 11V8a4 4 0 0 1 8 0v3M12 15v2',
+      audit: 'M4 5h16M4 10h16M4 15h10M4 20h7M18 15v5M18 15h3',
+      learning: 'M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 19V5M19 19v2H6'
+    };
+    I.claims = I.expenses; I.payslips = I.payroll;
+    const L = { dashboard: 'Dashboard', staff: 'Staff', interns: 'Interns & trainees', attendance: 'Attendance', movement: 'Movement register', leave: 'Leave', timesheets: 'Timesheets', projects: 'Projects', tasks: 'Tasks', qa: 'QA & issues', leads: 'Leads & clients', proposals: 'Proposals', contracts: 'Contracts', invoices: 'Invoices & payments', expenses: 'Expenses', claims: 'My expenses', payroll: 'Payroll & stipends', payslips: 'My payslips', learning: 'Learning & reviews', assets: 'Assets', reports: 'Reports', settings: 'Configuration', roles: 'Roles & access', audit: 'Audit trail' };
+    const self = role === 'employee' || role === 'intern';
+    const H = { dashboard: role === 'employee' ? 'Dash-Employee' : role === 'intern' ? 'Dash-Intern' : 'Dash-Mgmt', staff: 'Staff', interns: 'Interns', attendance: self ? 'Attendance' : 'Attendance-Team', movement: self ? 'Movement-New' : 'Movement', leave: self ? 'Leave' : 'Leave-Approvals', timesheets: 'Timesheet', projects: 'Projects', tasks: 'Tasks', qa: 'Issues', leads: 'Leads', proposals: 'Proposal', contracts: 'Contracts', invoices: 'Invoices', expenses: 'Expenses', claims: 'Expenses', payroll: 'Payroll', payslips: 'Payslip', learning: 'Intern', assets: 'Assets', reports: 'Reports', settings: 'Settings', roles: 'Roles', audit: 'Audit' };
+    const S = {
+      management: [['', ['dashboard']], ['People', ['staff', 'interns']], ['Time', ['attendance', 'movement', 'leave', 'timesheets']], ['Work', ['projects', 'tasks', 'qa']], ['Sales', ['leads', 'proposals', 'contracts']], ['Finance', ['invoices', 'expenses', 'payroll']], ['Operations', ['assets', 'reports']], ['Admin', ['settings', 'roles', 'audit']]],
+      hr: [['', ['dashboard']], ['People', ['staff', 'interns']], ['Time', ['attendance', 'movement', 'leave', 'timesheets']], ['Work', ['projects', 'tasks']], ['Finance', ['payroll', 'expenses']], ['Operations', ['assets', 'reports']], ['Admin', ['settings', 'roles', 'audit']]],
+      employee: [['', ['dashboard']], ['My work', ['tasks', 'projects', 'timesheets', 'qa']], ['My time', ['attendance', 'movement', 'leave']], ['Pay & claims', ['payslips', 'claims']]],
+      intern: [['', ['dashboard']], ['Internship', ['tasks', 'learning', 'timesheets']], ['My time', ['attendance', 'movement', 'leave']]]
+    };
+    const B = { management: { movement: ['2', 1], leave: ['4', 0] }, hr: { movement: ['2', 1], leave: ['4', 0] }, employee: { tasks: ['5', 0] }, intern: { tasks: ['3', 0] } }[role] || {};
+    const U = { management: ['Sameer Hassan', 'Managing Partner', 'SH'], hr: ['Nadia Thomas', 'HR & Admin', 'NT'], employee: ['Arjun Nair', 'Software Engineer', 'AN'], intern: ['Rahul Menon', 'UI/UX Intern', 'RM'] }[role];
+    const base = 'display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:8px;font-size:13.5px;font-weight:500;text-decoration:none;';
+    const sections = (S[role] || S.management).map(([label, keys]) => ({
+      label,
+      items: keys.map((k) => ({
+        label: L[k], d: I[k], href: H[k] + '.dc.html',
+        style: base + (k === active ? 'background:#1F3CB3;color:#FFFFFF' : 'color:#C3CAE8'),
+        badge: B[k] ? B[k][0] : '',
+        badgeStyle: 'font-size:11px;font-weight:600;min-width:20px;height:20px;padding:0 6px;box-sizing:border-box;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;color:#FFFFFF;background:' + (B[k] && B[k][1] ? '#C2410C' : 'rgba(255,255,255,0.16)')
+      }))
+    }));
+    return { sections, homeHref: H.dashboard + '.dc.html', user: { name: U[0], title: U[1], initials: U[2] } };
+  }
+}
+</script>
+</body>
+</html>

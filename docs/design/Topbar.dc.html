@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Shell · Top bar</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<header style="width:100%;min-height:64px;box-sizing:border-box;background:#FFFFFF;border-bottom:1px solid #E2E6F0;font-family:Inter,system-ui,sans-serif;color:#10183A;display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:10px 32px">
+  <label style="flex:1 1 280px;max-width:440px;display:flex;align-items:center;gap:10px;height:40px;padding:0 12px;border:1px solid #E2E6F0;border-radius:10px;background:#F7F8FC;color:#5E6583;box-sizing:border-box">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4"></path></svg>
+    <input type="search" aria-label="Search people, projects, clients, invoices" placeholder="Search people, projects, clients, invoices…" style="flex:1;min-width:0;border:0;background:transparent;font:inherit;font-size:14px;color:#10183A;outline:none">
+    <span style="font-size:11px;font-weight:600;padding:2px 6px;border:1px solid #D5DAE8;border-radius:5px;color:#5E6583">Ctrl K</span>
+  </label>
+  <div style="flex:1 1 0"></div>
+  <a href="{{attHref}}" style="display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 12px;border-radius:999px;background:#E2F5EC;color:#0E6B4B;font-size:13px;font-weight:600;text-decoration:none">
+    <span style="width:8px;height:8px;border-radius:999px;background:#12935F"></span>In office · since {{since}}
+  </a>
+  <a href="Movement-New.dc.html" style="display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 14px;border-radius:10px;border:1px solid #D5DAE8;color:#10183A;font-size:13px;font-weight:600;text-decoration:none">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M9 16l-4-4 4-4M5 12h11"></path></svg>Record movement
+  </a>
+  <a href="Notifications.dc.html" aria-label="Notifications, 6 unread" style="position:relative;width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:10px;color:#3D4566">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9zM10 20a2 2 0 0 0 4 0"></path></svg>
+    <span style="position:absolute;top:5px;right:5px;min-width:17px;height:17px;padding:0 4px;box-sizing:border-box;border-radius:999px;background:#C2410C;color:#FFFFFF;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #FFFFFF">6</span>
+  </a>
+  <a href="Employee.dc.html" aria-label="My profile" style="width:36px;height:36px;border-radius:999px;background:#1F3CB3;color:#FFFFFF;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;text-decoration:none">{{initials}}</a>
+</header>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"role":{"editor":"enum","options":["management","hr","employee","intern"],"default":"management"},"$preview":{"width":1192,"height":64}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const role = this.props.role ?? 'management';
+    const R = { management: ['SH', '09:04'], hr: ['NT', '08:58'], employee: ['AN', '09:12'], intern: ['RM', '09:26'] }[role] || ['SH', '09:04'];
+    const self = role === 'employee' || role === 'intern';
+    return { initials: R[0], since: R[1], attHref: self ? 'Attendance.dc.html' : 'Attendance-Team.dc.html' };
+  }
+}
+</script>
+</body>
+</html>

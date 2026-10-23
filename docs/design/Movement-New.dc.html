@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Record movement</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="employee" active="movement" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="employee" hint-size="100%,64px"></dc-import>
+    <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:20px;width:100%;max-width:1280px;box-sizing:border-box">
+      <div>
+        <div style="font-size:13px;color:#5E6583">Time · Movement register</div>
+        <h1 style="margin:2px 0 0;font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">Going out of the office</h1>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start">
+        <form style="grid-column:span 2;background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:20px;min-width:0">
+          <div style="display:flex;flex-wrap:wrap;gap:24px;padding:14px 16px;border-radius:12px;background:#F7F8FC;font-size:13px">
+            <span><span style="color:#5E6583">Person</span><br><strong>Arjun Nair · D4DX-E0142</strong></span>
+            <span><span style="color:#5E6583">Date</span><br><strong>Wed 21 Oct 2026</strong></span>
+            <span><span style="color:#5E6583">Out-Time</span><br><strong>Recorded when you confirm</strong></span>
+            <span><span style="color:#5E6583">Movement ID</span><br><strong>Assigned automatically</strong></span>
+          </div>
+          <fieldset style="border:0;margin:0;padding:0">
+            <legend style="font-size:13px;font-weight:600;color:#3D4566;margin-bottom:10px">Category</legend>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
+              <sc-for list="{{cats}}" as="c" hint-placeholder-count="6">
+                <label style="{{c.style}}"><input type="radio" name="cat" checked="{{c.on}}" style="width:18px;height:18px;margin:2px 0 0;accent-color:#1F3CB3"><span><span style="display:block;font-size:14px;font-weight:600">{{c.n}}</span><span style="display:block;font-size:12px;color:#5E6583">{{c.note}}</span></span></label>
+              </sc-for>
+            </div>
+          </fieldset>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px 20px">
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Purpose<input type="text" value="Sprint demo with Greenleaf product team" style="height:42px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A"></label>
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Destination<input type="text" value="Greenleaf Organics, Infopark Phase 2, Kakkanad" style="height:42px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A"></label>
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Client / project<select style="height:42px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;background:#FFFFFF"><option>PRJ-0241 · Greenleaf e-commerce revamp</option></select></label>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <label for="ret" style="font-size:13px;font-weight:600;color:#3D4566">Expected return</label>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input id="ret" type="time" value="14:30" style="height:42px;padding:0 12px;border:2px solid #284CC7;box-shadow:0 0 0 3px #E2E8FC;border-radius:10px;font:inherit;font-size:14px;color:#10183A;width:120px">
+                <button type="button" style="height:34px;padding:0 10px;border:1px solid #D5DAE8;border-radius:999px;background:#FFFFFF;font:inherit;font-size:12px;font-weight:600;color:#3D4566">+30m</button>
+                <button type="button" style="height:34px;padding:0 10px;border:1px solid #1F3CB3;border-radius:999px;background:#F1F4FE;font:inherit;font-size:12px;font-weight:600;color:#1F3CB3">+2h</button>
+                <button type="button" style="height:34px;padding:0 10px;border:1px solid #D5DAE8;border-radius:999px;background:#FFFFFF;font:inherit;font-size:12px;font-weight:600;color:#3D4566">+3h</button>
+              </div>
+            </div>
+          </div>
+          <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Remarks <span style="font-weight:400;color:#5E6583">optional</span>
+            <textarea rows="2" style="padding:10px 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;resize:vertical">Travelling with Sanjay. Will join stand-up remotely if late.</textarea>
+          </label>
+          <div style="display:flex;gap:10px;padding:12px 14px;border-radius:10px;background:#F1F4FE;color:#172E94;font-size:13px;line-height:1.5">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;margin-top:1px"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v5M12 8h.01"></path></svg>
+            <span>Client meetings don't need approval. You stay checked in; this movement is logged separately from attendance.</span>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:10px;padding-top:4px">
+            <a href="Dash-Employee.dc.html" style="height:46px;padding:0 18px;border:1px solid #D5DAE8;border-radius:12px;color:#10183A;font-size:15px;font-weight:600;display:flex;align-items:center;text-decoration:none">Cancel</a>
+            <button type="button" style="height:46px;padding:0 22px;border:0;border-radius:12px;background:#1F3CB3;font:inherit;font-size:15px;font-weight:600;color:#FFFFFF;display:flex;align-items:center;gap:8px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M9 16l-4-4 4-4M5 12h11"></path></svg>Confirm &amp; record Out-Time</button>
+          </div>
+        </form>
+
+        <aside style="display:flex;flex-direction:column;gap:16px;min-width:0">
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">My movements</h2><span style="font-size:12px;color:#5E6583">This week · 3h 20m</span></div>
+            <sc-for list="{{hist}}" as="h" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid #EEF1F7">
+                <span style="flex:1;min-width:0"><span style="display:block;font-size:13px;font-weight:600">{{h.p}}</span><span style="display:block;font-size:12px;color:#5E6583">{{h.t}}</span></span>
+                <span style="text-align:right"><span style="display:block;font-size:13px;font-weight:600">{{h.d}}</span><span style="{{h.chip}}">{{h.s}}</span></span>
+              </div>
+            </sc-for>
+          </section>
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:10px">
+            <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Forgot to record?</h2>
+            <p style="margin:0;font-size:13px;color:#3D4566;line-height:1.5">Add a past movement or fix a time. It is marked as a late entry, needs a reason and goes to Vivek Menon for approval. Original times are kept.</p>
+            <button type="button" style="height:38px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:600;color:#10183A">Add late entry or correction</button>
+          </section>
+        </aside>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1050}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const C = [['Client meeting', 'No approval', 1], ['Official business', 'No approval', 0], ['Project work', 'No approval', 0], ['Personal work', 'Manager approval', 0], ['Medical / emergency', 'HR notified', 0], ['Other', 'Manager approval', 0]];
+    const T = { green: ['#E2F5EC', '#0E6B4B'], gray: ['#EDF0F6', '#4A5270'], purple: ['#F1EAFE', '#6D28D9'] };
+    const chip = (t) => 'display:inline-block;margin-top:3px;font-size:11px;font-weight:600;padding:2px 7px;border-radius:999px;background:' + T[t][0] + ';color:' + T[t][1];
+    return {
+      cats: C.map(([n, note, on]) => ({ n, note, on: !!on, style: 'display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:12px;' + (on ? 'border:2px solid #1F3CB3;background:#F1F4FE' : 'border:1px solid #D5DAE8') })),
+      hist: [
+        { p: 'Client meeting · Greenleaf', t: 'Tue 20 · 14:05 – 15:20', d: '1h 15m', s: 'Approved', chip: chip('green') },
+        { p: 'Personal · bank', t: 'Mon 19 · 12:10 – 12:40', d: '30m', s: 'Returned', chip: chip('gray') },
+        { p: 'Official · GST office', t: 'Thu 15 · 10:30 – 12:05', d: '1h 35m', s: 'Corrected', chip: chip('purple') }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

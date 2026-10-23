@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Expenses &amp; reimbursements</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="management" active="expenses" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="management" hint-size="100%,64px"></dc-import>
+    <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:18px;width:100%;max-width:1280px;box-sizing:border-box">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px">
+        <div>
+          <div style="font-size:13px;color:#5E6583">Finance</div>
+          <h1 style="margin:2px 0 0;font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">Expenses</h1>
+        </div>
+        <div style="display:flex;gap:10px">
+          <button type="button" style="height:40px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:500;color:#10183A">Expense report</button>
+          <button type="button" style="height:40px;padding:0 16px;border:0;border-radius:10px;background:#1F3CB3;font:inherit;font-size:14px;font-weight:600;color:#FFFFFF;display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New expense</button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:14px 16px"><div style="font-size:13px;color:#5E6583">Recorded · October</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">₹2,96,300</div><div style="font-size:12px;color:#3D4566">48 entries</div></div>
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:14px 16px"><div style="font-size:13px;color:#5E6583">Waiting for approval</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px;color:#9A5800">₹6,250</div><div style="font-size:12px;color:#3D4566">2 claims</div></div>
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:14px 16px"><div style="font-size:13px;color:#5E6583">To reimburse</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">₹9,840</div><div style="font-size:12px;color:#3D4566">3 approved · with Oct payroll</div></div>
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:14px 16px"><div style="font-size:13px;color:#5E6583">Charged to projects</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">₹48,200</div><div style="font-size:12px;color:#3D4566">4 projects</div></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start">
+        <section style="grid-column:span 2;background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column;min-width:0">
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:14px 16px;border-bottom:1px solid #EEF1F7">
+            <span style="height:32px;padding:0 12px;border-radius:999px;background:#1F3CB3;color:#FFFFFF;font-size:13px;font-weight:600;display:flex;align-items:center">All</span>
+            <span style="height:32px;padding:0 12px;border-radius:999px;border:1px solid #D5DAE8;color:#3D4566;font-size:13px;font-weight:500;display:flex;align-items:center">Claims</span>
+            <span style="height:32px;padding:0 12px;border-radius:999px;border:1px solid #D5DAE8;color:#3D4566;font-size:13px;font-weight:500;display:flex;align-items:center">Company paid</span>
+            <span style="flex:1"></span>
+            <button type="button" style="height:34px;padding:0 12px;border:1px solid #D5DAE8;border-radius:9px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:500;color:#3D4566">Category ▾</button>
+            <button type="button" style="height:34px;padding:0 12px;border:1px solid #D5DAE8;border-radius:9px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:500;color:#3D4566">Project ▾</button>
+          </div>
+          <div style="overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:820px">
+              <thead><tr style="background:#F7F8FC;color:#5E6583;text-align:left"><th style="padding:10px 16px;font-size:12px;font-weight:600">Expense</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Category · project</th><th style="padding:10px 8px;font-size:12px;font-weight:600">By</th><th style="padding:10px 8px;font-size:12px;font-weight:600;text-align:right">Amount</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Receipt</th><th style="padding:10px 16px 10px 8px;font-size:12px;font-weight:600">Status</th></tr></thead>
+              <tbody>
+                <sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+                  <tr style="border-top:1px solid #EEF1F7">
+                    <td style="padding:11px 16px"><div style="font-weight:600">{{r.t}}</div><div style="font-size:12px;color:#5E6583">{{r.id}} · {{r.d}}</div></td>
+                    <td style="padding:11px 8px"><div>{{r.cat}}</div><div style="font-size:12px;color:#5E6583">{{r.p}}</div></td>
+                    <td style="padding:11px 8px;color:#3D4566">{{r.by}}</td>
+                    <td style="padding:11px 8px;text-align:right;font-weight:600">{{r.a}}</td>
+                    <td style="padding:11px 8px;font-size:12px;font-weight:600;color:{{r.rc}}">{{r.r}}</td>
+                    <td style="padding:11px 16px 11px 8px"><span style="{{r.chip}}">{{r.s}}</span></td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <aside style="display:flex;flex-direction:column;gap:16px;min-width:0">
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:10px">
+            <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">By category · October</h2>
+            <sc-for list="{{cats}}" as="c" hint-placeholder-count="6">
+              <div style="display:flex;flex-direction:column;gap:4px"><div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:#3D4566">{{c.n}}</span><strong>{{c.v}}</strong></div><div style="height:8px;border-radius:4px;background:#F4F6FB"><div style="{{c.bar}}"></div></div></div>
+            </sc-for>
+          </section>
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:10px">
+            <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Approve</h2>
+            <div style="padding:10px 0;border-top:1px solid #EEF1F7;display:flex;flex-direction:column;gap:8px"><div style="font-size:13px"><strong>Vivek Menon · ₹2,850</strong><br><span style="color:#5E6583">Client lunch · Seaside · receipt attached</span></div><div style="display:flex;gap:8px"><button type="button" style="flex:1;height:34px;border:1px solid #D5DAE8;border-radius:9px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:600;color:#B42323">Reject</button><button type="button" style="flex:1;height:34px;border:0;border-radius:9px;background:#0E7A55;font:inherit;font-size:13px;font-weight:600;color:#FFFFFF">Approve</button></div></div>
+            <div style="padding:10px 0;border-top:1px solid #EEF1F7;display:flex;flex-direction:column;gap:8px"><div style="font-size:13px"><strong>Joel Mathew · ₹3,400</strong><br><span style="color:#5E6583">Cab · Kakkanad ↔ Fort Kochi · 4 trips</span></div><div style="display:flex;gap:8px"><button type="button" style="flex:1;height:34px;border:1px solid #D5DAE8;border-radius:9px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:600;color:#B42323">Reject</button><button type="button" style="flex:1;height:34px;border:0;border-radius:9px;background:#0E7A55;font:inherit;font-size:13px;font-weight:600;color:#FFFFFF">Approve</button></div></div>
+          </section>
+        </aside>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const T = { amber: ['#FFF1D9', '#8A4F00'], green: ['#E2F5EC', '#0E6B4B'], blue: ['#E2E8FC', '#1F3CB3'], red: ['#FDE7E7', '#B42323'], gray: ['#EDF0F6', '#4A5270'] };
+    const chip = (t) => 'font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;white-space:nowrap;background:' + T[t][0] + ';color:' + T[t][1];
+    const R = [
+      ['Client lunch · Seaside', 'EXP-1042', '19 Oct', 'Client entertainment', 'CL-0087', 'Vivek Menon', '₹2,850', 'Attached', 'Pending approval', 'amber'],
+      ['Cab · client visits', 'EXP-1043', '20 Oct', 'Travel & conveyance', 'PRJ-0229', 'Joel Mathew', '₹3,400', 'Attached', 'Pending approval', 'amber'],
+      ['Figma organisation plan', 'EXP-1038', '15 Oct', 'Software & subscriptions', 'Design · company paid', 'Divya Krishnan', '₹38,400', 'Invoice', 'Paid', 'green'],
+      ['Courier · signed contract', 'EXP-1040', '17 Oct', 'Office & admin', 'CTR-0034', 'Adil Basheer', '₹640', 'Attached', 'To reimburse', 'blue'],
+      ['Print vendor · proofs', 'EXP-1041', '21 Oct', 'Project materials', 'PRJ-0238', 'Fathima Nasrin', '₹4,200', 'Attached', 'To reimburse', 'blue'],
+      ['GST office filing fee', 'EXP-1039', '16 Oct', 'Statutory & fees', 'Finance', 'Divya Krishnan', '₹5,000', 'Attached', 'To reimburse', 'blue'],
+      ['Team dinner', 'EXP-1036', '12 Oct', 'Staff welfare', 'Engineering', 'Vivek Menon', '₹9,600', 'Missing', 'Rejected', 'red'],
+      ['Office rent · October', 'EXP-1030', '5 Oct', 'Rent & utilities', 'Company paid', 'Divya Krishnan', '₹1,20,000', 'Invoice', 'Paid', 'green']
+    ];
+    const C = [['Rent & utilities', 138000], ['Software & subscriptions', 62400], ['Travel & conveyance', 31800], ['Hardware', 28600], ['Client entertainment', 18900], ['Other', 16600]];
+    const fmt = (n) => '₹' + n.toLocaleString('en-IN');
+    return {
+      rows: R.map(([t, id, d, cat, p, by, a, r, s, k]) => ({ t, id, d, cat, p, by, a, r, s, chip: chip(k), rc: r === 'Missing' ? '#B42323' : '#0E6B4B' })),
+      cats: C.map(([n, v]) => ({ n, v: fmt(v), bar: 'height:8px;border-radius:4px;background:#284CC7;width:' + Math.round(v / 138000 * 100) + '%' }))
+    };
+  }
+}
+</script>
+</body>
+</html>

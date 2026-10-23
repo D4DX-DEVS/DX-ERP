@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Intern record &amp; evaluation</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="hr" active="interns" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="hr" hint-size="100%,64px"></dc-import>
+    <main style="padding:24px 32px 48px;display:flex;flex-direction:column;gap:20px;width:100%;max-width:1280px;box-sizing:border-box">
+      <nav aria-label="Breadcrumb" style="font-size:13px;color:#5E6583"><a href="Interns.dc.html" style="text-decoration:none">Interns &amp; trainees</a> / Rahul Menon</nav>
+
+      <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:24px;display:flex;flex-wrap:wrap;gap:24px;align-items:center">
+        <span style="width:72px;height:72px;border-radius:999px;background:#6D28D9;color:#FFFFFF;font-family:Montserrat,sans-serif;font-size:24px;font-weight:600;display:flex;align-items:center;justify-content:center;flex:none">RM</span>
+        <div style="flex:1 1 360px;display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px"><h1 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">Rahul Menon</h1><span style="font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;background:#F1EAFE;color:#6D28D9">Intern</span><span style="font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:#E2E8FC;color:#1F3CB3">In training</span></div>
+          <div style="font-size:14px;color:#3D4566">UI/UX Intern · Design · D4DX-I0031 · B.Des, final year</div>
+          <div style="display:flex;flex-wrap:wrap;gap:20px;font-size:13px;color:#5E6583"><span>Mentor <strong style="color:#10183A">Fathima Nasrin</strong></span><span>Supervisor <strong style="color:#10183A">Aisha Rahman</strong></span><span>1 Aug 2026 – 31 Jan 2027</span><span>Stipend ₹8,000 / month <span style="font-size:11px;font-weight:600;padding:1px 6px;border-radius:4px;background:#0A1450;color:#FFFFFF">HR · Finance</span></span></div>
+        </div>
+        <div style="display:flex;gap:10px"><button type="button" style="height:40px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:600;color:#10183A">Complete internship</button></div>
+      </section>
+
+      <div style="display:flex;gap:4px;border-bottom:1px solid #E2E6F0;overflow-x:auto">
+        <sc-for list="{{tabs}}" as="t" hint-placeholder-count="7"><span style="{{t.style}}">{{t.label}}</span></sc-for>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start">
+        <form style="grid-column:span 2;background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:18px;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+            <div><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:19px">Mid-term evaluation</h2><p style="margin:4px 0 0;font-size:13px;color:#5E6583">Due Fri 30 Oct · by Fathima Nasrin · self-assessment received 20 Oct</p></div>
+            <span style="font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:#EDF0F6;color:#4A5270">Draft</span>
+          </div>
+          <div style="display:flex;flex-direction:column;border:1px solid #E2E6F0;border-radius:12px;overflow:hidden">
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) 260px 90px;gap:12px;padding:10px 16px;background:#F7F8FC;font-size:12px;font-weight:600;color:#5E6583"><span>Competency</span><span>Rating 1–5</span><span style="text-align:right">Self</span></div>
+            <sc-for list="{{comps}}" as="c" hint-placeholder-count="5">
+              <fieldset style="margin:0;border:0;border-top:1px solid #EEF1F7;display:grid;grid-template-columns:minmax(0,1fr) 260px 90px;gap:12px;padding:12px 16px;align-items:center">
+                <legend style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">{{c.n}}</legend>
+                <span><span style="display:block;font-size:14px;font-weight:600">{{c.n}}</span><span style="display:block;font-size:12px;color:#5E6583">{{c.d}}</span></span>
+                <span style="display:flex;gap:6px">
+                  <sc-for list="{{c.opts}}" as="o" hint-placeholder-count="5"><label style="{{o.style}}"><input type="radio" name="{{c.key}}" checked="{{o.on}}" style="position:absolute;opacity:0;width:1px;height:1px">{{o.v}}</label></sc-for>
+                </span>
+                <span style="text-align:right;font-size:13px;color:#5E6583">{{c.self}}</span>
+              </fieldset>
+            </sc-for>
+          </div>
+          <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Strengths &amp; improvement areas
+            <textarea rows="3" style="padding:10px 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;resize:vertical">Picks up the design system quickly and asks good questions in critiques. Needs to annotate interaction states before handoff and run tests with real users, not teammates.</textarea>
+          </label>
+          <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between;padding-top:14px;border-top:1px solid #EEF1F7">
+            <label style="display:flex;align-items:center;gap:10px;font-size:14px;color:#3D4566"><input type="checkbox" checked="" style="width:18px;height:18px;accent-color:#1F3CB3">Share feedback with Rahul after HR review</label>
+            <div style="display:flex;gap:10px"><button type="button" style="height:42px;padding:0 16px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:600;color:#10183A">Save draft</button><button type="button" style="height:42px;padding:0 18px;border:0;border-radius:10px;background:#1F3CB3;font:inherit;font-size:14px;font-weight:600;color:#FFFFFF">Submit evaluation</button></div>
+          </div>
+        </form>
+
+        <aside style="display:flex;flex-direction:column;gap:16px;min-width:0">
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Objectives</h2><span style="font-size:13px;color:#5E6583">3 / 6</span></div>
+            <sc-for list="{{objectives}}" as="o" hint-placeholder-count="6">
+              <div style="display:flex;align-items:flex-start;gap:10px;font-size:13px;line-height:1.4"><span style="{{o.box}}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{o.d}}"></path></svg></span><span>{{o.t}}</span></div>
+            </sc-for>
+          </section>
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:10px">
+            <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">At a glance</h2>
+            <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#5E6583">Attendance (Aug–Oct)</span><strong>93%</strong></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#5E6583">Tasks approved</span><strong>9 of 12</strong></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#5E6583">Avg. review turnaround</span><strong>1.8 days</strong></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#5E6583">Learning completed</span><strong>2 of 4</strong></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#5E6583">Leave taken</span><strong>1 day</strong></div>
+          </section>
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:8px">
+            <h2 style="margin:0 0 4px;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Documents</h2>
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-top:1px solid #EEF1F7"><span>Internship agreement</span><span style="color:#0E6B4B;font-weight:600">On file</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-top:1px solid #EEF1F7"><span>College NOC</span><span style="color:#0E6B4B;font-weight:600">On file</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-top:1px solid #EEF1F7"><span>ID proof</span><span style="color:#3D4566;font-weight:600">Restricted</span></div>
+          </section>
+        </aside>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1250}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const tabs = ['Overview', 'Evaluations', 'Tasks & submissions', 'Attendance', 'Movements', 'Learning', 'Documents'];
+    const C = [['vis', 'Visual design', 'Layout, type, colour, consistency', 4, '4'], ['res', 'Research & testing', 'Plans and runs usability tests', 3, '4'], ['sys', 'Design system use', 'Reuses tokens and components', 4, '3'], ['com', 'Communication', 'Critiques, updates, handoff notes', 4, '4'], ['own', 'Ownership & timeliness', 'Meets deadlines, flags blockers', 3, '4']];
+    const opt = (v, sel) => ({ v, on: v === sel, style: 'width:40px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;cursor:pointer;' + (v === sel ? 'background:#1F3CB3;color:#FFFFFF' : 'border:1px solid #D5DAE8;color:#3D4566') });
+    const O = [['Learn the D4DX design system', 1], ['Ship one feature end-to-end with a developer', 1], ['Run two usability tests', 1], ['Own a component in the library', 0], ['Present a case study at all-hands', 0], ['Write accessible handoff specs', 0]];
+    return {
+      tabs: tabs.map((label, i) => ({ label, style: 'padding:12px 12px;font-size:14px;white-space:nowrap;' + (i === 1 ? 'font-weight:600;color:#1F3CB3;border-bottom:2px solid #1F3CB3;margin-bottom:-1px' : 'font-weight:500;color:#5E6583') })),
+      comps: C.map(([key, n, d, sel, self]) => ({ key, n, d, self: 'Self ' + self, opts: [1, 2, 3, 4, 5].map((v) => opt(v, sel)) })),
+      objectives: O.map(([t, done]) => ({ t, d: done ? 'M5 12l5 5 9-10' : '', box: 'width:18px;height:18px;flex:none;border-radius:5px;display:flex;align-items:center;justify-content:center;' + (done ? 'background:#6D28D9;color:#FFFFFF' : 'border:1.5px solid #C4CAD9') }))
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Interns &amp; trainees</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="hr" active="interns" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="hr" hint-size="100%,64px"></dc-import>
+    <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:20px;width:100%;max-width:1280px;box-sizing:border-box">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px">
+        <div>
+          <div style="font-size:13px;color:#5E6583">People</div>
+          <h1 style="margin:2px 0 0;font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">Interns &amp; trainees</h1>
+        </div>
+        <a href="Onboarding.dc.html" style="height:40px;padding:0 16px;border-radius:10px;background:#1F3CB3;color:#FFFFFF;font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px;text-decoration:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Register intern</a>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:16px"><div style="font-size:13px;color:#5E6583">Active</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">11</div><div style="font-size:12px;color:#3D4566">7 interns · 4 trainees</div></div>
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:16px"><div style="font-size:13px;color:#5E6583">Evaluations due · 7 days</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">3</div><div style="font-size:12px;color:#3D4566">2 mid-term · 1 final</div></div>
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:16px"><div style="font-size:13px;color:#5E6583">Work awaiting review</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">5</div><div style="font-size:12px;color:#B42323;font-weight:600">2 older than 3 days</div></div>
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:16px"><div style="font-size:13px;color:#5E6583">Certificates pending</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">1</div><div style="font-size:12px;color:#3D4566">Devika Menon · completed 15 Oct</div></div>
+      </div>
+
+      <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column;min-width:0">
+        <div style="display:flex;flex-wrap:wrap;gap:10px;padding:14px 16px;align-items:center;border-bottom:1px solid #EEF1F7">
+          <span style="height:32px;padding:0 12px;border-radius:999px;background:#1F3CB3;color:#FFFFFF;font-size:13px;font-weight:600;display:flex;align-items:center">All 12</span>
+          <span style="height:32px;padding:0 12px;border-radius:999px;border:1px solid #D5DAE8;color:#3D4566;font-size:13px;font-weight:500;display:flex;align-items:center">Interns 8</span>
+          <span style="height:32px;padding:0 12px;border-radius:999px;border:1px solid #D5DAE8;color:#3D4566;font-size:13px;font-weight:500;display:flex;align-items:center">Trainees 4</span>
+          <span style="flex:1"></span>
+          <button type="button" style="height:36px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:500;color:#3D4566">Mentor ▾</button>
+          <button type="button" style="height:36px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:500;color:#3D4566">Stage ▾</button>
+        </div>
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:1000px">
+            <thead><tr style="background:#F7F8FC;color:#5E6583;text-align:left"><th style="padding:10px 16px;font-size:12px;font-weight:600">Intern / trainee</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Role</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Mentor</th><th style="padding:10px 8px;font-size:12px;font-weight:600;width:180px">Period</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Attendance</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Next review</th><th style="padding:10px 16px 10px 8px;font-size:12px;font-weight:600">Stage</th></tr></thead>
+            <tbody>
+              <sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+                <tr style="border-top:1px solid #EEF1F7">
+                  <td style="padding:10px 16px"><a href="Intern.dc.html" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:#10183A"><span style="width:34px;height:34px;flex:none;border-radius:999px;background:#F1EAFE;color:#6D28D9;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center">{{r.ini}}</span><span><span style="display:block;font-weight:600">{{r.name}}</span><span style="display:block;font-size:12px;color:#5E6583">{{r.id}}</span></span></a></td>
+                  <td style="padding:10px 8px"><div>{{r.role}}</div><div style="font-size:12px;color:#5E6583">{{r.kind}}</div></td>
+                  <td style="padding:10px 8px;color:{{r.mentorColor}};font-weight:{{r.mentorWeight}}">{{r.mentor}}</td>
+                  <td style="padding:10px 8px"><div style="font-size:12px;color:#3D4566;margin-bottom:5px">{{r.period}}</div><div style="height:6px;border-radius:999px;background:#EDF0F6"><div style="{{r.bar}}"></div></div></td>
+                  <td style="padding:10px 8px">{{r.att}}</td>
+                  <td style="padding:10px 8px;white-space:nowrap">{{r.review}}</td>
+                  <td style="padding:10px 16px 10px 8px"><span style="{{r.chip}}">{{r.stage}}</span></td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px">
+        <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:10px">
+          <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Work awaiting mentor review</h2>
+          <div style="display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid #EEF1F7;font-size:13px"><span><strong>Gopika S</strong> · Landing page build<br><span style="color:#5E6583">Submitted 16 Oct · to Anjali George</span></span><span style="color:#B42323;font-weight:600;white-space:nowrap">5 days</span></div>
+          <div style="display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid #EEF1F7;font-size:13px"><span><strong>Sara Ali</strong> · October social calendar<br><span style="color:#5E6583">Submitted 17 Oct · to Meera Pillai (on leave)</span></span><span style="color:#B42323;font-weight:600;white-space:nowrap">4 days</span></div>
+          <div style="display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid #EEF1F7;font-size:13px"><span><strong>Neha Joseph</strong> · Product card component<br><span style="color:#5E6583">Submitted 20 Oct · to Sanjay Varma</span></span><span style="color:#3D4566;white-space:nowrap">1 day</span></div>
+        </section>
+        <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:12px">
+          <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Completion &amp; certificate</h2>
+          <div style="display:flex;gap:12px;align-items:center"><span style="width:40px;height:40px;border-radius:999px;background:#F1EAFE;color:#6D28D9;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center">DM</span><div style="flex:1"><div style="font-size:14px;font-weight:600">Devika Menon · Content intern</div><div style="font-size:12px;color:#5E6583">15 Jul – 15 Oct 2026 · final rating 4.2 / 5</div></div></div>
+          <div style="display:flex;flex-direction:column;gap:6px;font-size:13px"><span style="color:#0E6B4B">✓ Final evaluation by Meera Pillai</span><span style="color:#0E6B4B">✓ Assets returned · exit form</span><span style="color:#8A4F00">• Management approval for certificate</span></div>
+          <div style="display:flex;gap:8px"><button type="button" style="flex:1;height:38px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:600;color:#10183A">Preview certificate</button><button type="button" style="flex:1;height:38px;border:0;border-radius:10px;background:#1F3CB3;font:inherit;font-size:13px;font-weight:600;color:#FFFFFF">Send for approval</button></div>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const T = { green: ['#E2F5EC', '#0E6B4B'], amber: ['#FFF1D9', '#8A4F00'], blue: ['#E2E8FC', '#1F3CB3'], gray: ['#EDF0F6', '#4A5270'], purple: ['#F1EAFE', '#6D28D9'], red: ['#FDE7E7', '#B42323'] };
+    const chip = (t) => 'font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;white-space:nowrap;background:' + T[t][0] + ';color:' + T[t][1];
+    const R = [
+      ['Rahul Menon', 'D4DX-I0031', 'UI/UX Intern', 'Intern · Design', 'Fathima Nasrin', '1 Aug – 31 Jan', 47, '93%', 'Fri 30 Oct · mid-term', 'In training', 'blue'],
+      ['Sara Ali', 'D4DX-I0029', 'Digital Marketing Intern', 'Intern · Marketing', 'Meera Pillai', '1 Jun – 30 Nov', 82, '96%', 'Mon 26 Oct · final', 'Evaluation due', 'amber'],
+      ['Gopika S', 'D4DX-I0032', 'Development Intern', 'Intern · Engineering', 'Anjali George', '17 Aug – 16 Feb', 36, '90%', 'Tue 17 Nov', 'In training', 'blue'],
+      ['Adil Basheer', 'D4DX-I0033', 'Development Intern', 'Intern · Engineering', 'Anjali George', '1 Sep – 28 Feb', 28, '88%', 'Fri 27 Nov', 'In training', 'blue'],
+      ['Neha Joseph', 'D4DX-T0004', 'Trainee · Frontend', 'Trainee · Engineering', 'Sanjay Varma', '1 Sep – 28 Feb', 28, '100%', 'Fri 23 Oct · monthly', 'Evaluation due', 'amber'],
+      ['Jithin Raj', 'D4DX-T0003', 'Trainee · QA', 'Trainee · QA', 'Kiran Das · leaving', '1 Jul – 31 Dec', 62, '94%', 'Fri 6 Nov', 'Reassign mentor', 'red'],
+      ['Ananya Suresh', 'D4DX-I0034', 'Design Intern', 'Intern · Design', 'Not assigned', 'Starts 2 Nov', 0, '—', '—', 'Registered', 'gray'],
+      ['Devika Menon', 'D4DX-I0030', 'Content Intern', 'Intern · Marketing', 'Meera Pillai', '15 Jul – 15 Oct', 100, '95%', 'Done', 'Completed', 'green']
+    ];
+    return {
+      rows: R.map(([name, id, role, kind, mentor, period, pct, att, review, stage, t]) => ({
+        name, id, role, kind, mentor, period, att, review, stage,
+        ini: name.split(' ').map((w) => w[0]).join(''),
+        mentorColor: /Not|leaving/.test(mentor) ? '#B42323' : '#3D4566', mentorWeight: /Not|leaving/.test(mentor) ? '600' : '400',
+        bar: 'height:6px;border-radius:999px;width:' + pct + '%;background:' + (pct === 100 ? '#0E9F75' : '#6D28D9'),
+        chip: chip(t)
+      }))
+    };
+  }
+}
+</script>
+</body>
+</html>

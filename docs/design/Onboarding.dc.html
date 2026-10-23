@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Onboarding wizard</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="hr" active="staff" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="hr" hint-size="100%,64px"></dc-import>
+    <main style="padding:24px 32px 48px;display:flex;flex-direction:column;gap:20px;width:100%;max-width:1280px;box-sizing:border-box">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px">
+        <div>
+          <nav aria-label="Breadcrumb" style="font-size:13px;color:#5E6583"><a href="Staff.dc.html" style="text-decoration:none">Staff</a> / New person</nav>
+          <h1 style="margin:4px 0 0;font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">Onboard Neha Joseph</h1>
+        </div>
+        <span style="font-size:13px;color:#5E6583">Draft saved 11:38</span>
+      </div>
+
+      <ol style="margin:0;padding:16px 20px;list-style:none;display:flex;flex-wrap:wrap;gap:8px;background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px">
+        <sc-for list="{{steps}}" as="s" hint-placeholder-count="6">
+          <li style="flex:1 1 140px;display:flex;align-items:center;gap:10px">
+            <span style="{{s.badge}}">{{s.mark}}</span>
+            <span style="display:flex;flex-direction:column"><span style="{{s.label}}">{{s.t}}</span><span style="font-size:12px;color:#5E6583">{{s.sub}}</span></span>
+          </li>
+        </sc-for>
+      </ol>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start">
+        <form style="grid-column:span 2;background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:20px;min-width:0">
+          <div>
+            <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:19px">Role &amp; reporting</h2>
+            <p style="margin:4px 0 0;font-size:14px;color:#5E6583">Fields change with the person type. Trainees and interns get a mentor and an end date.</p>
+          </div>
+          <fieldset style="border:0;margin:0;padding:0;display:flex;flex-direction:column;gap:8px">
+            <legend style="font-size:13px;font-weight:600;color:#3D4566;margin-bottom:8px">Person type</legend>
+            <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px">
+              <label style="display:flex;gap:10px;align-items:flex-start;padding:14px;border:1px solid #D5DAE8;border-radius:12px;font-size:14px"><input type="radio" name="ptype" style="margin-top:2px;width:18px;height:18px;accent-color:#1F3CB3"><span><strong>Employee</strong><br><span style="font-size:12px;color:#5E6583">Salary, probation</span></span></label>
+              <label style="display:flex;gap:10px;align-items:flex-start;padding:14px;border:2px solid #1F3CB3;background:#F1F4FE;border-radius:12px;font-size:14px"><input type="radio" name="ptype" checked="" style="margin-top:2px;width:18px;height:18px;accent-color:#1F3CB3"><span><strong>Trainee</strong><br><span style="font-size:12px;color:#5E6583">Stipend, mentor, end date</span></span></label>
+              <label style="display:flex;gap:10px;align-items:flex-start;padding:14px;border:1px solid #D5DAE8;border-radius:12px;font-size:14px"><input type="radio" name="ptype" style="margin-top:2px;width:18px;height:18px;accent-color:#1F3CB3"><span><strong>Intern</strong><br><span style="font-size:12px;color:#5E6583">Objectives, certificate</span></span></label>
+            </div>
+          </fieldset>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px 20px">
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Department<select style="height:42px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;background:#FFFFFF"><option>Engineering</option></select></label>
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Designation<select style="height:42px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;background:#FFFFFF"><option>Trainee · Frontend</option></select></label>
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Start date<input type="date" value="2026-09-01" style="height:42px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A"></label>
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Expected end date<input type="date" value="2027-02-28" style="height:42px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A"></label>
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Reporting manager<select style="height:42px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;background:#FFFFFF"><option>Vivek Menon · Team Lead</option></select></label>
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Mentor<select style="height:42px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;background:#FFFFFF"><option>Sanjay Varma · Frontend Developer</option></select></label>
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Monthly stipend<span style="display:flex;align-items:center;height:42px;border:1px solid #D5DAE8;border-radius:10px;padding:0 12px;gap:6px;box-sizing:border-box"><span style="color:#5E6583;font-weight:500">₹</span><input type="text" value="12,000" style="flex:1;min-width:0;border:0;outline:none;font:inherit;font-size:14px;font-weight:400;color:#10183A"></span></label>
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Work location<select style="height:42px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;background:#FFFFFF"><option>Kochi office</option></select></label>
+          </div>
+          <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Training objectives
+            <textarea rows="3" style="padding:10px 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;resize:vertical">React and TypeScript fundamentals; ship two Greenleaf storefront components with reviews; pair on QA fixes.</textarea>
+          </label>
+          <div style="display:flex;justify-content:space-between;gap:10px;padding-top:16px;border-top:1px solid #EEF1F7">
+            <button type="button" style="height:42px;padding:0 16px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:600;color:#10183A">Back</button>
+            <div style="display:flex;gap:10px">
+              <button type="button" style="height:42px;padding:0 16px;border:0;border-radius:10px;background:transparent;font:inherit;font-size:14px;font-weight:600;color:#1F3CB3">Save draft</button>
+              <button type="button" style="height:42px;padding:0 18px;border:0;border-radius:10px;background:#1F3CB3;font:inherit;font-size:14px;font-weight:600;color:#FFFFFF">Continue to documents</button>
+            </div>
+          </div>
+        </form>
+
+        <aside style="display:flex;flex-direction:column;gap:16px;min-width:0">
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:12px">
+            <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Documents to collect</h2>
+            <sc-for list="{{docs}}" as="d" hint-placeholder-count="6">
+              <div style="display:flex;align-items:center;gap:10px;font-size:13px"><span style="{{d.box}}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{d.d}}"></path></svg></span><span style="flex:1">{{d.n}}</span><span style="font-size:12px;color:#5E6583">{{d.r}}</span></div>
+            </sc-for>
+          </section>
+          <section style="background:#0A1450;color:#FFFFFF;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:10px">
+            <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:16px">On activation</h2>
+            <div style="font-size:13px;line-height:1.5;color:#E3E9FC">Account created with the Trainee role and a welcome email to neha.joseph@d4dx.co.</div>
+            <div style="font-size:13px;line-height:1.5;color:#E3E9FC">Vivek and Sanjay are notified; Neha appears in their team views.</div>
+            <div style="font-size:13px;line-height:1.5;color:#E3E9FC">Attendance, leave and timesheets start on 1 Sep 2026.</div>
+          </section>
+        </aside>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const S = [['Basic details', 'Name, contact', 'done'], ['Role & reporting', 'Department, manager', 'now'], ['Documents', '6 required', ''], ['Pay', 'Salary or stipend', ''], ['Access', 'Role & login', ''], ['Review', 'Activate', '']];
+    const badge = (st) => 'width:30px;height:30px;flex:none;border-radius:999px;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;' + (st === 'done' ? 'background:#0E7A55;color:#FFFFFF' : st === 'now' ? 'background:#1F3CB3;color:#FFFFFF' : 'background:#EDF0F6;color:#4A5270');
+    const D = [['Offer letter (signed)', 'Required', 1], ['ID proof · Aadhaar', 'Restricted', 1], ['PAN card', 'Restricted', 0], ['Education certificates', 'Required', 0], ['Bank details', 'For stipend', 0], ['Training agreement & NDA', 'Required', 0]];
+    return {
+      steps: S.map(([t, sub, st], i) => ({ t, sub, mark: st === 'done' ? '✓' : String(i + 1), badge: badge(st), label: 'font-size:14px;' + (st === 'now' ? 'font-weight:700;color:#1F3CB3' : 'font-weight:600;color:#10183A') })),
+      docs: D.map(([n, r, ok]) => ({ n, r, d: ok ? 'M5 12l5 5 9-10' : '', box: 'width:18px;height:18px;flex:none;border-radius:5px;display:flex;align-items:center;justify-content:center;' + (ok ? 'background:#0E7A55;color:#FFFFFF' : 'border:1.5px solid #C4CAD9') }))
+    };
+  }
+}
+</script>
+</body>
+</html>

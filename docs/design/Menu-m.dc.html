@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>All modules — mobile</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}</style>
+</helmet>
+<div style="width:390px;height:844px;box-sizing:border-box;overflow:hidden;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A;display:flex;flex-direction:column">
+  <header style="background:#0A1450;color:#FFFFFF;padding:16px 12px 16px 20px;display:flex;align-items:center;gap:12px">
+    <span style="width:44px;height:44px;border-radius:999px;background:#284CC7;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700">SH</span>
+    <a href="Employee-m.dc.html" style="flex:1;text-decoration:none;color:#FFFFFF"><div style="font-size:16px;font-weight:600">Sameer Hassan</div><div style="font-size:12px;color:#A9B3DD">Managing Partner · View profile</div></a>
+    <a href="Login-m.dc.html" aria-label="Sign out" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;color:#C3CAE8"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4M15 16l4-4-4-4M19 12H9"></path></svg></a>
+  </header>
+  <div style="flex:1;overflow:hidden;padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+    <sc-for list="{{sections}}" as="s" hint-placeholder-count="7">
+      <section style="display:flex;flex-direction:column;gap:6px">
+        <h2 style="margin:0;font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#5E6583">{{s.name}}</h2>
+        <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px">
+          <sc-for list="{{s.items}}" as="it" hint-placeholder-count="3">
+            <a href="{{it.href}}" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:8px 2px 6px;border-radius:12px;background:#FFFFFF;border:1px solid #E2E6F0;text-decoration:none;color:#10183A">
+              <span style="{{it.box}}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{it.d}}"></path></svg></span>
+              <span style="font-size:11px;font-weight:600;white-space:nowrap">{{it.label}}</span>
+            </a>
+          </sc-for>
+        </div>
+      </section>
+    </sc-for>
+  </div>
+  <dc-import name="TabBar" active="more" role="management" hint-size="390px,84px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const I = {
+      staff: 'M16 20v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM22 20v-1a4 4 0 0 0-3-3.9M16 4.1a3.5 3.5 0 0 1 0 6.8',
+      interns: 'M2 9l10-5 10 5-10 5zM6 11v5c0 1.5 2.7 3 6 3s6-1.5 6-3v-5M22 9v6',
+      onboard: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 12-6.9M19 15v6M16 18h6',
+      attendance: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2',
+      movement: 'M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M9 16l-4-4 4-4M5 12h11',
+      leave: 'M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM4 10h16M8 3v4M16 3v4',
+      timesheets: 'M9 3h6v3H9zM9 4.5H6a1 1 0 0 0-1 1V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V5.5a1 1 0 0 0-1-1h-3M9 12h6M9 16h4',
+      projects: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
+      tasks: 'M9 11l3 3 8-8M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9',
+      qa: 'M8 8a4 4 0 0 1 8 0v1H8zM7 9h10v5a5 5 0 0 1-10 0zM12 14v5M3 12h4M17 12h4',
+      leads: 'M4 8h16v11H4zM9 8V5h6v3M4 13h16',
+      proposals: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h6',
+      contracts: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM9 12l2 2 4-4',
+      invoices: 'M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6M9 16h3',
+      expenses: 'M4 7h15a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1zM4 7l12-3v3M16 13h2',
+      payroll: 'M3 7h18v10H3zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 10v4M18 10v4',
+      payslip: 'M6 3h12v18H6zM9 8h6M9 12h6M9 16h4',
+      assets: 'M5 5h14v10H5zM2 19h20',
+      reports: 'M5 20V11M11 20V5M17 20v-6M3 20h18',
+      search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4',
+      settings: 'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4',
+      roles: 'M6 11h12v9H6zM8 11V8a4 4 0 0 1 8 0v3M12 15v2',
+      audit: 'M4 5h16M4 10h16M4 15h10M4 20h7M18 15v5M18 15h3'
+    };
+    const C = { People: ['#E2E8FC', '#1F3CB3'], Time: ['#FFEDE3', '#B03A0A'], Work: ['#E2F5EC', '#0E6B4B'], Sales: ['#F1EAFE', '#6D28D9'], Finance: ['#FFF1D9', '#8A4F00'], Operations: ['#EDF0F6', '#3D4566'], Admin: ['#E2E6F0', '#0A1450'] };
+    const S = [
+      ['People', [['staff', 'Staff', 'Staff-m'], ['interns', 'Interns', 'Interns-m'], ['onboard', 'Onboard', 'Onboarding-m']]],
+      ['Time', [['attendance', 'Attendance', 'Attendance-Team-m'], ['movement', 'Movement', 'Movement-m'], ['leave', 'Leave', 'Leave-Approvals-m'], ['timesheets', 'Timesheets', 'Timesheet-m']]],
+      ['Work', [['projects', 'Projects', 'Projects-m'], ['tasks', 'Tasks', 'Tasks-m'], ['qa', 'QA & issues', 'Issues-m']]],
+      ['Sales', [['leads', 'Pipeline', 'Leads-m'], ['leads', 'Clients', 'Client-m'], ['proposals', 'Proposals', 'Proposal-m'], ['contracts', 'Contracts', 'Contracts-m']]],
+      ['Finance', [['invoices', 'Invoices', 'Invoices-m'], ['expenses', 'Expenses', 'Expenses-m'], ['payroll', 'Payroll', 'Payroll-m'], ['payslip', 'Payslips', 'Payslip-m']]],
+      ['Operations', [['assets', 'Assets', 'Assets-m'], ['reports', 'Reports', 'Reports-m'], ['search', 'Search', 'Search-m']]],
+      ['Admin', [['settings', 'Settings', 'Settings-m'], ['roles', 'Roles', 'Roles-m'], ['audit', 'Audit trail', 'Audit-m']]]
+    ];
+    return {
+      sections: S.map(([name, items]) => ({ name, items: items.map(([k, label, f]) => ({ label, d: I[k], href: f + '.dc.html', box: 'width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:' + C[name][0] + ';color:' + C[name][1] })) }))
+    };
+  }
+}
+</script>
+</body>
+</html>

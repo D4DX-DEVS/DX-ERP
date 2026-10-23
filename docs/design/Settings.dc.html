@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>System configuration</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="management" active="settings" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="management" hint-size="100%,64px"></dc-import>
+    <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:18px;width:100%;max-width:1280px;box-sizing:border-box">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px">
+        <div>
+          <div style="font-size:13px;color:#5E6583">Admin · Super Admin only</div>
+          <h1 style="margin:2px 0 0;font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">Configuration</h1>
+        </div>
+        <span style="font-size:13px;color:#5E6583">Every change is written to the audit trail</span>
+      </div>
+
+      <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
+        <nav aria-label="Settings" style="flex:0 1 240px;min-width:220px;background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:8px;display:flex;flex-direction:column;gap:2px">
+          <sc-for list="{{nav}}" as="n" hint-placeholder-count="13"><a href="{{n.href}}" style="{{n.s}}">{{n.l}}</a></sc-for>
+        </nav>
+
+        <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:16px">
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:16px">
+            <div><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:18px">Working days &amp; office hours</h2><p style="margin:4px 0 0;font-size:13px;color:#5E6583">Used for attendance, late marks, half days and working-hour totals.</p></div>
+            <fieldset style="border:0;margin:0;padding:0"><legend style="font-size:13px;font-weight:600;color:#3D4566;margin-bottom:8px">Working days</legend>
+              <div style="display:flex;flex-wrap:wrap;gap:8px"><sc-for list="{{days}}" as="d" hint-placeholder-count="7"><label style="{{d.s}}"><input type="checkbox" checked="{{d.on}}" style="position:absolute;opacity:0;width:1px;height:1px">{{d.l}}</label></sc-for></div>
+            </fieldset>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px">
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Office starts<input type="time" value="09:00" style="height:40px;padding:0 10px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A"></label>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Office ends<input type="time" value="18:00" style="height:40px;padding:0 10px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A"></label>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Grace period<select style="height:40px;padding:0 10px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;background:#FFFFFF"><option>30 minutes</option></select></label>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Half day below<select style="height:40px;padding:0 10px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;background:#FFFFFF"><option>4 h 30 m</option></select></label>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Missing check-out alert<input type="time" value="20:00" style="height:40px;padding:0 10px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A"></label>
+            </div>
+          </section>
+
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column;overflow:hidden">
+            <div style="padding:20px 22px 12px;display:flex;justify-content:space-between;align-items:flex-start;gap:12px"><div><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:18px">Movement categories &amp; approval rules</h2><p style="margin:4px 0 0;font-size:13px;color:#5E6583">Management decides which categories need approval and how they affect working hours.</p></div><button type="button" style="height:34px;padding:0 12px;border:1px dashed #C4CAD9;border-radius:9px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:600;color:#1F3CB3;white-space:nowrap">+ Category</button></div>
+            <div style="overflow-x:auto">
+              <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:680px">
+                <thead><tr style="background:#F7F8FC;color:#5E6583;text-align:left"><th style="padding:10px 22px;font-size:12px;font-weight:600">Category</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Needs approval</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Approver</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Counts as working time</th><th style="padding:10px 22px 10px 8px;font-size:12px;font-weight:600">Visibility</th></tr></thead>
+                <tbody>
+                  <sc-for list="{{cats}}" as="c" hint-placeholder-count="6">
+                    <tr style="border-top:1px solid #EEF1F7">
+                      <td style="padding:11px 22px;font-weight:600">{{c.n}}</td>
+                      <td style="padding:11px 8px"><button type="button" role="switch" aria-checked="{{c.ap}}" aria-label="Needs approval" style="{{c.apS}}"><span style="{{c.apK}}"></span></button></td>
+                      <td style="padding:11px 8px;color:#3D4566">{{c.who}}</td>
+                      <td style="padding:11px 8px"><button type="button" role="switch" aria-checked="{{c.wt}}" aria-label="Counts as working time" style="{{c.wtS}}"><span style="{{c.wtK}}"></span></button></td>
+                      <td style="padding:11px 22px 11px 8px;color:#3D4566">{{c.vis}}</td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;padding:16px 22px 20px;border-top:1px solid #EEF1F7">
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Alert when return is late by<select style="height:40px;padding:0 10px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;background:#FFFFFF"><option>15 minutes</option></select></label>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Who gets the alert<select style="height:40px;padding:0 10px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;background:#FFFFFF"><option>Person, manager and HR</option></select></label>
+              <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Late entries allowed within<select style="height:40px;padding:0 10px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;background:#FFFFFF"><option>3 working days</option></select></label>
+            </div>
+          </section>
+
+          <div style="display:flex;justify-content:flex-end;gap:10px;padding:14px 18px;background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px">
+            <span style="flex:1;font-size:13px;color:#9A5800;font-weight:600;align-self:center">3 unsaved changes</span>
+            <button type="button" style="height:40px;padding:0 16px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:600;color:#10183A">Discard</button>
+            <button type="button" style="height:40px;padding:0 18px;border:0;border-radius:10px;background:#1F3CB3;font:inherit;font-size:14px;font-weight:600;color:#FFFFFF">Save changes</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1250}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const N = [['Company profile & logo', 0], ['Departments & designations', 0], ['Roles & permissions', 0, 'Roles.dc.html'], ['Attendance & movement', 1], ['Holidays', 0], ['Leave policies', 0], ['Payroll & stipend components', 0], ['Project & task statuses', 0], ['CRM pipeline stages', 0], ['Invoice numbering & templates', 0], ['Notifications', 0], ['Data, backup & retention', 0], ['General', 0]];
+    const D = [['Mon', 1], ['Tue', 1], ['Wed', 1], ['Thu', 1], ['Fri', 1], ['Sat', 0], ['Sun', 0]];
+    const sw = (on) => ['border:0;padding:0;display:inline-block;width:40px;height:24px;border-radius:999px;position:relative;background:' + (on ? '#1F3CB3' : '#C9CFDF'), 'position:absolute;top:3px;width:18px;height:18px;border-radius:999px;background:#FFFFFF;left:' + (on ? '19px' : '3px')];
+    const C = [['Client meeting', 0, '—', 1, 'Everyone with access'], ['Official business', 0, '—', 1, 'Everyone with access'], ['Project-related work', 0, '—', 1, 'Everyone with access'], ['Personal work', 1, 'Reporting manager', 0, 'HR & manager only'], ['Medical / emergency', 0, 'HR notified', 0, 'HR only'], ['Other', 1, 'Reporting manager', 0, 'HR & manager only']];
+    return {
+      nav: N.map(([l, on, href]) => ({ l, href: href || 'Settings.dc.html', s: 'display:block;padding:10px 12px;border-radius:10px;font-size:14px;text-decoration:none;' + (on ? 'background:#F1F4FE;color:#1F3CB3;font-weight:600' : 'color:#10183A;font-weight:500') })),
+      days: D.map(([l, on]) => ({ l, on: !!on, s: 'width:56px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;' + (on ? 'background:#1F3CB3;color:#FFFFFF' : 'border:1px solid #D5DAE8;color:#5E6583') })),
+      cats: C.map(([n, ap, who, wt, vis]) => { const a = sw(ap), w = sw(wt); return { n, who, vis, ap: ap ? 'true' : 'false', wt: wt ? 'true' : 'false', apS: a[0], apK: a[1], wtS: w[0], wtK: w[1] }; })
+    };
+  }
+}
+</script>
+</body>
+</html>

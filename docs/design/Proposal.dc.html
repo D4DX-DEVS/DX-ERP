@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Proposal builder</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="management" active="proposals" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="management" hint-size="100%,64px"></dc-import>
+    <main style="padding:24px 32px 48px;display:flex;flex-direction:column;gap:18px;width:100%;max-width:1280px;box-sizing:border-box">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px">
+        <div>
+          <nav aria-label="Breadcrumb" style="font-size:13px;color:#5E6583"><a href="Leads.dc.html" style="text-decoration:none">Proposals</a> / PRP-0062</nav>
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:4px"><h1 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">Loyalty programme — Seaside Hospitality</h1><span style="font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:#FFF1D9;color:#8A4F00">Negotiation</span><span style="font-size:12px;font-weight:600;padding:3px 9px;border-radius:6px;background:#EDF0F6;color:#4A5270">v2</span></div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px">
+          <button type="button" style="height:40px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:500;color:#10183A">Preview PDF</button>
+          <button type="button" style="height:40px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:500;color:#10183A">Save as v3</button>
+          <button type="button" style="height:40px;padding:0 16px;border:0;border-radius:10px;background:#1F3CB3;font:inherit;font-size:14px;font-weight:600;color:#FFFFFF">Send to client</button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start">
+        <div style="grid-column:span 2;display:flex;flex-direction:column;gap:16px;min-width:0">
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:14px">
+            <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Scope &amp; deliverables</h2>
+            <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Summary<textarea rows="2" style="padding:10px 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;resize:vertical">A points-based loyalty programme across both Seaside resorts: member app, staff admin portal and a rules engine for tiers and partner offers.</textarea></label>
+            <sc-for list="{{deliv}}" as="d" hint-placeholder-count="4">
+              <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border:1px solid #EEF1F7;border-radius:10px"><span style="width:22px;height:22px;flex:none;border-radius:6px;background:#F1F4FE;color:#1F3CB3;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center">{{d.n}}</span><span style="flex:1"><span style="display:block;font-size:14px;font-weight:600">{{d.t}}</span><span style="display:block;font-size:13px;color:#5E6583">{{d.b}}</span></span><span style="font-size:12px;color:#3D4566;white-space:nowrap">{{d.w}}</span></div>
+            </sc-for>
+          </section>
+
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column;overflow:hidden">
+            <div style="padding:18px 22px 12px;display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Costing</h2><button type="button" style="height:32px;padding:0 10px;border:1px dashed #C4CAD9;border-radius:8px;background:#FFFFFF;font:inherit;font-size:12px;font-weight:600;color:#1F3CB3">+ Line item</button></div>
+            <div style="overflow-x:auto">
+              <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:600px">
+                <thead><tr style="background:#F7F8FC;color:#5E6583;text-align:left"><th style="padding:9px 22px;font-size:12px;font-weight:600">Item</th><th style="padding:9px 8px;font-size:12px;font-weight:600;text-align:right">Hours</th><th style="padding:9px 8px;font-size:12px;font-weight:600;text-align:right">Rate</th><th style="padding:9px 22px 9px 8px;font-size:12px;font-weight:600;text-align:right">Amount</th></tr></thead>
+                <tbody>
+                  <sc-for list="{{lines}}" as="l" hint-placeholder-count="4"><tr style="border-top:1px solid #EEF1F7"><td style="padding:10px 22px">{{l.i}}</td><td style="padding:10px 8px;text-align:right">{{l.h}}</td><td style="padding:10px 8px;text-align:right">{{l.r}}</td><td style="padding:10px 22px 10px 8px;text-align:right;font-weight:600">{{l.a}}</td></tr></sc-for>
+                </tbody>
+                <tfoot>
+                  <tr style="border-top:1px solid #E2E6F0"><td colspan="3" style="padding:8px 8px;text-align:right;color:#5E6583">Subtotal</td><td style="padding:8px 22px 8px 8px;text-align:right">₹5,00,000</td></tr>
+                  <tr><td colspan="3" style="padding:4px 8px;text-align:right;color:#5E6583">Discount 4%</td><td style="padding:4px 22px 4px 8px;text-align:right;color:#0E6B4B">− ₹20,000</td></tr>
+                  <tr><td colspan="3" style="padding:4px 8px;text-align:right;color:#5E6583">GST 18%</td><td style="padding:4px 22px 4px 8px;text-align:right">₹86,400</td></tr>
+                  <tr style="background:#F1F4FE"><td colspan="3" style="padding:12px 8px;text-align:right;font-weight:700">Total</td><td style="padding:12px 22px 12px 8px;text-align:right;font-family:Montserrat,sans-serif;font-weight:600;font-size:18px">₹5,66,400</td></tr>
+                </tfoot>
+              </table>
+            </div>
+          </section>
+
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:12px">
+            <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Payment milestones &amp; terms</h2>
+            <div style="display:flex;height:12px;gap:2px"><span style="flex:40;background:#284CC7;border-radius:4px 0 0 4px"></span><span style="flex:40;background:#5B78E0"></span><span style="flex:20;background:#0E9F75;border-radius:0 4px 4px 0"></span></div>
+            <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px">
+              <div style="padding:12px;border:1px solid #EEF1F7;border-radius:10px"><div style="font-size:12px;color:#5E6583">40% · on signing</div><div style="font-weight:600;font-size:15px">₹1,92,000</div></div>
+              <div style="padding:12px;border:1px solid #EEF1F7;border-radius:10px"><div style="font-size:12px;color:#5E6583">40% · beta handover</div><div style="font-weight:600;font-size:15px">₹1,92,000</div></div>
+              <div style="padding:12px;border:1px solid #EEF1F7;border-radius:10px"><div style="font-size:12px;color:#5E6583">20% · go-live</div><div style="font-weight:600;font-size:15px">₹96,000</div></div>
+            </div>
+            <div style="font-size:13px;color:#3D4566;line-height:1.55">Amounts exclude GST. Invoices due in 15 days. Valid until 17 Nov 2026. Change requests billed at ₹1,500 / hour.</div>
+          </section>
+        </div>
+
+        <aside style="display:flex;flex-direction:column;gap:16px;min-width:0">
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:10px">
+            <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Status</h2>
+            <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#5E6583">Client</span><span>Seaside Hospitality · CL-0087</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#5E6583">Owner</span><span>Joel Mathew</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#5E6583">Internal approval</span><span style="color:#0E6B4B;font-weight:600">✓ Sameer · 17 Oct</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:#5E6583">Client opened</span><span>3 times · last 20 Oct</span></div>
+          </section>
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:6px">
+            <h2 style="margin:0 0 6px;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Versions</h2>
+            <div style="padding:10px 0;border-top:1px solid #EEF1F7;font-size:13px"><div style="display:flex;justify-content:space-between"><strong>v2 · current</strong><span style="color:#5E6583">18 Oct</span></div><div style="color:#5E6583;margin-top:2px">Phase 1 trimmed, 4% discount, 40/40/20</div></div>
+            <div style="padding:10px 0;border-top:1px solid #EEF1F7;font-size:13px"><div style="display:flex;justify-content:space-between"><strong>v1</strong><span style="color:#5E6583">2 Oct</span></div><div style="color:#5E6583;margin-top:2px">₹6.2 L · 50/50 split</div></div>
+          </section>
+          <section style="background:#0A1450;color:#FFFFFF;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:10px">
+            <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:16px">When the client approves</h2>
+            <div style="font-size:13px;line-height:1.5;color:#E3E9FC">One click creates the project, its 3 milestones and a matching billing schedule — no re-typing.</div>
+            <button type="button" disabled style="height:40px;border:1px solid rgba(255,255,255,0.3);border-radius:10px;background:transparent;font:inherit;font-size:13px;font-weight:600;color:#A9B3DD">Convert to project · after approval</button>
+          </section>
+        </aside>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1350}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      deliv: [
+        { n: 1, t: 'Discovery & UX', b: 'Tier rules, journeys, clickable prototype', w: 'Weeks 1–2' },
+        { n: 2, t: 'Member app (Android & iOS)', b: 'Sign-up, points wallet, offers, QR redemption', w: 'Weeks 3–8' },
+        { n: 3, t: 'Admin portal & rules engine', b: 'Earn/burn rules, partner offers, reports', w: 'Weeks 5–9' },
+        { n: 4, t: 'QA, launch & training', b: 'Staff training at both resorts, 30-day warranty', w: 'Weeks 10–11' }
+      ],
+      lines: [['Discovery & UX', '60', '₹1,500', '₹90,000'], ['Member app', '160', '₹1,500', '₹2,40,000'], ['Admin portal & rules engine', '80', '₹1,500', '₹1,20,000'], ['QA & launch', '40', '₹1,250', '₹50,000']].map(([i, h, r, a]) => ({ i, h, r, a }))
+    };
+  }
+}
+</script>
+</body>
+</html>

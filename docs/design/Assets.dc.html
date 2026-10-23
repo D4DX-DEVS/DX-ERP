@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Assets &amp; inventory</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="hr" active="assets" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="hr" hint-size="100%,64px"></dc-import>
+    <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:18px;width:100%;max-width:1280px;box-sizing:border-box">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px">
+        <div>
+          <div style="font-size:13px;color:#5E6583">Operations</div>
+          <h1 style="margin:2px 0 0;font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">Assets &amp; inventory</h1>
+        </div>
+        <div style="display:flex;gap:10px">
+          <button type="button" style="height:40px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:600;color:#10183A">Issue / return</button>
+          <button type="button" style="height:40px;padding:0 16px;border:0;border-radius:10px;background:#1F3CB3;font:inherit;font-size:14px;font-weight:600;color:#FFFFFF;display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add asset</button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px">
+        <sc-for list="{{kpis}}" as="k" hint-placeholder-count="5"><div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:14px 16px"><div style="font-size:13px;color:#5E6583">{{k.l}}</div><div style="{{k.vs}}">{{k.v}}</div><div style="font-size:12px;color:#3D4566">{{k.s}}</div></div></sc-for>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start">
+        <section style="grid-column:span 2;background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column;min-width:0">
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:14px 16px;border-bottom:1px solid #EEF1F7">
+            <sc-for list="{{cats}}" as="c" hint-placeholder-count="5"><span style="{{c.s}}">{{c.l}} {{c.n}}</span></sc-for>
+          </div>
+          <div style="overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:860px">
+              <thead><tr style="background:#F7F8FC;color:#5E6583;text-align:left"><th style="padding:10px 16px;font-size:12px;font-weight:600">Asset</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Serial</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Assigned to</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Purchased</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Warranty</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Condition</th><th style="padding:10px 16px 10px 8px;font-size:12px;font-weight:600">Status</th></tr></thead>
+              <tbody>
+                <sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+                  <tr style="border-top:1px solid #EEF1F7">
+                    <td style="padding:11px 16px"><div style="font-weight:600">{{r.n}}</div><div style="font-size:12px;color:#5E6583">{{r.id}} · {{r.cat}}</div></td>
+                    <td style="padding:11px 8px;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#3D4566">{{r.sn}}</td>
+                    <td style="padding:11px 8px">{{r.to}}</td>
+                    <td style="padding:11px 8px;white-space:nowrap;color:#3D4566">{{r.p}}</td>
+                    <td style="padding:11px 8px;white-space:nowrap;color:{{r.wc}};font-weight:{{r.ww}}">{{r.w}}</td>
+                    <td style="padding:11px 8px;color:#3D4566">{{r.c}}</td>
+                    <td style="padding:11px 16px 11px 8px"><span style="{{r.chip}}">{{r.s}}</span></td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <aside style="display:flex;flex-direction:column;gap:16px;min-width:0">
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:8px">
+            <h2 style="margin:0 0 4px;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Reminders</h2>
+            <div style="padding:10px 0;border-top:1px solid #EEF1F7;font-size:13px"><strong>Collect assets from Kiran Das</strong><br><span style="color:#5E6583">Last day 6 Nov · laptop, ID card</span></div>
+            <div style="padding:10px 0;border-top:1px solid #EEF1F7;font-size:13px"><strong>4 warranties end by Dec</strong><br><span style="color:#5E6583">2 laptops, 1 printer, 1 router</span></div>
+            <div style="padding:10px 0;border-top:1px solid #EEF1F7;font-size:13px"><strong>AC service due</strong><br><span style="color:#5E6583">Every 6 months · last 20 Apr</span></div>
+          </section>
+          <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:8px">
+            <h2 style="margin:0 0 4px;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Recent movements</h2>
+            <div style="font-size:13px;padding:8px 0;border-top:1px solid #EEF1F7">Issued · AST-0131 to Neha Joseph<br><span style="color:#5E6583">1 Sep · by Nadia Thomas</span></div>
+            <div style="font-size:13px;padding:8px 0;border-top:1px solid #EEF1F7">Returned · AST-0098 from Devika Menon<br><span style="color:#5E6583">15 Oct · condition good</span></div>
+            <div style="font-size:13px;padding:8px 0;border-top:1px solid #EEF1F7">Sent for repair · AST-0074<br><span style="color:#5E6583">12 Oct · battery swelling</span></div>
+          </section>
+        </aside>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1050}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const T = { blue: ['#E2E8FC', '#1F3CB3'], green: ['#E2F5EC', '#0E6B4B'], amber: ['#FFF1D9', '#8A4F00'], red: ['#FDE7E7', '#B42323'], gray: ['#EDF0F6', '#4A5270'] };
+    const chip = (t) => 'font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;white-space:nowrap;background:' + T[t][0] + ';color:' + T[t][1];
+    const big = (c) => 'font-family:Montserrat,sans-serif;font-weight:600;font-size:24px;color:' + c;
+    const R = [
+      ['MacBook Air 13" M3', 'AST-0087', 'Laptop', 'C02X…7LQ', 'Arjun Nair', '2 Feb 2024', '2 Feb 2027', 0, 'Good', 'Assigned', 'blue'],
+      ['ThinkPad E14 Gen 5', 'AST-0131', 'Laptop', 'PF4…K2M', 'Neha Joseph', '28 Aug 2026', '28 Aug 2029', 0, 'New', 'Assigned', 'blue'],
+      ['Dell Latitude 5420', 'AST-0074', 'Laptop', '7H2…QX9', '—', '10 Nov 2023', '10 Nov 2026', 1, 'Battery fault', 'In repair', 'amber'],
+      ['Dell 24" monitor', 'AST-0112', 'Monitor', 'CN0…8T4', 'Arjun Nair', '2 Mar 2025', '2 Mar 2028', 0, 'Good', 'Assigned', 'blue'],
+      ['MacBook Pro 14"', 'AST-0098', 'Laptop', 'FVF…3ND', 'In stock', '5 Jul 2024', '5 Jul 2027', 0, 'Good', 'Available', 'green'],
+      ['HP LaserJet Pro', 'AST-0041', 'Printer', 'VNB…221', 'Office · 1st floor', '18 Dec 2023', '18 Dec 2026', 1, 'Fair', 'In use', 'blue'],
+      ['iPhone 13 · test device', 'AST-0103', 'Mobile', 'F2L…P0Z', 'QA team', '1 Jan 2025', 'Expired', 0, 'Screen cracked', 'Damaged', 'red'],
+      ['ThinkPad T14', 'AST-0055', 'Laptop', 'R90…LL7', 'Kiran Das', '14 Sep 2023', '14 Sep 2026', 0, 'Good', 'Return due 6 Nov', 'amber']
+    ];
+    const cats = [['All', 64, 1], ['Laptops', 34], ['Monitors', 12], ['Mobiles', 6], ['Network & office', 12]];
+    return {
+      kpis: [['Total assets', '64', 'cost ₹31.2 L', '#10183A'], ['Assigned', '48', 'to 39 people', '#10183A'], ['In stock', '9', 'ready to issue', '#0E6B4B'], ['In repair / damaged', '4', '1 needs write-off', '#9A5800'], ['Warranty ending · 60 d', '4', 'by 20 Dec', '#B03A0A']].map(([l, v, s, c]) => ({ l, v, s, vs: big(c) })),
+      cats: cats.map(([l, n, on]) => ({ l, n, s: 'height:32px;padding:0 12px;border-radius:999px;font-size:13px;display:flex;align-items:center;' + (on ? 'background:#1F3CB3;color:#FFFFFF;font-weight:600' : 'border:1px solid #D5DAE8;color:#3D4566;font-weight:500') })),
+      rows: R.map(([n, id, cat, sn, to, p, w, soon, c, s, k]) => ({ n, id, cat, sn, to, p, w, c, s, chip: chip(k), wc: soon ? '#B03A0A' : '#3D4566', ww: soon ? '600' : '400' }))
+    };
+  }
+}
+</script>
+</body>
+</html>

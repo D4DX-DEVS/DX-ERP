@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Intern dashboard</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="intern" active="dashboard" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="intern" hint-size="100%,64px"></dc-import>
+    <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:24px;width:100%;max-width:1280px;box-sizing:border-box">
+      <div style="display:flex;align-items:flex-end;gap:12px">
+        <div>
+          <div style="font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#5E6583">Wednesday, 21 October 2026</div>
+          <h1 style="margin:4px 0 0;font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">Good morning, Rahul</h1>
+        </div>
+        <span style="font-size:12px;font-weight:600;padding:3px 9px;border-radius:6px;background:#F1EAFE;color:#6D28D9;margin-bottom:5px">UI/UX Intern · D4DX-I0031</span>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
+        <section style="grid-column:span 2;background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:22px;display:flex;flex-wrap:wrap;gap:28px;min-width:0">
+          <div style="flex:1 1 320px;display:flex;flex-direction:column;gap:14px">
+            <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Internship progress</h2>
+            <div style="display:flex;justify-content:space-between;font-size:13px"><span><span style="color:#5E6583">Started</span> <strong>1 Aug 2026</strong></span><span><span style="color:#5E6583">Ends</span> <strong>31 Jan 2027</strong></span></div>
+            <div style="height:10px;border-radius:999px;background:#EDF0F6"><div style="width:47%;height:10px;border-radius:999px;background:#6D28D9"></div></div>
+            <div style="font-size:13px;color:#3D4566">Week 12 of 26 · 102 days to go</div>
+            <div style="display:flex;flex-direction:column;gap:8px;padding-top:12px;border-top:1px solid #EEF1F7">
+              <div style="font-size:13px;font-weight:600;color:#3D4566">Objectives · 3 of 6 met</div>
+              <sc-for list="{{objectives}}" as="o" hint-placeholder-count="4">
+                <div style="display:flex;align-items:center;gap:10px;font-size:13px"><span style="{{o.box}}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{o.d}}"></path></svg></span><span style="{{o.text}}">{{o.t}}</span></div>
+              </sc-for>
+            </div>
+          </div>
+          <div style="flex:1 1 240px;display:flex;flex-direction:column;gap:14px;padding-left:24px;border-left:1px solid #EEF1F7">
+            <div style="font-size:13px;font-weight:600;color:#3D4566">Your mentor</div>
+            <div style="display:flex;gap:12px;align-items:center">
+              <span style="width:48px;height:48px;border-radius:999px;background:#FFEDE3;color:#B03A0A;font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:center">FN</span>
+              <div><div style="font-size:15px;font-weight:600">Fathima Nasrin</div><div style="font-size:12px;color:#5E6583">UI/UX Designer · Design team</div></div>
+            </div>
+            <a href="mailto:fathima.nasrin@d4dx.co" style="height:38px;border-radius:10px;border:1px solid #D5DAE8;color:#10183A;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H8l-4 4z"></path></svg>Message mentor</a>
+            <div style="padding:12px;border-radius:12px;background:#F1EAFE;display:flex;flex-direction:column;gap:2px">
+              <span style="font-size:12px;font-weight:600;color:#6D28D9">Next review</span>
+              <span style="font-size:14px;font-weight:600">Mid-term evaluation</span>
+              <span style="font-size:12px;color:#3D4566">Fri 30 Oct · self-assessment due Wed 28</span>
+            </div>
+          </div>
+        </section>
+
+        <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:14px">
+          <div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Attendance · October</h2><a href="Attendance.dc.html" style="font-size:13px;font-weight:600;text-decoration:none">Details →</a></div>
+          <div style="display:flex;gap:24px">
+            <div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">14<span style="font-size:14px;color:#5E6583"> / 15</span></div><div style="font-size:12px;color:#5E6583">Days present</div></div>
+            <div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">8h 06m</div><div style="font-size:12px;color:#5E6583">Average day</div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px">
+            <sc-for list="{{days}}" as="d" hint-placeholder-count="15"><span title="{{d.t}}" style="{{d.s}}">{{d.n}}</span></sc-for>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:#5E6583"><span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:3px;background:#0E9F75"></span>Present</span><span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:3px;background:#D0691F"></span>Late</span><span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:3px;background:#284CC7"></span>Leave</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding-top:12px;border-top:1px solid #EEF1F7;font-size:13px"><span>Today <strong>09:26</strong> in</span><span style="font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:#E2F5EC;color:#0E6B4B">Present</span></div>
+        </section>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
+        <section style="grid-column:span 2;background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:18px 20px 12px"><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Tasks &amp; submissions</h2><a href="Tasks.dc.html" style="font-size:13px;font-weight:600;text-decoration:none">All tasks →</a></div>
+          <div style="overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:560px">
+              <thead><tr style="background:#F7F8FC;color:#5E6583;text-align:left"><th style="padding:9px 20px;font-size:12px;font-weight:600">Task</th><th style="padding:9px 8px;font-size:12px;font-weight:600">Due</th><th style="padding:9px 8px;font-size:12px;font-weight:600">Submission</th><th style="padding:9px 20px 9px 8px;font-size:12px;font-weight:600;text-align:right">Action</th></tr></thead>
+              <tbody>
+                <sc-for list="{{tasks}}" as="t" hint-placeholder-count="4">
+                  <tr style="border-top:1px solid #EEF1F7">
+                    <td style="padding:11px 20px"><div style="font-weight:600">{{t.title}}</div><div style="font-size:12px;color:#5E6583">{{t.project}}</div></td>
+                    <td style="padding:11px 8px;white-space:nowrap">{{t.due}}</td>
+                    <td style="padding:11px 8px"><span style="{{t.chip}}">{{t.status}}</span></td>
+                    <td style="padding:11px 20px 11px 8px;text-align:right"><a href="Task.dc.html" style="font-size:13px;font-weight:600;text-decoration:none">{{t.action}}</a></td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:18px 20px 12px"><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Learning</h2><a href="Intern.dc.html" style="font-size:13px;font-weight:600;text-decoration:none">Library →</a></div>
+          <sc-for list="{{learning}}" as="l" hint-placeholder-count="4">
+            <div style="display:flex;align-items:center;gap:12px;padding:11px 20px;border-top:1px solid #EEF1F7">
+              <span style="width:34px;height:34px;flex:none;border-radius:10px;background:#F1F4FE;color:#1F3CB3;display:flex;align-items:center;justify-content:center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 19V5"></path></svg></span>
+              <span style="flex:1;min-width:0"><span style="display:block;font-size:13px;font-weight:600">{{l.title}}</span><span style="display:block;font-size:12px;color:#5E6583">{{l.meta}}</span></span>
+              <span style="font-size:12px;font-weight:600;color:#3D4566">{{l.pct}}</span>
+            </div>
+          </sc-for>
+        </section>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
+        <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Latest feedback</h2><span style="font-size:12px;color:#5E6583">From Fathima · 16 Oct</span></div>
+          <p style="margin:0;font-size:14px;line-height:1.6;color:#3D4566">Strong wireframes for the Nexora booking flow. Next step: tighten spacing tokens and annotate states before handoff.</p>
+          <sc-for list="{{skills}}" as="s" hint-placeholder-count="3">
+            <div style="display:flex;align-items:center;gap:10px;font-size:12px"><span style="width:130px;color:#3D4566">{{s.n}}</span><span style="flex:1;display:flex;gap:3px"><sc-for list="{{s.dots}}" as="d" hint-placeholder-count="5"><span style="{{d}}"></span></sc-for></span><span style="width:28px;text-align:right;font-weight:600">{{s.v}}/5</span></div>
+          </sc-for>
+        </section>
+        <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:18px 20px 12px"><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">My movements</h2><a href="Movement-New.dc.html" style="font-size:13px;font-weight:600;text-decoration:none">Record →</a></div>
+          <div style="display:flex;align-items:center;gap:12px;padding:11px 20px;border-top:1px solid #EEF1F7"><span style="width:52px;font-size:12px;color:#5E6583;font-weight:600">Mon 19</span><span style="flex:1"><span style="display:block;font-size:13px;font-weight:600">Official · print shop for mockups</span><span style="display:block;font-size:12px;color:#5E6583">Out 15:10 · In 15:45</span></span><span style="font-size:13px;font-weight:600">35m</span><span style="font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;background:#E2F5EC;color:#0E6B4B">Approved</span></div>
+          <div style="display:flex;align-items:center;gap:12px;padding:11px 20px;border-top:1px solid #EEF1F7"><span style="width:52px;font-size:12px;color:#5E6583;font-weight:600">Thu 15</span><span style="flex:1"><span style="display:block;font-size:13px;font-weight:600">Personal · college office</span><span style="display:block;font-size:12px;color:#5E6583">Out 12:30 · In 13:20</span></span><span style="font-size:13px;font-weight:600">50m</span><span style="font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;background:#E2F5EC;color:#0E6B4B">Approved</span></div>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1200}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const T = { green: ['#E2F5EC', '#0E6B4B'], amber: ['#FFF1D9', '#8A4F00'], blue: ['#E2E8FC', '#1F3CB3'], gray: ['#EDF0F6', '#4A5270'], purple: ['#F1EAFE', '#6D28D9'] };
+    const chip = (t) => 'font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;white-space:nowrap;background:' + T[t][0] + ';color:' + T[t][1];
+    const O = [['Learn the D4DX design system', 1], ['Ship one feature end-to-end with a developer', 1], ['Run two usability tests', 1], ['Own a component in the library', 0], ['Present a case study at all-hands', 0], ['Write accessible handoff specs', 0]];
+    const D = 'PPPLPPPPPPPVPPP';
+    const C = { P: '#0E9F75', L: '#D0691F', V: '#284CC7' };
+    const N = { P: 'present', L: 'late', V: 'on leave' };
+    const dates = [1, 5, 6, 7, 8, 9, 12, 13, 14, 15, 16, 19, 20, 21, 2];
+    return {
+      objectives: O.slice(0, 4).map(([t, done]) => ({ t, d: done ? 'M5 12l5 5 9-10' : '', box: 'width:18px;height:18px;flex:none;border-radius:5px;display:flex;align-items:center;justify-content:center;' + (done ? 'background:#6D28D9;color:#FFFFFF' : 'border:1.5px solid #C4CAD9'), text: done ? 'color:#3D4566' : 'color:#10183A;font-weight:500' })),
+      days: D.split('').map((k, i) => ({ n: [1, 5, 6, 7, 8, 9, 12, 13, 14, 15, 16, 19, 20, 21, 22][i], t: 'Oct ' + [1, 5, 6, 7, 8, 9, 12, 13, 14, 15, 16, 19, 20, 21, 22][i] + ' · ' + N[k], s: 'height:28px;border-radius:6px;font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center;color:#FFFFFF;background:' + (i === 14 ? '#EDF0F6;color:#5E6583' : C[k]) })).slice(0, 14),
+      tasks: [
+        { title: 'Booking flow — high-fidelity screens', project: 'Nexora patient app', due: 'Fri 23 Oct', status: 'Changes requested', chip: chip('amber'), action: 'Resubmit' },
+        { title: 'Empty states for patient records', project: 'Nexora patient app', due: 'Tue 27 Oct', status: 'In progress', chip: chip('blue'), action: 'Submit work' },
+        { title: 'Icon audit for Greenleaf storefront', project: 'Greenleaf e-commerce', due: 'Mon 19 Oct', status: 'Approved', chip: chip('green'), action: 'View' },
+        { title: 'Usability test notes — checkout', project: 'Greenleaf e-commerce', due: 'Fri 30 Oct', status: 'Not started', chip: chip('gray'), action: 'Open' }
+      ],
+      learning: [
+        { title: 'D4DX design system basics', meta: 'Course · 6 lessons', pct: '100%' },
+        { title: 'Accessibility for designers', meta: 'Course · WCAG 2.2', pct: '70%' },
+        { title: 'Auto-layout workshop', meta: 'Recording · 48 min', pct: '—' },
+        { title: 'Client handoff checklist', meta: 'Document · Design team', pct: 'New' }
+      ],
+      skills: [['Visual design', 4], ['Research & testing', 3], ['Communication', 4]].map(([n, v]) => ({ n, v, dots: [1, 2, 3, 4, 5].map((i) => 'flex:1;max-width:28px;height:8px;border-radius:4px;background:' + (i <= v ? '#6D28D9' : '#EDF0F6')) }))
+    };
+  }
+}
+</script>
+</body>
+</html>

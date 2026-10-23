@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Component library</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div style="width:1440px;height:1800px;box-sizing:border-box;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A;padding:56px 64px;display:flex;flex-direction:column;gap:24px">
+  <div>
+    <div style="font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#1F3CB3">Foundations</div>
+    <h1 style="margin:6px 0 0;font-family:Montserrat,sans-serif;font-weight:700;font-size:36px">Component library</h1>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px">
+    <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:16px">
+      <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Buttons</h2>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
+        <button type="button" style="height:40px;padding:0 18px;border:0;border-radius:10px;background:#1F3CB3;color:#FFFFFF;font:inherit;font-size:14px;font-weight:600">Primary</button>
+        <button type="button" style="height:40px;padding:0 18px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;color:#10183A;font:inherit;font-size:14px;font-weight:600">Secondary</button>
+        <button type="button" style="height:40px;padding:0 14px;border:0;border-radius:10px;background:transparent;color:#1F3CB3;font:inherit;font-size:14px;font-weight:600">Ghost</button>
+        <button type="button" style="height:40px;padding:0 18px;border:0;border-radius:10px;background:#B42323;color:#FFFFFF;font:inherit;font-size:14px;font-weight:600">Reject</button>
+        <button type="button" style="height:40px;padding:0 18px;border:0;border-radius:10px;background:#0E7A55;color:#FFFFFF;font:inherit;font-size:14px;font-weight:600">Approve</button>
+        <button type="button" disabled style="height:40px;padding:0 18px;border:0;border-radius:10px;background:#E2E6F0;color:#7B829C;font:inherit;font-size:14px;font-weight:600">Disabled</button>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
+        <button type="button" style="height:32px;padding:0 12px;border:0;border-radius:8px;background:#1F3CB3;color:#FFFFFF;font:inherit;font-size:13px;font-weight:600">Small</button>
+        <button type="button" style="height:48px;padding:0 22px;border:0;border-radius:12px;background:#1F3CB3;color:#FFFFFF;font:inherit;font-size:15px;font-weight:600;display:inline-flex;align-items:center;gap:8px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Mobile 48</button>
+        <button type="button" aria-label="More actions" style="width:40px;height:40px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;color:#3D4566;display:inline-flex;align-items:center;justify-content:center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M5 12h.01M12 12h.01M19 12h.01"></path></svg></button>
+        <button type="button" style="height:40px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;color:#10183A;font:inherit;font-size:14px;font-weight:500;display:inline-flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"></path></svg>Export</button>
+        <div role="group" aria-label="View" style="display:inline-flex;padding:3px;border-radius:10px;background:#EDF0F6">
+          <button type="button" style="height:32px;padding:0 12px;border:0;border-radius:8px;background:#FFFFFF;color:#10183A;font:inherit;font-size:13px;font-weight:600;box-shadow:0 1px 2px rgba(16,24,58,0.08)">Board</button>
+          <button type="button" style="height:32px;padding:0 12px;border:0;border-radius:8px;background:transparent;color:#3D4566;font:inherit;font-size:13px;font-weight:500">List</button>
+          <button type="button" style="height:32px;padding:0 12px;border:0;border-radius:8px;background:transparent;color:#3D4566;font:inherit;font-size:13px;font-weight:500">Calendar</button>
+        </div>
+      </div>
+    </section>
+
+    <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:24px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 20px">
+      <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px;grid-column:1 / -1">Form fields</h2>
+      <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Purpose of movement
+        <input type="text" value="Client meeting at Greenleaf office" style="height:40px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A">
+      </label>
+      <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Category
+        <select style="height:40px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;background:#FFFFFF"><option>Client meeting</option><option>Official business</option><option>Personal work</option></select>
+      </label>
+      <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Expected return
+        <input type="time" value="12:30" style="height:40px;padding:0 12px;border:2px solid #284CC7;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A;box-shadow:0 0 0 3px #E2E8FC">
+        <span style="font-size:12px;font-weight:400;color:#5E6583">Focused state</span>
+      </label>
+      <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:#3D4566">Correction reason
+        <input type="text" value="" placeholder="Required" style="height:40px;padding:0 12px;border:1px solid #B42323;border-radius:10px;font:inherit;font-size:14px;font-weight:400;color:#10183A">
+        <span style="font-size:12px;font-weight:500;color:#B42323">A reason is required for every correction.</span>
+      </label>
+      <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;grid-column:1 / -1;font-size:14px">
+        <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" checked style="width:18px;height:18px;accent-color:#1F3CB3">Half day</label>
+        <label style="display:flex;align-items:center;gap:8px"><input type="radio" name="sess" checked style="width:18px;height:18px;accent-color:#1F3CB3">First half</label>
+        <label style="display:flex;align-items:center;gap:8px"><input type="radio" name="sess" style="width:18px;height:18px;accent-color:#1F3CB3">Second half</label>
+        <label style="display:flex;align-items:center;gap:10px"><span style="width:40px;height:24px;border-radius:999px;background:#1F3CB3;position:relative;display:inline-block"><span style="position:absolute;top:3px;left:19px;width:18px;height:18px;border-radius:999px;background:#FFFFFF"></span></span>Requires approval</label>
+      </div>
+    </section>
+  </div>
+
+  <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:14px">
+    <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Status chips · one vocabulary per FRS workflow</h2>
+    <sc-for list="{{groups}}" as="g" hint-placeholder-count="8">
+      <div style="display:flex;gap:16px;align-items:center;padding:8px 0;border-top:1px solid #EEF1F7">
+        <div style="width:150px;flex:none;font-size:13px;font-weight:600;color:#3D4566">{{g.name}}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <sc-for list="{{g.items}}" as="c" hint-placeholder-count="6">
+            <span style="{{c.style}}"><span style="{{c.dot}}"></span>{{c.label}}</span>
+          </sc-for>
+        </div>
+      </div>
+    </sc-for>
+  </section>
+
+  <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px">
+    <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:14px">
+      <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Stat card</h2>
+      <div style="border:1px solid #E2E6F0;border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:13px;color:#5E6583;font-weight:500">Outside office now</span><span style="width:32px;height:32px;border-radius:9px;background:#FFEDE3;color:#C2410C;display:flex;align-items:center;justify-content:center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M9 16l-4-4 4-4M5 12h11"></path></svg></span></div>
+        <div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:30px">5</div>
+        <div style="font-size:12px;color:#B42323;font-weight:600">2 past expected return</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="display:flex;justify-content:space-between;font-size:13px"><span style="font-weight:500">Greenleaf e-commerce</span><span style="color:#5E6583">68%</span></div>
+        <div style="height:8px;border-radius:999px;background:#EDF0F6"><div style="width:68%;height:8px;border-radius:999px;background:#1F3CB3"></div></div>
+      </div>
+    </section>
+
+    <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:14px">
+      <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Avatars &amp; person tags</h2>
+      <div style="display:flex;gap:12px;align-items:center">
+        <span style="width:24px;height:24px;border-radius:999px;background:#E2E8FC;color:#1F3CB3;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center">AN</span>
+        <span style="width:32px;height:32px;border-radius:999px;background:#E2E8FC;color:#1F3CB3;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center">AN</span>
+        <span style="width:40px;height:40px;border-radius:999px;background:#E2E8FC;color:#1F3CB3;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center">AN</span>
+        <span style="width:56px;height:56px;border-radius:999px;background:#1F3CB3;color:#FFFFFF;font-size:18px;font-weight:700;display:flex;align-items:center;justify-content:center;position:relative">AN<span style="position:absolute;right:1px;bottom:1px;width:14px;height:14px;border-radius:999px;background:#12935F;border:2px solid #FFFFFF"></span></span>
+        <span style="display:flex"><span style="width:30px;height:30px;border-radius:999px;background:#FFEDE3;color:#B03A0A;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #FFFFFF">FN</span><span style="width:30px;height:30px;border-radius:999px;background:#E2F5EC;color:#0E6B4B;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #FFFFFF;margin-left:-8px">VM</span><span style="width:30px;height:30px;border-radius:999px;background:#EDF0F6;color:#4A5270;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid #FFFFFF;margin-left:-8px">+4</span></span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        <span style="font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;background:#E2E8FC;color:#1F3CB3">Employee</span>
+        <span style="font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;background:#F1EAFE;color:#6D28D9">Intern</span>
+        <span style="font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;background:#F1EAFE;color:#6D28D9">Trainee</span>
+        <span style="font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;background:#EDF0F6;color:#4A5270">Team Lead</span>
+        <span style="font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;background:#0A1450;color:#FFFFFF">Restricted</span>
+      </div>
+    </section>
+
+    <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:12px">
+      <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Alerts</h2>
+      <div style="display:flex;gap:10px;padding:12px;border-radius:10px;background:#FDE7E7;color:#8E1C1C;font-size:13px;line-height:1.45"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none"><path d="M12 3l10 18H2zM12 10v5M12 18h.01"></path></svg><span><strong>Overdue movement.</strong> Sanjay was expected back at 11:00.</span></div>
+      <div style="display:flex;gap:10px;padding:12px;border-radius:10px;background:#FFF1D9;color:#6E3F00;font-size:13px;line-height:1.45"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2"></path></svg><span><strong>Missing check-out</strong> on Mon 19 Oct. Request a correction.</span></div>
+      <div style="display:flex;gap:10px;padding:12px;border-radius:10px;background:#E2F5EC;color:#0B5A3F;font-size:13px;line-height:1.45"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none"><path d="M5 12l5 5 9-10"></path></svg><span>Leave approved for 27–28 Oct.</span></div>
+    </section>
+  </div>
+
+  <div style="display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:24px">
+    <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:24px 0 0;display:flex;flex-direction:column;gap:14px;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:0 24px">
+        <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Data table</h2>
+        <div style="display:flex;gap:8px">
+          <span style="display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:8px;background:#E2E8FC;color:#1F3CB3;font-size:12px;font-weight:600">Department: Engineering<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></span>
+          <span style="display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:8px;border:1px dashed #C4CAD9;color:#3D4566;font-size:12px;font-weight:600">+ Filter</span>
+        </div>
+      </div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:640px">
+          <thead><tr style="background:#F7F8FC;color:#5E6583;text-align:left"><th style="padding:10px 24px;font-weight:600;font-size:12px"><input type="checkbox" aria-label="Select all" style="accent-color:#1F3CB3"></th><th style="padding:10px 8px;font-weight:600;font-size:12px">Employee</th><th style="padding:10px 8px;font-weight:600;font-size:12px">Check-in</th><th style="padding:10px 8px;font-weight:600;font-size:12px">Hours</th><th style="padding:10px 8px;font-weight:600;font-size:12px">Status</th><th style="padding:10px 24px 10px 8px"></th></tr></thead>
+          <tbody>
+            <tr style="border-top:1px solid #EEF1F7"><td style="padding:12px 24px"><input type="checkbox" aria-label="Select Arjun Nair" style="accent-color:#1F3CB3"></td><td style="padding:12px 8px;font-weight:600">Arjun Nair</td><td style="padding:12px 8px">09:12</td><td style="padding:12px 8px">2h 28m</td><td style="padding:12px 8px"><span style="font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:#E2F5EC;color:#0E6B4B">Present</span></td><td style="padding:12px 24px 12px 8px;color:#5E6583;text-align:right">⋯</td></tr>
+            <tr style="border-top:1px solid #EEF1F7;background:#F1F4FE"><td style="padding:12px 24px"><input type="checkbox" checked aria-label="Select Sanjay Varma" style="accent-color:#1F3CB3"></td><td style="padding:12px 8px;font-weight:600">Sanjay Varma</td><td style="padding:12px 8px">09:41</td><td style="padding:12px 8px">1h 59m</td><td style="padding:12px 8px"><span style="font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:#FFF1D9;color:#8A4F00">Late</span></td><td style="padding:12px 24px 12px 8px;color:#5E6583;text-align:right">⋯</td></tr>
+            <tr style="border-top:1px solid #EEF1F7"><td style="padding:12px 24px"><input type="checkbox" aria-label="Select Meera Pillai" style="accent-color:#1F3CB3"></td><td style="padding:12px 8px;font-weight:600">Meera Pillai</td><td style="padding:12px 8px">—</td><td style="padding:12px 8px">—</td><td style="padding:12px 8px"><span style="font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:#E2E8FC;color:#1F3CB3">On leave</span></td><td style="padding:12px 24px 12px 8px;color:#5E6583;text-align:right">⋯</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 24px;border-top:1px solid #EEF1F7;font-size:13px;color:#5E6583"><span>1 selected · 1–3 of 48</span><span style="display:flex;gap:6px"><span style="width:30px;height:30px;border-radius:8px;border:1px solid #E2E6F0;display:flex;align-items:center;justify-content:center">‹</span><span style="width:30px;height:30px;border-radius:8px;background:#1F3CB3;color:#FFFFFF;display:flex;align-items:center;justify-content:center;font-weight:600">1</span><span style="width:30px;height:30px;border-radius:8px;border:1px solid #E2E6F0;display:flex;align-items:center;justify-content:center">2</span><span style="width:30px;height:30px;border-radius:8px;border:1px solid #E2E6F0;display:flex;align-items:center;justify-content:center">›</span></span></div>
+    </section>
+
+    <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:14px">
+      <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Approval card</h2>
+      <div style="border:1px solid #E2E6F0;border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;gap:12px;align-items:center">
+          <span style="width:40px;height:40px;border-radius:999px;background:#E2E8FC;color:#1F3CB3;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center">MP</span>
+          <div style="flex:1"><div style="font-size:14px;font-weight:600">Meera Pillai · Casual leave</div><div style="font-size:12px;color:#5E6583">Mon 26 – Tue 27 Oct · 2 days · balance 6</div></div>
+          <span style="font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:#FFF1D9;color:#8A4F00">Pending</span>
+        </div>
+        <p style="margin:0;font-size:13px;color:#3D4566;line-height:1.5">Family function in Thrissur. Campaign handover to Joel is done.</p>
+        <div style="display:flex;gap:8px"><button type="button" style="flex:1;height:38px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;color:#B42323;font:inherit;font-size:13px;font-weight:600">Reject</button><button type="button" style="flex:1;height:38px;border:0;border-radius:10px;background:#0E7A55;color:#FFFFFF;font:inherit;font-size:13px;font-weight:600">Approve</button></div>
+      </div>
+      <div style="display:flex;gap:4px;border-bottom:1px solid #E2E6F0">
+        <span style="padding:10px 12px;font-size:13px;font-weight:600;color:#1F3CB3;border-bottom:2px solid #1F3CB3;margin-bottom:-1px">Overview</span>
+        <span style="padding:10px 12px;font-size:13px;font-weight:500;color:#5E6583">Tasks <span style="font-size:11px;padding:1px 6px;border-radius:999px;background:#EDF0F6">24</span></span>
+        <span style="padding:10px 12px;font-size:13px;font-weight:500;color:#5E6583">Files</span>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px;border:1px dashed #C4CAD9;border-radius:12px;text-align:center">
+        <span style="width:40px;height:40px;border-radius:12px;background:#F1F4FE;color:#1F3CB3;display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3 8-8M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"></path></svg></span>
+        <span style="font-size:14px;font-weight:600">No pending approvals</span>
+        <span style="font-size:12px;color:#5E6583">Empty state · icon, one line, optional action</span>
+      </div>
+    </section>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1800}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const T = { blue: ['#E2E8FC', '#1F3CB3'], green: ['#E2F5EC', '#0E6B4B'], amber: ['#FFF1D9', '#8A4F00'], red: ['#FDE7E7', '#B42323'], orange: ['#FFEDE3', '#B03A0A'], gray: ['#EDF0F6', '#4A5270'], purple: ['#F1EAFE', '#6D28D9'] };
+    const chip = (label, t) => ({ label, style: 'display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:600;background:' + T[t][0] + ';color:' + T[t][1], dot: 'width:6px;height:6px;border-radius:999px;background:' + T[t][1] });
+    const g = (name, list) => ({ name, items: list.map(([l, t]) => chip(l, t)) });
+    return {
+      groups: [
+        g('Attendance', [['Present', 'green'], ['Late', 'amber'], ['Half day', 'amber'], ['Early departure', 'amber'], ['Absent', 'red'], ['On leave', 'blue'], ['Missing check-out', 'orange'], ['Holiday', 'gray']]),
+        g('Movement', [['Draft', 'gray'], ['Out', 'orange'], ['Returned', 'green'], ['Overdue', 'red'], ['Pending approval', 'amber'], ['Approved', 'green'], ['Rejected', 'red'], ['Correction requested', 'purple'], ['Cancelled', 'gray']]),
+        g('Leave · Timesheet', [['Draft', 'gray'], ['Submitted', 'blue'], ['Pending', 'amber'], ['Approved', 'green'], ['Rejected', 'red'], ['Cancelled', 'gray']]),
+        g('Project', [['Enquiry', 'gray'], ['Planning', 'purple'], ['In progress', 'blue'], ['On hold', 'amber'], ['Under review', 'orange'], ['Completed', 'green'], ['Cancelled', 'gray']]),
+        g('Task priority', [['Urgent', 'red'], ['High', 'orange'], ['Medium', 'amber'], ['Low', 'gray'], ['Blocked', 'red']]),
+        g('QA issue', [['Open', 'red'], ['Assigned', 'purple'], ['In progress', 'blue'], ['Fixed', 'green'], ['Ready for testing', 'amber'], ['Reopened', 'red'], ['Verified', 'green'], ['Closed', 'gray']]),
+        g('Sales pipeline', [['New lead', 'gray'], ['Contacted', 'blue'], ['Requirement gathering', 'blue'], ['Proposal preparation', 'purple'], ['Proposal sent', 'purple'], ['Negotiation', 'amber'], ['Won', 'green'], ['Lost', 'red']]),
+        g('Invoice', [['Draft', 'gray'], ['Issued', 'blue'], ['Partially paid', 'amber'], ['Paid', 'green'], ['Overdue', 'red'], ['Cancelled', 'gray']]),
+        g('Employment', [['Active', 'green'], ['On leave', 'blue'], ['Notice period', 'amber'], ['Resigned', 'gray'], ['Terminated', 'red'], ['Inactive', 'gray']])
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

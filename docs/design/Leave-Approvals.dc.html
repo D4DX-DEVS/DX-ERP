@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Leave approvals &amp; team calendar</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="hr" active="leave" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="hr" hint-size="100%,64px"></dc-import>
+    <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:20px;width:100%;max-width:1280px;box-sizing:border-box">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px">
+        <div>
+          <div style="font-size:13px;color:#5E6583">Time</div>
+          <h1 style="margin:2px 0 0;font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">Leave approvals</h1>
+        </div>
+        <div style="display:flex;gap:10px">
+          <button type="button" style="height:40px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:500;color:#10183A">Balances report</button>
+          <button type="button" style="height:40px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:500;color:#10183A">Export ▾</button>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:4px;border-bottom:1px solid #E2E6F0">
+        <span style="padding:12px 12px;font-size:14px;font-weight:600;color:#1F3CB3;border-bottom:2px solid #1F3CB3;margin-bottom:-1px">Pending <span style="font-size:11px;padding:1px 6px;border-radius:999px;background:#E2E8FC">4</span></span>
+        <span style="padding:12px 12px;font-size:14px;font-weight:500;color:#5E6583">Approved</span>
+        <span style="padding:12px 12px;font-size:14px;font-weight:500;color:#5E6583">Rejected</span>
+        <span style="padding:12px 12px;font-size:14px;font-weight:500;color:#5E6583">All requests</span>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px">
+        <sc-for list="{{reqs}}" as="r" hint-placeholder-count="4">
+          <article style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;gap:12px;align-items:center">
+              <span style="{{r.av}}">{{r.ini}}</span>
+              <div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:600">{{r.n}}</div><div style="font-size:12px;color:#5E6583">{{r.role}}</div></div>
+              <span style="{{r.typeChip}}">{{r.type}}</span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:18px;font-size:13px">
+              <span><span style="color:#5E6583">Dates</span><br><strong>{{r.dates}}</strong></span>
+              <span><span style="color:#5E6583">Days</span><br><strong>{{r.days}}</strong></span>
+              <span><span style="color:#5E6583">Balance after</span><br><strong>{{r.bal}}</strong></span>
+            </div>
+            <p style="margin:0;font-size:13px;color:#3D4566;line-height:1.5">“{{r.reason}}”</p>
+            <sc-if value="{{r.warn}}" hint-placeholder-val="{{false}}"><div style="display:flex;gap:8px;padding:8px 10px;border-radius:8px;background:#FFF1D9;color:#6E3F00;font-size:12px;line-height:1.45"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none"><path d="M12 3l10 18H2zM12 10v5M12 18h.01"></path></svg><span>{{r.warn}}</span></div></sc-if>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="text" aria-label="Comment" placeholder="Comment (required to reject)" style="flex:1;min-width:0;height:38px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;font:inherit;font-size:13px;color:#10183A">
+              <button type="button" style="height:38px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:600;color:#B42323">Reject</button>
+              <button type="button" style="height:38px;padding:0 14px;border:0;border-radius:10px;background:#0E7A55;font:inherit;font-size:13px;font-weight:600;color:#FFFFFF">Approve</button>
+            </div>
+          </article>
+        </sc-for>
+      </div>
+
+      <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column;min-width:0">
+        <div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:center;padding:18px 20px 12px">
+          <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Team calendar · 26 Oct – 13 Nov</h2>
+          <div style="display:flex;gap:14px;font-size:12px;color:#3D4566">
+            <span style="display:flex;align-items:center;gap:6px"><span style="width:14px;height:10px;border-radius:3px;background:#284CC7"></span>Approved</span>
+            <span style="display:flex;align-items:center;gap:6px"><span style="width:14px;height:10px;border-radius:3px;background:repeating-linear-gradient(45deg,#C4D0F7 0 3px,#FFFFFF 3px 6px);border:1px solid #284CC7;box-sizing:border-box"></span>Pending</span>
+            <span style="display:flex;align-items:center;gap:6px"><span style="width:14px;height:10px;border-radius:3px;background:#0E9F75"></span>Sick</span>
+          </div>
+        </div>
+        <div style="overflow-x:auto">
+          <div style="min-width:900px;padding:0 20px 18px">
+            <div style="display:grid;grid-template-columns:160px repeat(15,minmax(0,1fr));gap:2px;font-size:11px;color:#5E6583;text-align:center;padding-bottom:6px">
+              <span></span>
+              <sc-for list="{{cols}}" as="c" hint-placeholder-count="15"><span style="{{c.s}}">{{c.d}}<br>{{c.n}}</span></sc-for>
+            </div>
+            <sc-for list="{{team}}" as="t" hint-placeholder-count="8">
+              <div style="display:grid;grid-template-columns:160px repeat(15,minmax(0,1fr));gap:2px;align-items:center;border-top:1px solid #EEF1F7;padding:5px 0">
+                <span style="font-size:13px;font-weight:500">{{t.n}}</span>
+                <sc-for list="{{t.cells}}" as="c" hint-placeholder-count="15"><span title="{{c.t}}" style="{{c.s}}"></span></sc-for>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1250}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const T = { blue: ['#E2E8FC', '#1F3CB3'], green: ['#E2F5EC', '#0E6B4B'], purple: ['#F1EAFE', '#6D28D9'], orange: ['#FFEDE3', '#B03A0A'] };
+    const av = (t) => 'width:40px;height:40px;flex:none;border-radius:999px;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;background:' + T[t][0] + ';color:' + T[t][1];
+    const tag = (t) => 'font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;background:' + T[t][0] + ';color:' + T[t][1];
+    const days = [['Mon', 26], ['Tue', 27], ['Wed', 28], ['Thu', 29], ['Fri', 30], ['Mon', 2], ['Tue', 3], ['Wed', 4], ['Thu', 5], ['Fri', 6], ['Mon', 9], ['Tue', 10], ['Wed', 11], ['Thu', 12], ['Fri', 13]];
+    const S = { A: 'height:22px;border-radius:5px;background:#284CC7', P: 'height:22px;border-radius:5px;box-sizing:border-box;border:1px solid #284CC7;background:repeating-linear-gradient(45deg,#C4D0F7 0 3px,#FFFFFF 3px 6px)', S: 'height:22px;border-radius:5px;background:#0E9F75', H: 'height:22px;border-radius:5px;background:repeating-linear-gradient(45deg,#C4D0F7 0 3px,#FFFFFF 3px 6px);border:1px solid #284CC7;box-sizing:border-box;width:50%', '.': 'height:22px;border-radius:5px;background:#F7F8FC' };
+    const L = { A: 'approved', P: 'pending', S: 'sick leave', H: 'pending half day', '.': 'working' };
+    const team = [['Arjun Nair', '.........P.....'], ['Sanjay Varma', '........A......'], ['Anjali George', '...............'], ['Vivek Menon', '.....A.........'], ['Neha Joseph', '....S..........'], ['Meera Pillai', 'PP.............'], ['Joel Mathew', '...H...........'], ['Fathima Nasrin', '..........AAA..'], ['Rahul Menon', '.....P.........']];
+    return {
+      reqs: [
+        { ini: 'MP', n: 'Meera Pillai', role: 'Digital Marketing · reports to Joel Mathew', type: 'Casual', typeChip: tag('blue'), dates: 'Mon 26 – Tue 27 Oct', days: '2', bal: '4 casual', reason: 'Extending current leave — family function in Thrissur. Campaign handover to Joel is done.', warn: 'Extends approved leave 21–23 Oct · 5 days in a row needs HR approval too.', av: av('purple') },
+        { ini: 'AN', n: 'Arjun Nair', role: 'Software Engineer · reports to Vivek Menon', type: 'Casual', typeChip: tag('blue'), dates: 'Fri 6 Nov', days: '1', bal: '5 casual', reason: 'Personal work at home.', warn: 'Sanjay Varma (same squad) is on leave Thu 5 Nov.', av: av('blue') },
+        { ini: 'JM', n: 'Joel Mathew', role: 'Business Development · reports to Sameer Hassan', type: 'Casual · half day', typeChip: tag('blue'), dates: 'Thu 29 Oct · 2nd half', days: '0.5', bal: '7.5 casual', reason: 'Bank appointment for home loan.', warn: '', av: av('green') },
+        { ini: 'RM', n: 'Rahul Menon', role: 'UI/UX Intern · mentor Fathima Nasrin', type: 'Intern leave', typeChip: tag('purple'), dates: 'Mon 2 Nov', days: '1', bal: '0 this month', reason: 'University exam.', warn: 'Intern policy: 1 day per month. This uses November’s day.', av: av('purple') }
+      ],
+      cols: days.map(([d, n], i) => ({ d, n, s: i === 5 || i === 10 ? 'border-left:2px solid #E2E6F0' : '' })),
+      team: team.map(([n, code]) => ({ n, cells: code.split('').map((k, i) => ({ s: S[k], t: n + ' · ' + days[i][0] + ' ' + days[i][1] + ' · ' + L[k] })) }))
+    };
+  }
+}
+</script>
+</body>
+</html>

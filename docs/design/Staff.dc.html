@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Staff directory</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="management" active="staff" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="management" hint-size="100%,64px"></dc-import>
+    <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:20px;width:100%;max-width:1280px;box-sizing:border-box">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px">
+        <div>
+          <div style="font-size:13px;color:#5E6583">People</div>
+          <h1 style="margin:2px 0 0;font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">Staff <span style="font-size:16px;color:#5E6583;font-weight:500">42 people</span></h1>
+        </div>
+        <div style="display:flex;gap:10px">
+          <button type="button" style="height:40px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:500;color:#10183A;display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20V9M7 14l5-5 5 5M5 4h14"></path></svg>Import</button>
+          <button type="button" style="height:40px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:500;color:#10183A;display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"></path></svg>Export</button>
+          <a href="Onboarding.dc.html" style="height:40px;padding:0 16px;border-radius:10px;background:#1F3CB3;color:#FFFFFF;font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px;text-decoration:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add person</a>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;padding:12px 16px;border-radius:12px;background:#FFF1D9;color:#6E3F00;font-size:13px;align-items:center">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none"><path d="M12 3l10 18H2zM12 10v5M12 18h.01"></path></svg>
+        <span style="flex:1"><strong>3 documents expire within 30 days</strong> and 2 people have missing onboarding documents.</span>
+        <a href="Employee.dc.html" style="font-weight:600;color:#6E3F00">Review</a>
+      </div>
+
+      <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column;min-width:0">
+        <div style="display:flex;gap:4px;padding:0 16px;border-bottom:1px solid #E2E6F0;overflow-x:auto">
+          <sc-for list="{{tabs}}" as="t" hint-placeholder-count="6"><span style="{{t.style}}">{{t.label}} <span style="{{t.countStyle}}">{{t.n}}</span></span></sc-for>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;padding:14px 16px;align-items:center">
+          <label style="flex:1 1 240px;max-width:320px;display:flex;align-items:center;gap:8px;height:38px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;color:#5E6583"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4"></path></svg><input type="search" aria-label="Search by name or ID" placeholder="Name or employee ID" style="flex:1;min-width:0;border:0;outline:none;font:inherit;font-size:14px;color:#10183A"></label>
+          <sc-for list="{{filters}}" as="f" hint-placeholder-count="4"><button type="button" style="height:38px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:500;color:#3D4566;display:flex;align-items:center;gap:6px">{{f}}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button></sc-for>
+        </div>
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:980px">
+            <thead><tr style="background:#F7F8FC;color:#5E6583;text-align:left"><th style="padding:10px 16px;font-size:12px;font-weight:600">Person</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Designation</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Type</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Reports to</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Joined</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Status</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Today</th><th style="padding:10px 16px 10px 8px;font-size:12px;font-weight:600">Docs</th></tr></thead>
+            <tbody>
+              <sc-for list="{{people}}" as="p" hint-placeholder-count="12">
+                <tr style="border-top:1px solid #EEF1F7">
+                  <td style="padding:10px 16px"><a href="Employee.dc.html" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:#10183A"><span style="{{p.av}}">{{p.ini}}</span><span><span style="display:block;font-weight:600">{{p.name}}</span><span style="display:block;font-size:12px;color:#5E6583">{{p.id}}</span></span></a></td>
+                  <td style="padding:10px 8px"><div>{{p.title}}</div><div style="font-size:12px;color:#5E6583">{{p.dept}}</div></td>
+                  <td style="padding:10px 8px"><span style="{{p.typeStyle}}">{{p.type}}</span></td>
+                  <td style="padding:10px 8px;color:#3D4566">{{p.mgr}}</td>
+                  <td style="padding:10px 8px;color:#3D4566;white-space:nowrap">{{p.joined}}</td>
+                  <td style="padding:10px 8px"><span style="{{p.stStyle}}">{{p.status}}</span></td>
+                  <td style="padding:10px 8px"><span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#3D4566;white-space:nowrap"><span style="{{p.todayDot}}"></span>{{p.today}}</span></td>
+                  <td style="padding:10px 16px 10px 8px;font-size:12px;white-space:nowrap;font-weight:600;color:{{p.docColor}}">{{p.docs}}</td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-top:1px solid #EEF1F7;font-size:13px;color:#5E6583"><span>Showing 1–12 of 42</span><span style="display:flex;gap:6px"><button type="button" aria-label="Previous page" style="width:32px;height:32px;border-radius:8px;border:1px solid #E2E6F0;background:#FFFFFF;color:#3D4566">‹</button><button type="button" style="width:32px;height:32px;border-radius:8px;border:0;background:#1F3CB3;color:#FFFFFF;font-weight:600">1</button><button type="button" style="width:32px;height:32px;border-radius:8px;border:1px solid #E2E6F0;background:#FFFFFF;color:#3D4566">2</button><button type="button" style="width:32px;height:32px;border-radius:8px;border:1px solid #E2E6F0;background:#FFFFFF;color:#3D4566">3</button><button type="button" aria-label="Next page" style="width:32px;height:32px;border-radius:8px;border:1px solid #E2E6F0;background:#FFFFFF;color:#3D4566">›</button></span></div>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const T = { green: ['#E2F5EC', '#0E6B4B'], amber: ['#FFF1D9', '#8A4F00'], blue: ['#E2E8FC', '#1F3CB3'], gray: ['#EDF0F6', '#4A5270'], purple: ['#F1EAFE', '#6D28D9'], orange: ['#FFEDE3', '#B03A0A'], red: ['#FDE7E7', '#B42323'] };
+    const chip = (t) => 'font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;white-space:nowrap;background:' + T[t][0] + ';color:' + T[t][1];
+    const tag = (t) => 'font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;white-space:nowrap;background:' + T[t][0] + ';color:' + T[t][1];
+    const av = (t) => 'width:34px;height:34px;flex:none;border-radius:999px;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;background:' + T[t][0] + ';color:' + T[t][1];
+    const dot = (c) => 'width:8px;height:8px;border-radius:999px;background:' + c;
+    const D = { in: ['In office', '#12935F'], out: ['Out · client', '#C2410C'], leave: ['On leave', '#284CC7'], none: ['Not checked in', '#B42323'] };
+    const P = [
+      ['Sameer Hassan', 'D4DX-E0001', 'Managing Partner', 'Management', 'Full-time', '—', '12 Mar 2019', 'Active', 'in', 'Complete', 'blue'],
+      ['Nadia Thomas', 'D4DX-E0007', 'HR & Admin Manager', 'HR & Admin', 'Full-time', 'Sameer Hassan', '3 Jun 2020', 'Active', 'in', 'Complete', 'green'],
+      ['Aisha Rahman', 'D4DX-E0019', 'Project Manager', 'Delivery', 'Full-time', 'Sameer Hassan', '14 Jan 2022', 'Active', 'in', 'Complete', 'orange'],
+      ['Vivek Menon', 'D4DX-E0024', 'Team Lead', 'Engineering', 'Full-time', 'Aisha Rahman', '1 Aug 2022', 'Active', 'in', 'Passport exp. 12 Nov', 'purple'],
+      ['Arjun Nair', 'D4DX-E0142', 'Software Engineer', 'Engineering', 'Full-time', 'Vivek Menon', '6 Feb 2024', 'Active', 'in', 'Complete', 'blue'],
+      ['Sanjay Varma', 'D4DX-E0131', 'Frontend Developer', 'Engineering', 'Full-time', 'Vivek Menon', '10 Jul 2023', 'Active', 'out', 'Complete', 'green'],
+      ['Fathima Nasrin', 'D4DX-E0108', 'UI/UX Designer', 'Design', 'Full-time', 'Aisha Rahman', '2 Nov 2022', 'Active', 'in', 'Complete', 'orange'],
+      ['Meera Pillai', 'D4DX-E0150', 'Digital Marketing Exec.', 'Marketing', 'Full-time', 'Joel Mathew', '15 Apr 2024', 'On leave', 'leave', 'Complete', 'purple'],
+      ['Kiran Das', 'D4DX-E0137', 'QA Engineer', 'QA', 'Full-time', 'Aisha Rahman', '4 Sep 2023', 'Notice period', 'none', 'Exit docs due', 'gray'],
+      ['Divya Krishnan', 'D4DX-E0112', 'Finance Executive', 'Finance', 'Full-time', 'Sameer Hassan', '9 Jan 2023', 'Active', 'in', 'Complete', 'blue'],
+      ['Neha Joseph', 'D4DX-T0004', 'Trainee · Frontend', 'Engineering', 'Trainee', 'Vivek Menon', '1 Sep 2026', 'Active', 'in', '1 missing', 'green'],
+      ['Rahul Menon', 'D4DX-I0031', 'UI/UX Intern', 'Design', 'Intern', 'Fathima Nasrin', '1 Aug 2026', 'Active', 'in', 'Complete', 'purple']
+    ];
+    const ST = { 'Active': 'green', 'On leave': 'blue', 'Notice period': 'amber' };
+    const TY = { 'Full-time': 'gray', 'Trainee': 'purple', 'Intern': 'purple' };
+    const tabs = [['All', 42, 1], ['Employees', 31], ['Trainees', 4], ['Interns', 7], ['Notice period', 1], ['Inactive', 3]];
+    return {
+      tabs: tabs.map(([label, n, on]) => ({ label, n, style: 'padding:12px 10px;font-size:13px;white-space:nowrap;' + (on ? 'font-weight:600;color:#1F3CB3;border-bottom:2px solid #1F3CB3;margin-bottom:-1px' : 'font-weight:500;color:#5E6583'), countStyle: 'font-size:11px;padding:1px 6px;border-radius:999px;' + (on ? 'background:#E2E8FC' : 'background:#EDF0F6') })),
+      filters: ['Department', 'Designation', 'Status', 'Reports to'],
+      people: P.map(([name, id, title, dept, type, mgr, joined, status, today, docs, c]) => ({
+        name, id, title, dept, type, mgr, joined, status, docs,
+        ini: name.split(' ').map((w) => w[0]).join(''), av: av(c),
+        typeStyle: tag(TY[type]), stStyle: chip(ST[status]),
+        today: D[today][0], todayDot: dot(D[today][1]),
+        docColor: docs === 'Complete' ? '#0E6B4B' : '#9A5800'
+      }))
+    };
+  }
+}
+</script>
+</body>
+</html>

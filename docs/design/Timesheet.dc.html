@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Weekly timesheet</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="employee" active="timesheets" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="employee" hint-size="100%,64px"></dc-import>
+    <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:20px;width:100%;max-width:1280px;box-sizing:border-box">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px">
+        <div>
+          <div style="font-size:13px;color:#5E6583">My work</div>
+          <h1 style="margin:2px 0 0;font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">Timesheet</h1>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+          <div style="display:flex;align-items:center;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;height:40px">
+            <button type="button" aria-label="Previous week" style="width:36px;height:38px;border:0;background:transparent;color:#3D4566">‹</button>
+            <span style="font-size:14px;font-weight:600;padding:0 8px">Week 43 · 19 – 25 Oct</span>
+            <button type="button" aria-label="Next week" style="width:36px;height:38px;border:0;background:transparent;color:#3D4566">›</button>
+          </div>
+          <span style="font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;background:#EDF0F6;color:#4A5270">Draft</span>
+          <button type="button" style="height:40px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:500;color:#10183A">Copy last week</button>
+          <button type="button" style="height:40px;padding:0 16px;border:0;border-radius:10px;background:#1F3CB3;font:inherit;font-size:14px;font-weight:600;color:#FFFFFF">Submit for review</button>
+        </div>
+      </div>
+
+      <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column;min-width:0">
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:1000px">
+            <thead>
+              <tr style="background:#F7F8FC;color:#5E6583;text-align:left">
+                <th style="padding:10px 16px;font-size:12px;font-weight:600">Project · task</th>
+                <th style="padding:10px 8px;font-size:12px;font-weight:600">Work description</th>
+                <sc-for list="{{days}}" as="d" hint-placeholder-count="7"><th style="{{d.th}}">{{d.l}}<br><span style="font-weight:500">{{d.n}}</span></th></sc-for>
+                <th style="padding:10px 16px 10px 8px;font-size:12px;font-weight:600;text-align:right">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              <sc-for list="{{rows}}" as="r" hint-placeholder-count="4">
+                <tr style="border-top:1px solid #EEF1F7">
+                  <td style="padding:10px 16px"><div style="font-weight:600">{{r.task}}</div><div style="font-size:12px;color:#5E6583">{{r.proj}}</div></td>
+                  <td style="padding:10px 8px"><input type="text" aria-label="Work description" value="{{r.desc}}" style="width:100%;min-width:180px;height:34px;padding:0 10px;border:1px solid #E2E6F0;border-radius:8px;font:inherit;font-size:13px;color:#10183A;box-sizing:border-box"></td>
+                  <sc-for list="{{r.h}}" as="c" hint-placeholder-count="7"><td style="padding:8px 4px;text-align:center"><input type="text" aria-label="{{c.a}}" value="{{c.v}}" style="{{c.s}}"></td></sc-for>
+                  <td style="padding:10px 16px 10px 8px;text-align:right;font-weight:700">{{r.t}}</td>
+                </tr>
+              </sc-for>
+              <tr style="border-top:1px solid #EEF1F7"><td colspan="11" style="padding:10px 16px"><button type="button" style="height:34px;padding:0 12px;border:1px dashed #C4CAD9;border-radius:8px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:600;color:#1F3CB3">+ Add row</button></td></tr>
+            </tbody>
+            <tfoot>
+              <tr style="border-top:2px solid #E2E6F0;background:#F7F8FC">
+                <td colspan="2" style="padding:10px 16px;font-weight:700">Logged</td>
+                <sc-for list="{{tot}}" as="t" hint-placeholder-count="7"><td style="padding:10px 4px;text-align:center;font-weight:700">{{t}}</td></sc-for>
+                <td style="padding:10px 16px 10px 8px;text-align:right;font-family:Montserrat,sans-serif;font-weight:600;font-size:16px">17.5 h</td>
+              </tr>
+              <tr style="background:#F7F8FC">
+                <td colspan="2" style="padding:4px 16px 12px;font-size:12px;color:#5E6583">Attendance hours (reference only)</td>
+                <sc-for list="{{att}}" as="t" hint-placeholder-count="7"><td style="padding:4px 4px 12px;text-align:center;font-size:12px;color:#5E6583">{{t}}</td></sc-for>
+                <td style="padding:4px 16px 12px 8px;text-align:right;font-size:12px;color:#5E6583">19h 15m</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </section>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">
+        <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:12px">
+          <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Estimated vs actual</h2>
+          <sc-for list="{{eva}}" as="e" hint-placeholder-count="3">
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <div style="display:flex;justify-content:space-between;font-size:13px"><span style="font-weight:600">{{e.n}}</span><span style="{{e.c}}">{{e.v}}</span></div>
+              <div style="position:relative;height:10px;border-radius:999px;background:#EDF0F6"><div style="{{e.bar}}"></div><div style="{{e.mark}}"></div></div>
+            </div>
+          </sc-for>
+          <div style="font-size:12px;color:#5E6583">Bar = hours logged to date · line = estimate</div>
+        </section>
+        <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:4px">
+          <h2 style="margin:0 0 8px;font-family:Montserrat,sans-serif;font-weight:600;font-size:17px">Previous weeks</h2>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-top:1px solid #EEF1F7;font-size:13px"><span><strong>Week 42</strong> · 12 – 18 Oct</span><span>41.5 h <span style="margin-left:8px;font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;background:#E2F5EC;color:#0E6B4B">Approved</span></span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-top:1px solid #EEF1F7;font-size:13px"><span><strong>Week 41</strong> · 5 – 11 Oct</span><span>40.0 h <span style="margin-left:8px;font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;background:#E2F5EC;color:#0E6B4B">Approved</span></span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-top:1px solid #EEF1F7;font-size:13px"><span><strong>Week 40</strong> · 28 Sep – 4 Oct<br><span style="color:#5E6583;font-size:12px">Rejected: split client meeting time · resubmitted</span></span><span>32.0 h <span style="margin-left:8px;font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;background:#E2F5EC;color:#0E6B4B">Approved</span></span></div>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1050}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const D = [['Mon', 19], ['Tue', 20], ['Wed', 21], ['Thu', 22], ['Fri', 23], ['Sat', 24], ['Sun', 25]];
+    const cell = (v, i) => 'width:52px;height:34px;text-align:center;border-radius:8px;font:inherit;font-size:13px;color:#10183A;box-sizing:border-box;' + (i === 2 ? 'border:2px solid #284CC7;background:#FFFFFF' : i > 4 ? 'border:1px solid #EEF1F7;background:#F7F8FC' : 'border:1px solid #E2E6F0;background:#FFFFFF');
+    const R = [
+      ['TSK-1798 · Payment gateway retry logic', 'PRJ-0241 Greenleaf e-commerce', 'Retry with backoff, idempotency keys', [4, 3, 1.5, '', '', '', '']],
+      ['TSK-1832 · Order history API pagination', 'PRJ-0241 Greenleaf e-commerce', 'Cursor pagination + tests', [2, 2.5, 1, '', '', '', '']],
+      ['TSK-1815 · Appointment reminders cron', 'PRJ-0238 Nexora patient app', 'Review fixes from Vivek', [1.5, 0.5, '', '', '', '', '']],
+      ['Internal · meetings', 'Non-billable', 'Stand-ups, sprint demo', [0.5, 1, '', '', '', '', '']]
+    ];
+    const sum = (a) => a.reduce((s, x) => s + (Number(x) || 0), 0);
+    const ev = (n, act, est) => ({ n, v: act + ' h of ' + est + ' h', c: 'font-size:13px;font-weight:600;color:' + (act > est ? '#B42323' : '#3D4566'), bar: 'height:10px;border-radius:999px;background:' + (act > est ? '#D0691F' : '#284CC7') + ';width:' + Math.min(100, Math.round(act / Math.max(act, est) * 100)) + '%', mark: 'position:absolute;top:-3px;width:2px;height:16px;background:#10183A;left:' + Math.round(est / Math.max(act, est) * 100) + '%' });
+    return {
+      days: D.map(([l, n], i) => ({ l, n, th: 'padding:10px 4px;font-size:12px;font-weight:600;text-align:center;' + (i === 2 ? 'color:#1F3CB3' : '') })),
+      rows: R.map(([task, proj, desc, h]) => ({ task, proj, desc, t: sum(h) + ' h', h: h.map((v, i) => ({ v: String(v), a: task + ' ' + D[i][0], s: cell(v, i) })) })),
+      tot: ['8', '7', '2.5', '—', '—', '—', '—'],
+      att: ['8h 42m', '8h 05m', '2h 28m', '', '', '', ''],
+      eva: [ev('TSK-1798 Payment retry', 18.5, 16), ev('TSK-1832 Order history API', 5.5, 10), ev('TSK-1815 Reminders cron', 9, 12)]
+    };
+  }
+}
+</script>
+</body>
+</html>

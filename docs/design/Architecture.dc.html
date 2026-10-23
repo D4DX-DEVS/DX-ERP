@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Architecture · modules, roles, workflows</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div style="width:1440px;height:1500px;box-sizing:border-box;background:#FFFFFF;font-family:Inter,system-ui,sans-serif;color:#10183A;padding:56px 64px;display:flex;flex-direction:column;gap:32px">
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:32px">
+    <div>
+      <div style="font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#1F3CB3">Foundations</div>
+      <h1 style="margin:6px 0 0;font-family:Montserrat,sans-serif;font-weight:700;font-size:36px">Architecture</h1>
+    </div>
+    <p style="margin:0;max-width:600px;font-size:14px;line-height:1.6;color:#3D4566">Modules, who can reach them, and the eight business workflows the screens are built around. Navigation is generated from this matrix, so each role only sees what it may open.</p>
+  </div>
+
+  <div style="display:grid;grid-template-columns:minmax(0,1.75fr) minmax(0,1fr);gap:32px">
+    <section style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:20px">Role access matrix</h2>
+        <div style="display:flex;gap:12px;font-size:12px;color:#3D4566">
+          <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:22px;height:22px;border-radius:6px;background:#1F3CB3;color:#FFFFFF;font-weight:700;font-size:11px;display:inline-flex;align-items:center;justify-content:center">F</span>Full</span>
+          <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:22px;height:22px;border-radius:6px;background:#C4D0F7;color:#0F2291;font-weight:700;font-size:11px;display:inline-flex;align-items:center;justify-content:center">A</span>Approve / team</span>
+          <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:22px;height:22px;border-radius:6px;background:#EDF0F6;color:#4A5270;font-weight:700;font-size:11px;display:inline-flex;align-items:center;justify-content:center">V</span>View</span>
+          <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:22px;height:22px;border-radius:6px;border:1.5px solid #5B78E0;color:#1F3CB3;font-weight:700;font-size:11px;display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box">O</span>Own records</span>
+        </div>
+      </div>
+      <div style="border:1px solid #E2E6F0;border-radius:14px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="background:#F7F8FC">
+              <th scope="col" style="text-align:left;padding:10px 14px;font-size:12px;font-weight:600;color:#5E6583">Module</th>
+              <sc-for list="{{roles}}" as="r" hint-placeholder-count="10"><th scope="col" style="padding:10px 4px;font-size:11px;font-weight:600;color:#3D4566;text-align:center;line-height:1.2">{{r}}</th></sc-for>
+            </tr>
+          </thead>
+          <tbody>
+            <sc-for list="{{matrix}}" as="row" hint-placeholder-count="17">
+              <tr style="border-top:1px solid #EEF1F7">
+                <th scope="row" style="text-align:left;padding:6px 14px;font-weight:500;font-size:13px">{{row.name}}</th>
+                <sc-for list="{{row.cells}}" as="c" hint-placeholder-count="10"><td style="padding:5px 4px;text-align:center"><span style="{{c.style}}">{{c.t}}</span></td></sc-for>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </div>
+      <p style="margin:0;font-size:12px;color:#5E6583;line-height:1.5">Interns and trainees never see salary, payroll, finance, restricted client data or settings unless a Super Admin grants it explicitly. Every grant is written to the audit trail.</p>
+    </section>
+
+    <section style="display:flex;flex-direction:column;gap:12px">
+      <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:20px">Module map</h2>
+      <sc-for list="{{domains}}" as="d" hint-placeholder-count="6">
+        <div style="border:1px solid #E2E6F0;border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px">
+          <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#1F3CB3">{{d.name}}</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            <sc-for list="{{d.mods}}" as="m" hint-placeholder-count="4">
+              <span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:500;padding:4px 8px;border-radius:8px;background:#F4F6FB;color:#10183A">{{m.n}}<span style="{{m.ps}}">{{m.p}}</span></span>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+      <div style="border-radius:12px;padding:14px;background:#0A1450;color:#FFFFFF;display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#A9B3DD">Data rules the UI must show</div>
+        <div style="font-size:12.5px;line-height:1.5;color:#E3E9FC">Office check-in/out stays separate from movement Out/In.</div>
+        <div style="font-size:12.5px;line-height:1.5;color:#E3E9FC">Time outside = In-Time − Out-Time, on full date-times (crosses midnight).</div>
+        <div style="font-size:12.5px;line-height:1.5;color:#E3E9FC">An open movement has no final duration until In-Time is recorded.</div>
+        <div style="font-size:12.5px;line-height:1.5;color:#E3E9FC">Corrections need a reason; original timestamps are kept.</div>
+        <div style="font-size:12.5px;line-height:1.5;color:#E3E9FC">Timesheets stay separate from attendance and movement.</div>
+      </div>
+    </section>
+  </div>
+
+  <section style="display:flex;flex-direction:column;gap:12px">
+    <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:20px">Key business workflows</h2>
+    <div style="display:flex;flex-direction:column;border-top:1px solid #EEF1F7">
+      <sc-for list="{{flows}}" as="f" hint-placeholder-count="8">
+        <div style="display:flex;gap:16px;align-items:center;padding:9px 0;border-bottom:1px solid #EEF1F7">
+          <div style="width:190px;flex:none;font-size:13px;font-weight:600">{{f.name}}</div>
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px">
+            <sc-for list="{{f.steps}}" as="s" hint-placeholder-count="6">
+              <span style="display:inline-flex;align-items:center;gap:6px">
+                <span style="font-size:12px;padding:4px 9px;border-radius:999px;background:#F1F4FE;color:#172E94;font-weight:500">{{s.t}}</span>
+                <sc-if value="{{s.more}}" hint-placeholder-val="{{true}}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8A93B2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></sc-if>
+              </span>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1500}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const S = {
+      F: 'width:26px;height:24px;border-radius:6px;background:#1F3CB3;color:#FFFFFF;font-weight:700;font-size:11px;display:inline-flex;align-items:center;justify-content:center',
+      A: 'width:26px;height:24px;border-radius:6px;background:#C4D0F7;color:#0F2291;font-weight:700;font-size:11px;display:inline-flex;align-items:center;justify-content:center',
+      V: 'width:26px;height:24px;border-radius:6px;background:#EDF0F6;color:#4A5270;font-weight:700;font-size:11px;display:inline-flex;align-items:center;justify-content:center',
+      O: 'width:26px;height:24px;border-radius:6px;border:1.5px solid #5B78E0;box-sizing:border-box;color:#1F3CB3;font-weight:700;font-size:11px;display:inline-flex;align-items:center;justify-content:center',
+      '-': 'width:26px;height:24px;color:#A3A9BE;font-size:13px;display:inline-flex;align-items:center;justify-content:center'
+    };
+    const rows = [
+      ['Dashboards', 'FFOOOOOOOO'], ['Staff & HR records', 'FAFV-VVOOO'], ['Interns & trainees', 'FVFV-AA-OO'], ['Attendance', 'FVFVOAAOOO'],
+      ['Movement register', 'FAFOOAAOOO'], ['Leave', 'FAFOOAAOOO'], ['Payroll & stipends', 'FAVF---OOO'], ['Projects & tasks', 'FV-VVFAOOO'],
+      ['Timesheets', 'FVVVOAAOOO'], ['QA & issues', 'FV---FFOOO'], ['CRM & leads', 'FV-VFV----'], ['Proposals & contracts', 'FA-VFV----'],
+      ['Invoices & payments', 'FA-FVV----'], ['Expenses', 'FAAFOAOOO-'], ['Assets', 'FVFVOOOOOO'], ['Reports', 'FFVVVVV---'], ['Administration', 'FV--------']
+    ];
+    const P = (p) => 'font-size:10px;font-weight:700;padding:1px 5px;border-radius:4px;' + (p === 'P1' ? 'background:#E2E8FC;color:#1F3CB3' : p === 'P2' ? 'background:#FFF1D9;color:#8A4F00' : 'background:#EDF0F6;color:#4A5270');
+    const d = (name, mods) => ({ name, mods: mods.map(([n, p]) => ({ n, p, ps: P(p) })) });
+    const f = (name, steps) => ({ name, steps: steps.map((t, i) => ({ t, more: i < steps.length - 1 })) });
+    return {
+      roles: ['Super Admin', 'Mgmt', 'HR / Admin', 'Finance', 'BD', 'Project Mgr', 'Team Lead', 'Employee', 'Trainee', 'Intern'],
+      matrix: rows.map(([name, code]) => ({ name, cells: code.split('').map((t) => ({ t: t === '-' ? '—' : t, style: S[t] })) })),
+      domains: [
+        d('Core platform', [['Sign-in & access', 'P1'], ['Dashboards', 'P1'], ['Notifications', 'P1'], ['Search', 'P1'], ['Settings & audit', 'P1']]),
+        d('People', [['Staff & HR', 'P1'], ['Interns & trainees', 'P1'], ['Assets', 'P3']]),
+        d('Time', [['Attendance', 'P1'], ['Movement register', 'P1'], ['Leave', 'P1'], ['Timesheets', 'P1']]),
+        d('Delivery', [['Projects & tasks', 'P1'], ['QA & issues', 'P3']]),
+        d('Commercial', [['Clients', 'P1'], ['Lead pipeline', 'P2'], ['Proposals & contracts', 'P2']]),
+        d('Finance', [['Invoices & payments', 'P2'], ['Expenses', 'P2'], ['Payroll & stipends', 'P2'], ['Reports', 'P1']])
+      ],
+      flows: [
+        f('Onboarding', ['Record created', 'Department & role', 'Documents collected', 'Manager / mentor assigned', 'Access activated', 'Dashboard']),
+        f('Attendance & movement', ['Office check-in', 'Movement entry', 'Out-Time', 'Purpose & expected return', 'In-Time', 'Duration calculated', 'Reports']),
+        f('Leave', ['Request', 'Manager review', 'HR approval if required', 'Balance updated', 'Attendance updated', 'Notification']),
+        f('Client to project', ['Lead', 'Requirements', 'Proposal', 'Client approval', 'Project created', 'Team assigned', 'Delivery', 'Invoice', 'Payment']),
+        f('Project delivery', ['Planning', 'Task allocation', 'Development', 'QA testing', 'Defect fixes', 'Client review', 'Final delivery', 'Closure']),
+        f('Monthly payroll', ['Attendance & leave verified', 'Payroll / stipend calculated', 'Finance review', 'Management approval', 'Payment recorded', 'Payslips issued']),
+        f('Expense approval', ['Submitted', 'Receipts attached', 'Review', 'Approve / reject', 'Reimbursed', 'Reported']),
+        f('Internship', ['Registration', 'Mentor assigned', 'Objectives', 'Tasks', 'Work submitted', 'Mentor review', 'Evaluation', 'Completion & certificate'])
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

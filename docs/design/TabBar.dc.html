@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Shell · Mobile tab bar</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<nav aria-label="Main" style="width:390px;height:84px;box-sizing:border-box;background:#FFFFFF;border-top:1px solid #E2E6F0;font-family:Inter,system-ui,sans-serif;display:flex;padding:6px 8px 22px">
+  <sc-for list="{{tabs}}" as="t" hint-placeholder-count="5">
+    <a href="{{t.href}}" style="{{t.style}}">
+      <span style="position:relative;display:flex">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{t.d}}"></path></svg>
+        <sc-if value="{{t.badge}}" hint-placeholder-val="{{false}}"><span style="position:absolute;top:-4px;right:-8px;min-width:16px;height:16px;padding:0 4px;box-sizing:border-box;border-radius:999px;background:#C2410C;color:#FFFFFF;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center">{{t.badge}}</span></sc-if>
+      </span>
+      <span>{{t.label}}</span>
+    </a>
+  </sc-for>
+</nav>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"active":{"editor":"enum","options":["home","time","tasks","inbox","more"],"default":"home"},"role":{"editor":"enum","options":["management","employee","intern"],"default":"management"},"$preview":{"width":390,"height":84}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const active = this.props.active ?? 'home';
+    const role = this.props.role ?? 'management';
+    const self = role !== 'management';
+    const home = role === 'employee' ? 'Dash-Employee-m' : role === 'intern' ? 'Dash-Intern-m' : 'Dash-Mgmt-m';
+    const T = [
+      ['home', 'Home', home, 'M3 11l9-7 9 7M5 9.5V20h14V9.5M10 20v-6h4v6', ''],
+      ['time', 'Time', self ? 'Attendance-m' : 'Attendance-Team-m', 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2', ''],
+      ['tasks', 'Tasks', 'Tasks-m', 'M9 11l3 3 8-8M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9', ''],
+      ['inbox', 'Inbox', 'Notifications-m', 'M6 9a6 6 0 0 1 12 0c0 6 2.5 7.5 2.5 7.5h-17S6 15 6 9zM10 20a2 2 0 0 0 4 0', '6'],
+      ['more', 'More', 'Menu-m', 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z', '']
+    ];
+    const base = 'flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:11px;font-weight:600;text-decoration:none;border-radius:10px;';
+    return { tabs: T.map(([k, label, f, d, badge]) => ({ label, d, badge, href: f + '.dc.html', style: base + (k === active ? 'color:#1F3CB3' : 'color:#5E6583') })) };
+  }
+}
+</script>
+</body>
+</html>

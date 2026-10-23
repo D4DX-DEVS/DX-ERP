@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Invoices &amp; receivables</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="management" active="invoices" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="management" hint-size="100%,64px"></dc-import>
+    <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:18px;width:100%;max-width:1280px;box-sizing:border-box">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px">
+        <div>
+          <div style="font-size:13px;color:#5E6583">Finance</div>
+          <h1 style="margin:2px 0 0;font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">Invoices &amp; payments</h1>
+        </div>
+        <div style="display:flex;gap:10px">
+          <button type="button" style="height:40px;padding:0 14px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:14px;font-weight:600;color:#10183A">Record payment</button>
+          <a href="Invoice.dc.html" style="height:40px;padding:0 16px;border-radius:10px;background:#1F3CB3;color:#FFFFFF;font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px;text-decoration:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New invoice</a>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:14px 16px"><div style="font-size:13px;color:#5E6583">Invoiced · October</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">₹18,42,500</div><div style="font-size:12px;color:#3D4566">9 invoices</div></div>
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:14px 16px"><div style="font-size:13px;color:#5E6583">Received · October</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px;color:#0E6B4B">₹12,60,000</div><div style="font-size:12px;color:#3D4566">11 payments</div></div>
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:14px 16px"><div style="font-size:13px;color:#5E6583">Outstanding receivables</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px">₹9,85,400</div><div style="font-size:12px;color:#3D4566">7 invoices · 5 clients</div></div>
+        <div style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:14px 16px"><div style="font-size:13px;color:#5E6583">Overdue</div><div style="font-family:Montserrat,sans-serif;font-weight:600;font-size:24px;color:#B42323">₹3,10,000</div><div style="font-size:12px;color:#3D4566">3 invoices · oldest 41 days</div></div>
+      </div>
+
+      <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:16px">Receivables ageing</h2><div style="display:flex;gap:14px;font-size:12px;color:#3D4566"><span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:3px;background:#284CC7"></span>Not due ₹6,75,400</span><span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:3px;background:#D0691F"></span>1–30 days ₹1,95,000</span><span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:3px;background:#B42323"></span>31–60 days ₹1,15,000</span></div></div>
+        <div style="display:flex;height:14px;gap:2px"><span title="Not due ₹6,75,400" style="flex:675;background:#284CC7;border-radius:4px 0 0 4px"></span><span title="1–30 days ₹1,95,000" style="flex:195;background:#D0691F"></span><span title="31–60 days ₹1,15,000" style="flex:115;background:#B42323;border-radius:0 4px 4px 0"></span></div>
+      </section>
+
+      <section style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column;min-width:0">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:14px 16px;border-bottom:1px solid #EEF1F7">
+          <sc-for list="{{tabs}}" as="t" hint-placeholder-count="6"><span style="{{t.s}}">{{t.l}} {{t.n}}</span></sc-for>
+          <span style="flex:1"></span>
+          <button type="button" style="height:34px;padding:0 12px;border:1px solid #D5DAE8;border-radius:9px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:500;color:#3D4566">Export ▾</button>
+        </div>
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:960px">
+            <thead><tr style="background:#F7F8FC;color:#5E6583;text-align:left"><th style="padding:10px 16px;font-size:12px;font-weight:600">Invoice</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Client · milestone</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Issued</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Due</th><th style="padding:10px 8px;font-size:12px;font-weight:600;text-align:right">Amount</th><th style="padding:10px 8px;font-size:12px;font-weight:600;text-align:right">Balance</th><th style="padding:10px 16px 10px 8px;font-size:12px;font-weight:600">Status</th></tr></thead>
+            <tbody>
+              <sc-for list="{{rows}}" as="r" hint-placeholder-count="9">
+                <tr style="border-top:1px solid #EEF1F7">
+                  <td style="padding:11px 16px"><a href="Invoice.dc.html" style="font-weight:600;text-decoration:none;font-family:ui-monospace,Menlo,monospace;font-size:12px">{{r.no}}</a></td>
+                  <td style="padding:11px 8px"><div style="font-weight:600">{{r.c}}</div><div style="font-size:12px;color:#5E6583">{{r.m}}</div></td>
+                  <td style="padding:11px 8px;white-space:nowrap;color:#3D4566">{{r.d}}</td>
+                  <td style="padding:11px 8px;white-space:nowrap;color:{{r.dc}};font-weight:{{r.dw}}">{{r.due}}</td>
+                  <td style="padding:11px 8px;text-align:right">{{r.a}}</td>
+                  <td style="padding:11px 8px;text-align:right;font-weight:600">{{r.b}}</td>
+                  <td style="padding:11px 16px 11px 8px"><span style="{{r.chip}}">{{r.s}}</span></td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1150}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const T = { gray: ['#EDF0F6', '#4A5270'], blue: ['#E2E8FC', '#1F3CB3'], amber: ['#FFF1D9', '#8A4F00'], green: ['#E2F5EC', '#0E6B4B'], red: ['#FDE7E7', '#B42323'] };
+    const S = { 'Draft': 'gray', 'Issued': 'blue', 'Partially paid': 'amber', 'Paid': 'green', 'Overdue': 'red', 'Cancelled': 'gray' };
+    const chip = (s) => 'font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;white-space:nowrap;background:' + T[S[s]][0] + ';color:' + T[S[s]][1];
+    const R = [
+      ['INV/2026-27/0114', 'Nexora Health Clinics', 'Sprint 7–8 · PRJ-0238', '20 Oct', '4 Nov', '₹3,54,000', '₹3,54,000', 'Issued'],
+      ['INV/2026-27/0113', 'Orbit Motors', 'Oct retainer · PRJ-0245', '15 Oct', '30 Oct', '₹1,18,000', '₹1,18,000', 'Issued'],
+      ['INV/2026-27/0112', 'Greenleaf Organics', 'Catalogue & search · 30%', '6 Oct', '21 Oct', '₹5,13,300', '₹2,03,400', 'Partially paid'],
+      ['INV/2026-27/0109', 'Seaside Hospitality', 'Booking engine · UAT', '22 Sep', '7 Oct', '₹1,95,000', '₹1,95,000', 'Overdue'],
+      ['INV/2026-27/0104', 'Lumen Academy', 'Phase 2 · LMS', '10 Sep', '25 Sep', '₹1,15,000', '₹1,15,000', 'Overdue'],
+      ['INV/2026-27/0102', 'BlueTide Logistics', 'Discovery advance', '1 Oct', '16 Oct', '₹1,15,640', '—', 'Paid'],
+      ['INV/2026-27/0098', 'Greenleaf Organics', 'Discovery & design · 30%', '18 Aug', '2 Sep', '₹5,13,300', '—', 'Paid'],
+      ['INV/2026-27/0115', 'Arabian Spice Traders', 'Proposal advance', '—', '—', '₹59,000', '₹59,000', 'Draft'],
+      ['INV/2026-27/0101', 'Kayal Ayurveda', 'Duplicate of 0100', '28 Sep', '—', '₹47,200', '—', 'Cancelled']
+    ];
+    const tabs = [['All', 42, 1], ['Draft', 1], ['Issued', 2], ['Partially paid', 1], ['Overdue', 3], ['Paid', 34]];
+    return {
+      tabs: tabs.map(([l, n, on]) => ({ l, n, s: 'height:32px;padding:0 12px;border-radius:999px;font-size:13px;display:flex;align-items:center;' + (on ? 'background:#1F3CB3;color:#FFFFFF;font-weight:600' : 'border:1px solid #D5DAE8;color:#3D4566;font-weight:500') })),
+      rows: R.map(([no, c, m, d, due, a, b, s]) => ({ no, c, m, d, due, a, b, s, chip: chip(s), dc: s === 'Overdue' ? '#B42323' : '#3D4566', dw: s === 'Overdue' ? '600' : '400' }))
+    };
+  }
+}
+</script>
+</body>
+</html>

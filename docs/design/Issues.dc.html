@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>QA &amp; issue tracker</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Montserrat:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}a{color:#1F3CB3}a:hover{color:#0F2291}</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-wrap:wrap;background:#F4F6FB;font-family:Inter,system-ui,sans-serif;color:#10183A">
+  <div style="flex:1 0 248px;background:#0A1450;display:flex">
+    <dc-import name="Sidebar" role="management" active="qa" hint-size="248px,1000px"></dc-import>
+  </div>
+  <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <dc-import name="Topbar" role="management" hint-size="100%,64px"></dc-import>
+    <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:18px;width:100%;max-width:1280px;box-sizing:border-box">
+      <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:16px">
+        <div>
+          <div style="font-size:13px;color:#5E6583">Work</div>
+          <h1 style="margin:2px 0 0;font-family:Montserrat,sans-serif;font-weight:600;font-size:26px">QA &amp; issues</h1>
+        </div>
+        <button type="button" style="height:40px;padding:0 16px;border:0;border-radius:10px;background:#1F3CB3;font:inherit;font-size:14px;font-weight:600;color:#FFFFFF;display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Report issue</button>
+      </div>
+
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        <sc-for list="{{pipe}}" as="p" hint-placeholder-count="8"><span style="{{p.s}}"><span style="{{p.dot}}"></span>{{p.l}} <strong>{{p.n}}</strong></span></sc-for>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:16px;align-items:start">
+        <section style="grid-column:span 2;background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;display:flex;flex-direction:column;min-width:0">
+          <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:14px 16px;border-bottom:1px solid #EEF1F7">
+            <button type="button" style="height:36px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:600;color:#10183A">Greenleaf e-commerce ▾</button>
+            <button type="button" style="height:36px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:500;color:#3D4566">Severity ▾</button>
+            <button type="button" style="height:36px;padding:0 12px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:500;color:#3D4566">Assignee ▾</button>
+          </div>
+          <div style="overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:700px">
+              <thead><tr style="background:#F7F8FC;color:#5E6583;text-align:left"><th style="padding:10px 16px;font-size:12px;font-weight:600">Issue</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Severity</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Assignee</th><th style="padding:10px 8px;font-size:12px;font-weight:600">Target</th><th style="padding:10px 16px 10px 8px;font-size:12px;font-weight:600">Status</th></tr></thead>
+              <tbody>
+                <sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+                  <tr style="{{r.rs}}">
+                    <td style="padding:11px 16px"><div style="font-weight:600">{{r.t}}</div><div style="font-size:12px;color:#5E6583">{{r.id}} · {{r.task}}</div></td>
+                    <td style="padding:11px 8px"><span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:{{r.sc}}"><span style="{{r.sd}}"></span>{{r.sev}}</span></td>
+                    <td style="padding:11px 8px;color:#3D4566">{{r.a}}</td>
+                    <td style="padding:11px 8px;white-space:nowrap;color:{{r.tc}}">{{r.due}}</td>
+                    <td style="padding:11px 16px 11px 8px"><span style="{{r.chip}}">{{r.s}}</span></td>
+                  </tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <aside style="background:#FFFFFF;border:1px solid #E2E6F0;border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:14px;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:12px;color:#5E6583;font-family:ui-monospace,Menlo,monospace">QA-0412</span><span style="font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;background:#FDE7E7;color:#B42323">Reopened</span></div>
+          <h2 style="margin:0;font-family:Montserrat,sans-serif;font-weight:600;font-size:18px;line-height:1.3">Coupon discount rounds cart total up by ₹1</h2>
+          <div style="display:flex;flex-wrap:wrap;gap:16px;font-size:12px;color:#5E6583"><span>Severity <strong style="color:#B03A0A">High</strong></span><span>Priority <strong style="color:#10183A">P1</strong></span><span>Task <a href="Task.dc.html" style="font-weight:600;text-decoration:none">TSK-1840</a></span></div>
+          <div style="display:flex;flex-direction:column;gap:6px"><h3 style="margin:0;font-size:13px;font-weight:600">Steps to reproduce</h3><ol style="margin:0;padding-left:18px;font-size:13px;color:#3D4566;line-height:1.6"><li>Add 3 × Organic honey 250 g to cart</li><li>Apply coupon GREEN15</li><li>Total shows ₹1,148; expected ₹1,147.50 → ₹1,148 only at payment</li></ol></div>
+          <div style="height:120px;border-radius:12px;background:#F4F6FB;border:1px dashed #C4CAD9;display:flex;align-items:center;justify-content:center;font-size:12px;color:#5E6583">Screenshot · cart-total.png</div>
+          <div style="display:flex;flex-direction:column;gap:8px;font-size:13px;padding-top:10px;border-top:1px solid #EEF1F7">
+            <div style="display:flex;justify-content:space-between"><span style="color:#5E6583">Reported</span><span>Kiran Das · 14 Oct</span></div>
+            <div style="display:flex;justify-content:space-between"><span style="color:#5E6583">Assigned</span><span>Arjun Nair</span></div>
+            <div style="display:flex;justify-content:space-between"><span style="color:#5E6583">Target</span><span style="color:#B42323;font-weight:600">Thu 22 Oct</span></div>
+            <div style="display:flex;justify-content:space-between"><span style="color:#5E6583">History</span><span>Fixed 19 Oct → reopened 20 Oct</span></div>
+          </div>
+          <div style="display:flex;gap:8px"><button type="button" style="flex:1;height:40px;border:1px solid #D5DAE8;border-radius:10px;background:#FFFFFF;font:inherit;font-size:13px;font-weight:600;color:#10183A">Comment</button><button type="button" style="flex:1;height:40px;border:0;border-radius:10px;background:#1F3CB3;font:inherit;font-size:13px;font-weight:600;color:#FFFFFF">Mark fixed</button></div>
+        </aside>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1050}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const T = { red: ['#FDE7E7', '#B42323'], purple: ['#F1EAFE', '#6D28D9'], blue: ['#E2E8FC', '#1F3CB3'], green: ['#E2F5EC', '#0E6B4B'], amber: ['#FFF1D9', '#8A4F00'], gray: ['#EDF0F6', '#4A5270'] };
+    const chip = (t) => 'font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;white-space:nowrap;background:' + T[t][0] + ';color:' + T[t][1];
+    const SV = { Critical: '#B42323', High: '#B03A0A', Medium: '#8A4F00', Low: '#5E6583' };
+    const ST = { 'Open': 'red', 'Assigned': 'purple', 'In progress': 'blue', 'Fixed': 'green', 'Ready for testing': 'amber', 'Reopened': 'red', 'Verified': 'green', 'Closed': 'gray' };
+    const P = [['Open', 4], ['Assigned', 3], ['In progress', 3], ['Fixed', 2], ['Ready for testing', 3], ['Reopened', 2], ['Verified', 5], ['Closed', 61]];
+    const R = [
+      ['QA-0412', 'Coupon discount rounds cart total up by ₹1', 'TSK-1840', 'High', 'Arjun Nair', 'Thu 22 Oct', 0, 'Reopened', 1],
+      ['QA-0415', 'Payment page freezes on gateway timeout', 'TSK-1798', 'Critical', 'Arjun Nair', 'Wed 21 Oct', 1, 'In progress', 0],
+      ['QA-0409', 'Address autocomplete misses Kerala PIN codes', 'TSK-1829', 'High', 'Sanjay Varma', 'Fri 23 Oct', 0, 'Ready for testing', 0],
+      ['QA-0417', 'Product images blurry on retina', 'TSK-1801', 'Medium', 'Neha Joseph', 'Mon 26 Oct', 0, 'Assigned', 0],
+      ['QA-0418', 'Order email shows UTC time', 'TSK-1846', 'Medium', 'Unassigned', '—', 0, 'Open', 0],
+      ['QA-0406', 'Brand filter count off by one', 'TSK-1801', 'Low', 'Sanjay Varma', 'Done', 0, 'Fixed', 0],
+      ['QA-0401', 'Search returns sold-out items first', 'TSK-1795', 'Medium', 'Anjali George', 'Done', 0, 'Verified', 0]
+    ];
+    return {
+      pipe: P.map(([l, n]) => ({ l, n, s: 'display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:999px;background:#FFFFFF;border:1px solid #E2E6F0;font-size:13px;color:#3D4566', dot: 'width:8px;height:8px;border-radius:999px;background:' + T[ST[l]][1] })),
+      rows: R.map(([id, t, task, sev, a, due, late, s, sel]) => ({ id, t, task, sev, a, due, s, chip: chip(ST[s]), sc: SV[sev], sd: 'width:8px;height:8px;border-radius:999px;background:' + SV[sev], tc: late ? '#B42323' : '#3D4566', rs: 'border-top:1px solid #EEF1F7;' + (sel ? 'background:#F1F4FE' : '') }))
+    };
+  }
+}
+</script>
+</body>
+</html>
