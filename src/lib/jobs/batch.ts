@@ -1,10 +1,8 @@
 import "server-only";
-import { and } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { db } from "@/lib/db";
-import { Notification, type Id } from "@/lib/models";
-import { notify, type NotifyInput } from "@/lib/notify";
-import { inList } from "@/lib/sql";
+import type { Id } from "@/lib/models";
+import { notifyMany, type NotifyInput } from "@/lib/notify";
 
 /**
  * Helpers that keep the scheduled jobs to a handful of queries however many rows they touch
@@ -19,42 +17,9 @@ export interface BatchedNotification {
   input: NotifyInput & { dedupeKey: string };
 }
 
-/**
- * Delivers many reminders with ONE lookup for the whole batch of which (person, dedupeKey) pairs were
- * already delivered, then calls `notify` only for the people still to be told. `notify` itself still
- * de-duplicates the stored record, so a reminder is never delivered twice. Returns the number of
- * (person, reminder) deliveries attempted.
- */
+/** Delivers many reminders in a fixed number of queries (see `notifyMany`). Returns the number of (person, reminder) deliveries. */
 export async function notifyBatch(items: BatchedNotification[]): Promise<number> {
-  const planned = items
-    .map(({ recipients, exclude, input }) => {
-      const skip = new Set((exclude ?? []).filter(Boolean));
-      const ids = [...new Set(recipients.filter((r): r is Id => Boolean(r)))].filter((id) => !skip.has(id));
-      return { ids, input };
-    })
-    .filter((p) => p.ids.length > 0);
-  if (planned.length === 0) return 0;
-
-  const existing = await db()
-    .select({ user: Notification.user, dedupeKey: Notification.dedupeKey })
-    .from(Notification)
-    .where(
-      and(
-        inList(Notification.dedupeKey, [...new Set(planned.map((p) => p.input.dedupeKey))]),
-        inList(Notification.user, [...new Set(planned.flatMap((p) => p.ids))]),
-      ),
-    );
-  const seen = new Set(existing.map((e) => `${e.user}|${e.dedupeKey}`));
-
-  let sent = 0;
-  for (const { ids, input } of planned) {
-    const fresh = ids.filter((id) => !seen.has(`${id}|${input.dedupeKey}`));
-    if (fresh.length === 0) continue;
-    await notify(fresh, input);
-    for (const id of fresh) seen.add(`${id}|${input.dedupeKey}`);
-    sent += fresh.length;
-  }
-  return sent;
+  return notifyMany(items);
 }
 
 const WRITE_CHUNK = 50;

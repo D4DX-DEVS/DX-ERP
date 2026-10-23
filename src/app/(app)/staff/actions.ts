@@ -7,7 +7,7 @@ import { audit, diff } from "@/lib/audit";
 import { can, revokeUserSessions, type CurrentUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { Role, User, type Address, type EmergencyContact, type Internship, type LifecycleEvent, type NewUser } from "@/lib/models";
-import { notify } from "@/lib/notify";
+import { notify, notifyMany } from "@/lib/notify";
 import { jsonPush } from "@/lib/sql";
 import { isObjectId, zs } from "@/lib/validation";
 import { EMPLOYMENT_TYPE_KEYS } from "./_lib/constants";
@@ -378,9 +378,13 @@ export async function importPeople(
       for (const { line } of valid) failed.push({ line, error: error instanceof ActionError ? error.message : "Could not be saved" });
     }
 
-    for (const [managerId, count] of perManager) {
-      await notify([managerId], { type: "system", title: `${count} ${count === 1 ? "person was" : "people were"} added to your team`, link: "/staff" }, [user._id]);
-    }
+    await notifyMany(
+      [...perManager].map(([managerId, count]) => ({
+        recipients: [managerId],
+        input: { type: "system", title: `${count} ${count === 1 ? "person was" : "people were"} added to your team`, link: "/staff" },
+        exclude: [user._id],
+      })),
+    );
 
     const skipped = preview.filter((r) => !r.valid).length;
     await audit(user, { action: "import", entity: "user", summary: `Imported ${created} ${created === 1 ? "person" : "people"} from CSV (${skipped} skipped, ${failed.length} failed)` });

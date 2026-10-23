@@ -6,7 +6,7 @@ import { actionUser, ActionError, parse, runAction, type ActionResult } from "@/
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { TimesheetEntry } from "@/lib/models";
-import { notify } from "@/lib/notify";
+import { notify, notifyMany } from "@/lib/notify";
 import { inList, jsonPush } from "@/lib/sql";
 import { formatDuration } from "@/lib/time";
 import { isObjectId, zs } from "@/lib/validation";
@@ -42,9 +42,13 @@ async function notifyOwners(entries: { user: string; weekStart: string; minutes:
     g.count += 1;
     groups.set(key, g);
   }
-  for (const g of groups.values()) {
-    await notify([g.owner], { type: "timesheet", title: title(g.week), body: body(g.minutes, g.count), link: `/timesheets?week=${g.week}` }, [actorId]);
-  }
+  await notifyMany(
+    [...groups.values()].map((g) => ({
+      recipients: [g.owner],
+      input: { type: "timesheet", title: title(g.week), body: body(g.minutes, g.count), link: `/timesheets?week=${g.week}` },
+      exclude: [actorId],
+    })),
+  );
 }
 
 export async function approveEntries(ids: string[]): Promise<ActionResult<{ count: number }>> {

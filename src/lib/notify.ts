@@ -1,12 +1,14 @@
 import "server-only";
 import { after } from "next/server";
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, getTableColumns, or } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { db } from "@/lib/db";
+import { runBatch } from "@/lib/domain/batch";
 import { Notification, Role, User, type Id } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
 import { sendMail } from "@/lib/mailer";
 import { env } from "@/lib/env";
-import { inList, insertChunked, jsonHas, notInList } from "@/lib/sql";
+import { inList, jsonHas, notInList } from "@/lib/sql";
 import type { Permission } from "@/lib/rbac/permissions";
 
 export interface NotifyInput {
@@ -26,50 +28,89 @@ function uniqueIds(ids: (Id | null | undefined)[], exclude: (Id | null | undefin
   return [...new Set(ids.filter((x): x is Id => Boolean(x)))].filter((x) => !skip.has(x));
 }
 
+export interface NotifyItem {
+  recipients: (Id | null | undefined)[];
+  input: NotifyInput;
+  /** People never notified by this item (usually the actor). */
+  exclude?: (Id | null | undefined)[];
+}
+
 /** Sends an in-app notification (and optionally email) to each recipient. Never throws. */
 export async function notify(recipients: (Id | null | undefined)[], input: NotifyInput, exclude: (Id | null | undefined)[] = []): Promise<void> {
+  await notifyMany([{ recipients, input, exclude }]);
+}
+
+/**
+ * Same as calling `notify(recipients, input, exclude)` for each item, in a fixed number of queries however many
+ * items and people there are (D1 caps the queries per request): one lookup of already-delivered dedupe keys, the
+ * settings, one batched insert and, after the response, one user lookup for the emails. Never throws. Returns the
+ * number of (person, notification) deliveries.
+ */
+export async function notifyMany(items: NotifyItem[]): Promise<number> {
   try {
-    let ids = uniqueIds(recipients, exclude);
-    if (ids.length === 0) return;
-    if (input.dedupeKey) {
+    const planned = items.map(({ recipients, input, exclude }) => ({ ids: uniqueIds(recipients, exclude), input })).filter((p) => p.ids.length > 0);
+    if (planned.length === 0) return 0;
+
+    // Which (person, dedupeKey) pairs were already delivered — one lookup for the whole set.
+    const keys = [...new Set(planned.flatMap((p) => (p.input.dedupeKey ? [p.input.dedupeKey] : [])))];
+    const seen = new Set<string>();
+    if (keys.length) {
       const already = await db()
-        .select({ user: Notification.user })
+        .select({ user: Notification.user, dedupeKey: Notification.dedupeKey })
         .from(Notification)
-        .where(and(inList(Notification.user, ids), eq(Notification.dedupeKey, input.dedupeKey)));
-      const seen = new Set(already.map((n) => n.user));
-      ids = ids.filter((id) => !seen.has(id));
-      if (ids.length === 0) return;
+        .where(and(inList(Notification.dedupeKey, keys), inList(Notification.user, [...new Set(planned.flatMap((p) => p.ids))])));
+      for (const n of already) seen.add(`${n.user}|${n.dedupeKey}`);
     }
+
     const settings = await getSettings();
-    if (settings.notifications.events[input.type] === false) return;
+    const deliveries: { ids: string[]; input: NotifyInput }[] = [];
+    for (const { ids, input } of planned) {
+      if (settings.notifications.events[input.type] === false) continue;
+      const fresh = input.dedupeKey ? ids.filter((id) => !seen.has(`${id}|${input.dedupeKey}`)) : ids;
+      if (fresh.length === 0) continue;
+      if (input.dedupeKey) for (const id of fresh) seen.add(`${id}|${input.dedupeKey}`);
+      deliveries.push({ ids: fresh, input });
+    }
+    if (deliveries.length === 0) return 0;
 
     if (settings.notifications.inApp) {
-      const rows = ids.map((user) => ({
-        user,
-        type: input.type,
-        title: input.title,
-        body: input.body,
-        link: input.link,
-        priority: input.priority ?? "normal",
-        dedupeKey: input.dedupeKey,
-        actionable: input.actionable ?? false,
-      }));
+      const rows = deliveries.flatMap(({ ids, input }) =>
+        ids.map((user) => ({
+          user,
+          type: input.type,
+          title: input.title,
+          body: input.body,
+          link: input.link,
+          priority: input.priority ?? "normal",
+          dedupeKey: input.dedupeKey,
+          actionable: input.actionable ?? false,
+        })),
+      );
+      // Chunks sized for D1's 100-bound-parameter limit, sent as batches (one round trip per 50 chunks).
       // A concurrent delivery of the same dedupeKey is skipped by the (user, dedupeKey) unique index.
-      await insertChunked(db(), Notification, rows, { ignoreConflicts: true });
+      const size = Math.max(1, Math.floor(100 / Object.keys(getTableColumns(Notification)).length));
+      const inserts: BatchItem<"sqlite">[] = [];
+      for (let i = 0; i < rows.length; i += size) inserts.push(db().insert(Notification).values(rows.slice(i, i + size)).onConflictDoNothing());
+      await runBatch(inserts);
     }
 
     if (settings.notifications.email && env.smtp.configured) {
       const send = async () => {
         const users = await db()
-          .select({ email: User.email, name: User.name })
+          .select({ id: User._id, email: User.email })
           .from(User)
-          .where(and(inList(User._id, ids), eq(User.accountActive, true)));
-        for (const u of users) {
-          await sendMail({
-            to: u.email,
-            subject: input.title,
-            text: `${input.body ?? input.title}${input.link ? `\n\nOpen: ${env.appUrl}${input.link}` : ""}`,
-          });
+          .where(and(inList(User._id, [...new Set(deliveries.flatMap((d) => d.ids))]), eq(User.accountActive, true)));
+        const emailOf = new Map(users.map((u) => [u.id, u.email]));
+        for (const { ids, input } of deliveries) {
+          for (const id of ids) {
+            const to = emailOf.get(id);
+            if (!to) continue;
+            await sendMail({
+              to,
+              subject: input.title,
+              text: `${input.body ?? input.title}${input.link ? `\n\nOpen: ${env.appUrl}${input.link}` : ""}`,
+            });
+          }
         }
       };
       try {
@@ -78,8 +119,10 @@ export async function notify(recipients: (Id | null | undefined)[], input: Notif
         void send().catch((e) => console.error("[notify] email failed", e));
       }
     }
+    return deliveries.reduce((n, d) => n + d.ids.length, 0);
   } catch (error) {
     console.error("[notify] failed", error);
+    return 0;
   }
 }
 

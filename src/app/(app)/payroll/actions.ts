@@ -7,7 +7,7 @@ import { runAction, actionPermission, ActionError, parse, type ActionResult } fr
 import type { CurrentUser } from "@/lib/auth/session";
 import { zs, isObjectId } from "@/lib/validation";
 import { audit } from "@/lib/audit";
-import { notify, notifyPermission } from "@/lib/notify";
+import { notify, notifyMany, notifyPermission } from "@/lib/notify";
 import { ID_PREFIX, nextNumber } from "@/lib/counters";
 import { inr, round2 } from "@/lib/format";
 import { monthKey, todayKey } from "@/lib/time";
@@ -355,15 +355,16 @@ async function settlePayslips(slips: IPayslip[], pay: z.infer<typeof paymentSche
   }
   await flush();
 
-  await Promise.all(
-    claimed.map((slip) =>
-      notify([slip.user], {
+  await notifyMany(
+    claimed.map((slip) => ({
+      recipients: [slip.user],
+      input: {
         type: "payroll",
         title: `Your payslip for ${periodLabel(slip.period)} is ready`,
         body: `Net pay ${inr(slip.net, true)} paid on ${pay.date}.`,
         link: `/payslips/${slip._id}`,
-      }),
-    ),
+      },
+    })),
   );
   return claimed;
 }
