@@ -1,6 +1,6 @@
 import "server-only";
-import type { Types } from "mongoose";
-import { connectDB } from "@/lib/db";
+import { and, eq, gte, lte, ne } from "drizzle-orm";
+import { db } from "@/lib/db";
 import { Attendance, Holiday, LeaveRequest, Movement, type IAttendance } from "@/lib/models";
 import type { AppSettings } from "@/lib/config-defaults";
 import { getSettings } from "@/lib/settings";
@@ -76,9 +76,11 @@ export function computeAttendance(
 }
 
 /** Sum of closed movement minutes for a person on a day, split into personal / official. */
-export async function movementMinutesFor(userId: string | Types.ObjectId, date: string): Promise<{ personal: number; official: number }> {
-  await connectDB();
-  const rows = await Movement.find({ user: userId, date, status: "returned", approvalStatus: { $ne: "rejected" } }, { durationMinutes: 1, official: 1 }).lean();
+export async function movementMinutesFor(userId: string, date: string): Promise<{ personal: number; official: number }> {
+  const rows = await db()
+    .select({ durationMinutes: Movement.durationMinutes, official: Movement.official })
+    .from(Movement)
+    .where(and(eq(Movement.user, userId), eq(Movement.date, date), eq(Movement.status, "returned"), ne(Movement.approvalStatus, "rejected")));
   return rows.reduce(
     (acc, m) => {
       if (m.official) acc.official += m.durationMinutes ?? 0;
@@ -93,15 +95,26 @@ export async function movementMinutesFor(userId: string | Types.ObjectId, date: 
  * Recomputes and saves the derived fields of one attendance day. Call after any change to the
  * day's check-in/out, breaks, movements or leave.
  */
-export async function recalcAttendanceDay(userId: string | Types.ObjectId, date: string): Promise<void> {
-  await connectDB();
-  const att = await Attendance.findOne({ user: userId, date });
+export async function recalcAttendanceDay(userId: string, date: string): Promise<void> {
+  const [att] = await db()
+    .select()
+    .from(Attendance)
+    .where(and(eq(Attendance.user, userId), eq(Attendance.date, date)))
+    .limit(1);
   if (!att) return;
   const settings = await getSettings();
-  const [moves, leave, holiday] = await Promise.all([
+  const [moves, [leave], [holiday]] = await Promise.all([
     movementMinutesFor(userId, date),
-    LeaveRequest.findOne({ user: userId, status: "approved", startDate: { $lte: date }, endDate: { $gte: date } }, { halfDay: 1 }).lean(),
-    Holiday.exists({ date, optional: false }),
+    db()
+      .select({ halfDay: LeaveRequest.halfDay })
+      .from(LeaveRequest)
+      .where(and(eq(LeaveRequest.user, userId), eq(LeaveRequest.status, "approved"), lte(LeaveRequest.startDate, date), gte(LeaveRequest.endDate, date)))
+      .limit(1),
+    db()
+      .select({ id: Holiday._id })
+      .from(Holiday)
+      .where(and(eq(Holiday.date, date), eq(Holiday.optional, false)))
+      .limit(1),
   ]);
   const m = computeAttendance(
     {
@@ -116,8 +129,7 @@ export async function recalcAttendanceDay(userId: string | Types.ObjectId, date:
     },
     settings,
   );
-  Object.assign(att, m);
-  await att.save();
+  await db().update(Attendance).set(m).where(eq(Attendance._id, att._id));
 }
 
 /** Minutes of the office day (used for progress bars / expected check-out). */

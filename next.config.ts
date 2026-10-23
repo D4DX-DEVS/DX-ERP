@@ -15,6 +15,8 @@ const nextConfig: NextConfig = {
   // Every ERP screen is per-user and request-time; Cache Components / PPR are not used.
   cacheComponents: false,
   poweredByHeader: false,
+  // Only small static brand marks use next/image; Workers would need a paid Images binding to optimise them.
+  images: { unoptimized: true },
   // Dev-only: Next logs every Server Function call with its arguments — that would print vault secrets,
   // salaries and the super admin password to the terminal.
   logging: { serverFunctions: false },

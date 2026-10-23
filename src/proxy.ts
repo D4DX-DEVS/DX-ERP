@@ -3,39 +3,36 @@ import { SESSION_COOKIE, verifyToken } from "@/lib/auth/token";
 
 const isDev = process.env.NODE_ENV === "development";
 
-/** Origins that serve user photos and the company logo (DigitalOcean Spaces / CDN, Google profile pictures). */
-function imageOrigins(): string[] {
+/**
+ * Origins that serve user photos and the company logo (the public R2 bucket's URL, Google profile pictures).
+ * Read per request: on Workers, `process.env` is populated per request, not at module load.
+ */
+function imageOrigins(): string {
   const origins = ["https://*.googleusercontent.com"];
-  const cdn = process.env.DO_SPACES_CDN_URL?.trim().replace(/\/+$/, "");
-  if (cdn) origins.push(cdn);
-  const endpoint = process.env.DO_SPACES_ENDPOINT?.trim();
-  const bucket = process.env.DO_SPACES_BUCKET?.trim();
-  if (endpoint && bucket) {
+  const publicFiles = process.env.PUBLIC_FILES_URL?.trim();
+  if (publicFiles) {
     try {
-      const u = new URL(endpoint.startsWith("http") ? endpoint : `https://${endpoint}`);
-      origins.push(`${u.protocol}//${bucket}.${u.host}`);
+      origins.push(new URL(publicFiles).origin);
     } catch {
-      // Misconfigured endpoint: photos simply fall back to initials.
+      // Misconfigured URL: photos simply fall back to initials.
     }
   }
-  return origins;
+  return origins.join(" ");
 }
-
-const IMAGE_ORIGINS = imageOrigins().join(" ");
 
 /**
  * Nonce-based Content-Security-Policy (defence in depth: React escapes all output and there are no third-party
  * scripts). Next.js reads the `nonce-…` value from this header and stamps it on every script it emits, so only
  * our own bundles run. Styles keep `'unsafe-inline'`: the UI kit sets inline `style` attributes (charts, table
  * column rules), next/font and sonner inject `<style>` elements, and a nonce there would be ignored by browsers
- * once `'unsafe-inline'` is also present. Fonts are self-hosted by next/font; images come from Spaces / Google.
+ * once `'unsafe-inline'` is also present. Fonts are self-hosted by next/font; images come from R2 / Google.
  */
 function contentSecurityPolicy(nonce: string): string {
   return [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
-    `img-src 'self' blob: data: ${IMAGE_ORIGINS}`,
+    `img-src 'self' blob: data: ${imageOrigins()}`,
     "font-src 'self' data:",
     `connect-src 'self'${isDev ? " ws: wss:" : ""}`,
     "object-src 'none'",

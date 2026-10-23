@@ -1,17 +1,31 @@
 import "server-only";
-import type { Types } from "mongoose";
+import { and, eq, isNotNull, isNull, ne, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { ActionError } from "@/lib/actions";
 import { audit } from "@/lib/audit";
 import { can, type CurrentUser } from "@/lib/auth/session";
 import { ID_PREFIX, nextNumber } from "@/lib/counters";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { env } from "@/lib/env";
-import { escapeRegex } from "@/lib/format";
-import { Department, Designation, Role, StoredFile, User, type LifecycleEvent, type LifecycleType, type MoneyLine, type SalaryStructure } from "@/lib/models";
+import {
+  Department,
+  Designation,
+  Role,
+  StoredFile,
+  User,
+  newId,
+  type Id,
+  type Internship,
+  type LifecycleEvent,
+  type LifecycleType,
+  type MoneyLine,
+  type OnboardingStep,
+  type SalaryStructure,
+} from "@/lib/models";
 import { notify } from "@/lib/notify";
 import { assignableRoles } from "@/lib/rbac/roles";
 import { getSettings } from "@/lib/settings";
+import { eqIgnoreCase, inList } from "@/lib/sql";
 import { todayKey } from "@/lib/time";
 import { zs } from "@/lib/validation";
 import { AUTO_ONBOARDING_KEY, DEFAULT_EMPLOYMENT_TYPE, EMPLOYMENT_TYPE_KEYS, ONBOARDING_STEPS, type NewPersonType } from "./constants";
@@ -28,8 +42,9 @@ export function superAdminEmail(): string | null {
   }
 }
 
-export function emailRegex(email: string): RegExp {
-  return new RegExp(`^${escapeRegex(email.trim())}$`, "i");
+/** Case-insensitive match of a work email (emails are stored lowercased + trimmed). */
+export function emailMatch(email: string): SQL {
+  return eqIgnoreCase(User.email, email.trim());
 }
 
 /**
@@ -41,8 +56,10 @@ export function emailRegex(email: string): RegExp {
 export async function roleOptionsFor(user: CurrentUser): Promise<{ key: string; name: string }[]> {
   const all = await assignableRoles();
   if (user.isSuperAdmin) return all;
-  await connectDB();
-  const roles = await Role.find({ key: { $in: all.map((r) => r.key) } }, { key: 1, permissions: 1 }).lean();
+  const roles = await db()
+    .select({ key: Role.key, permissions: Role.permissions })
+    .from(Role)
+    .where(inList(Role.key, all.map((r) => r.key)));
   if (can(user, "users.manage")) {
     const own = new Set<string>(user.permissions);
     const within = new Set(roles.filter((r) => r.permissions.every((p) => own.has(p))).map((r) => r.key));
@@ -58,6 +75,7 @@ export function lifecycleEvent(
   e: { type: LifecycleType; date?: string; summary: string; from?: string; to?: string; note?: string; confidential?: boolean },
 ): LifecycleEvent {
   return {
+    _id: newId(),
     type: e.type,
     date: e.date ?? todayKey(),
     summary: e.summary,
@@ -75,48 +93,74 @@ export function lifecycleEvent(
 /* Onboarding checklist                                                */
 /* ------------------------------------------------------------------ */
 
-/** Sets one onboarding step (creating it on legacy records that lack the checklist). */
-export async function setOnboardingStep(userId: string | Types.ObjectId, key: string, done: boolean, by?: Types.ObjectId): Promise<void> {
-  await connectDB();
+/** Returns the checklist with one step set (appending it on legacy records that lack the step). */
+function withOnboardingStep(steps: OnboardingStep[], key: string, done: boolean, by?: Id): OnboardingStep[] {
   const label = ONBOARDING_STEPS.find((s) => s.key === key)?.label ?? key;
-  const set: Record<string, unknown> = { "onboarding.$.done": done };
-  if (done) {
-    set["onboarding.$.doneAt"] = new Date();
-    if (by) set["onboarding.$.doneBy"] = by;
+  if (!steps.some((s) => s.key === key)) {
+    return [...steps, { key, label, done, doneAt: done ? new Date() : undefined, doneBy: done ? by : undefined }];
   }
-  const res = await User.updateOne(
-    { _id: userId, "onboarding.key": key },
-    done ? { $set: set } : { $set: set, $unset: { "onboarding.$.doneAt": "", "onboarding.$.doneBy": "" } },
-  );
-  if (res.matchedCount === 0) {
-    await User.updateOne(
-      { _id: userId, "onboarding.key": { $ne: key } },
-      { $push: { onboarding: { key, label, done, doneAt: done ? new Date() : undefined, doneBy: done ? by : undefined } } },
-    );
-  }
+  return steps.map((s) => {
+    if (s.key !== key) return s;
+    if (!done) return { key: s.key, label: s.label, done };
+    return { ...s, done, doneAt: new Date(), ...(by ? { doneBy: by } : {}) };
+  });
+}
+
+/** Sets one onboarding step (creating it on legacy records that lack the checklist). */
+export async function setOnboardingStep(userId: Id, key: string, done: boolean, by?: Id): Promise<void> {
+  const [u] = await db().select({ onboarding: User.onboarding }).from(User).where(eq(User._id, userId)).limit(1);
+  if (!u) return;
+  await db()
+    .update(User)
+    .set({ onboarding: withOnboardingStep(u.onboarding ?? [], key, done, by) })
+    .where(eq(User._id, userId));
 }
 
 /** Marks steps done when their condition is met (never un-marks, so manual ticks are respected). */
-export async function autoCompleteSteps(userId: string | Types.ObjectId): Promise<void> {
-  await connectDB();
-  const u = await User.findById(userId, { department: 1, designation: 1, reportingManager: 1, "internship.mentor": 1, accountActive: 1, onboarding: 1, personType: 1 }).lean();
+export async function autoCompleteSteps(userId: Id): Promise<void> {
+  const [u] = await db()
+    .select({
+      _id: User._id,
+      department: User.department,
+      designation: User.designation,
+      reportingManager: User.reportingManager,
+      internship: User.internship,
+      accountActive: User.accountActive,
+      onboarding: User.onboarding,
+      personType: User.personType,
+    })
+    .from(User)
+    .where(eq(User._id, userId))
+    .limit(1);
   if (!u) return;
-  const done = new Set((u.onboarding ?? []).filter((s) => s.done).map((s) => s.key));
+  const steps = u.onboarding ?? [];
+  const done = new Set(steps.filter((s) => s.done).map((s) => s.key));
   const ready: string[] = [];
   if (u.department && u.designation) ready.push("dept_role");
   if (u.reportingManager || u.internship?.mentor) ready.push("manager");
   if (u.accountActive) ready.push("access");
 
   const settings = await getSettings();
-  const files = await StoredFile.find(
-    { entityType: "user", entityId: u._id.toString(), deletedAt: null, replacedBy: null, category: { $nin: [null, ""] } },
-    { category: 1 },
-  ).lean();
+  const files = await db()
+    .select({ category: StoredFile.category })
+    .from(StoredFile)
+    .where(
+      and(
+        eq(StoredFile.entityType, "user"),
+        eq(StoredFile.entityId, u._id),
+        isNull(StoredFile.deletedAt),
+        isNull(StoredFile.replacedBy),
+        isNotNull(StoredFile.category),
+        ne(StoredFile.category, ""),
+      ),
+    );
   if (missingRequired(settings.documentCategories, u.personType, new Set(files.map((f) => f.category!))).length === 0) ready.push("documents");
 
-  for (const key of ready) {
-    if (!done.has(key)) await setOnboardingStep(u._id, key, true);
-  }
+  const pending = ready.filter((key) => !done.has(key));
+  if (pending.length === 0) return;
+  // One write for every newly met step (the Mongo version issued one update per step).
+  const next = pending.reduce((acc, key) => withOnboardingStep(acc, key, true), steps);
+  await db().update(User).set({ onboarding: next }).where(eq(User._id, u._id));
 }
 
 /* ------------------------------------------------------------------ */
@@ -239,13 +283,13 @@ export async function createPersonRecord(
   p: NewPerson,
   opts: CreateOptions = {},
 ): Promise<{ id: string; employeeId: string; name: string }> {
-  await connectDB();
   const email = p.email.trim().toLowerCase();
   const adminEmail = superAdminEmail();
   if (adminEmail && email === adminEmail) {
     throw new ActionError("This email belongs to the super admin account.", { email: "Reserved for the super admin" });
   }
-  if (await User.exists({ email: emailRegex(email) })) {
+  const [emailClash] = await db().select({ id: User._id }).from(User).where(emailMatch(email)).limit(1);
+  if (emailClash) {
     throw new ActionError("A person with this email already exists.", { email: "Already in use" });
   }
 
@@ -256,11 +300,13 @@ export async function createPersonRecord(
   if (!EMPLOYMENT_TYPE_KEYS.includes(employmentType)) throw new ActionError("Choose a valid employment type.", { employmentType: "Invalid" });
 
   const mentorId = p.internship?.mentor;
+  const personById = (id: Id) =>
+    db().select({ name: User.name, personType: User.personType, status: User.status }).from(User).where(eq(User._id, id)).limit(1).then((r) => r[0]);
   const [dept, desig, manager, mentor] = await Promise.all([
-    p.department ? Department.findById(p.department, { name: 1 }).lean() : null,
-    p.designation ? Designation.findById(p.designation, { name: 1 }).lean() : null,
-    p.reportingManager ? User.findById(p.reportingManager, { name: 1, personType: 1, status: 1 }).lean() : null,
-    mentorId ? User.findById(mentorId, { name: 1, personType: 1, status: 1 }).lean() : null,
+    p.department ? db().select({ name: Department.name }).from(Department).where(eq(Department._id, p.department)).limit(1).then((r) => r[0]) : undefined,
+    p.designation ? db().select({ name: Designation.name }).from(Designation).where(eq(Designation._id, p.designation)).limit(1).then((r) => r[0]) : undefined,
+    p.reportingManager ? personById(p.reportingManager) : undefined,
+    mentorId ? personById(mentorId) : undefined,
   ]);
   if (p.department && !dept) throw new ActionError("Department not found.", { department: "Not found" });
   if (p.designation && !desig) throw new ActionError("Designation not found.", { designation: "Not found" });
@@ -270,7 +316,7 @@ export async function createPersonRecord(
   const today = todayKey();
   const joiningDate = p.joiningDate;
   const internLike = p.personType !== "employee";
-  let internship: Record<string, unknown> | undefined;
+  let internship: Internship | undefined;
   if (internLike) {
     const startDate = p.internship?.startDate ?? joiningDate;
     const endDate = p.internship?.endDate;
@@ -286,54 +332,57 @@ export async function createPersonRecord(
       objectives: [],
       status: startDate && startDate <= today ? "active" : "registered",
       stipend,
-      stipendHistory: stipend.eligible && stipend.amount > 0 ? [{ amount: stipend.amount, effectiveFrom: startDate, note: "Initial stipend", by: actor._id, at: new Date() }] : [],
+      stipendHistory: stipend.eligible && stipend.amount > 0 ? [{ _id: newId(), amount: stipend.amount, effectiveFrom: startDate, note: "Initial stipend", by: actor._id, at: new Date() }] : [],
       certificateStatus: "none",
     };
   }
 
   const employeeId = await nextNumber(p.personType, ID_PREFIX[p.personType], 4);
   const now = new Date();
-  const doc = await User.create({
-    employeeId,
-    name: p.name.trim(),
-    email,
-    personalEmail: p.personalEmail,
-    phone: p.phone,
-    personType: p.personType,
-    role: p.role,
-    isSuperAdmin: false,
-    department: p.department,
-    designation: p.designation,
-    employmentType,
-    joiningDate,
-    status: "active",
-    accountActive: p.accountActive,
-    reportingManager: p.reportingManager,
-    team: p.team,
-    dob: p.dob,
-    gender: p.gender,
-    bloodGroup: p.bloodGroup,
-    internship,
-    salary: p.salary,
-    salaryHistory: p.salary ? [{ ...p.salary, note: "Initial salary", by: actor._id, byName: actor.name, at: now }] : [],
-    onboarding: ONBOARDING_STEPS.map((s) => {
-      const done =
-        s.key === "record_created" ||
-        (s.key === "dept_role" && Boolean(p.department && p.designation)) ||
-        (s.key === "manager" && Boolean(p.reportingManager || mentorId)) ||
-        (s.key === "access" && p.accountActive);
-      return { key: s.key, label: s.label, done: done && s.key !== AUTO_ONBOARDING_KEY, doneAt: done ? now : undefined, doneBy: done ? actor._id : undefined };
-    }),
-    history: [
-      lifecycleEvent(actor, {
-        type: "joined",
-        date: joiningDate ?? today,
-        summary: desig ? `Joined as ${desig.name}` : "Joined D4DX",
-        to: desig?.name,
+  const [doc] = await db()
+    .insert(User)
+    .values({
+      employeeId,
+      name: p.name.trim(),
+      email,
+      personalEmail: p.personalEmail?.trim().toLowerCase(),
+      phone: p.phone,
+      personType: p.personType,
+      role: p.role,
+      isSuperAdmin: false,
+      department: p.department,
+      designation: p.designation,
+      employmentType,
+      joiningDate,
+      status: "active",
+      accountActive: p.accountActive,
+      reportingManager: p.reportingManager,
+      team: p.team,
+      dob: p.dob,
+      gender: p.gender,
+      bloodGroup: p.bloodGroup,
+      internship,
+      salary: p.salary,
+      salaryHistory: p.salary ? [{ ...p.salary, _id: newId(), note: "Initial salary", by: actor._id, byName: actor.name, at: now }] : [],
+      onboarding: ONBOARDING_STEPS.map((s) => {
+        const done =
+          s.key === "record_created" ||
+          (s.key === "dept_role" && Boolean(p.department && p.designation)) ||
+          (s.key === "manager" && Boolean(p.reportingManager || mentorId)) ||
+          (s.key === "access" && p.accountActive);
+        return { key: s.key, label: s.label, done: done && s.key !== AUTO_ONBOARDING_KEY, doneAt: done ? now : undefined, doneBy: done ? actor._id : undefined };
       }),
-    ],
-    createdBy: actor._id,
-  });
+      history: [
+        lifecycleEvent(actor, {
+          type: "joined",
+          date: joiningDate ?? today,
+          summary: desig ? `Joined as ${desig.name}` : "Joined D4DX",
+          to: desig?.name,
+        }),
+      ],
+      createdBy: actor._id,
+    })
+    .returning();
 
   await audit(actor, {
     action: "create",
@@ -359,5 +408,5 @@ export async function createPersonRecord(
     }
   }
 
-  return { id: doc._id.toString(), employeeId, name: doc.name };
+  return { id: doc._id, employeeId, name: doc.name };
 }

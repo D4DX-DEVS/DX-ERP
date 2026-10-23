@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "dx-erp",
-  "main": ".open-next/worker.js",
+  "main": "cloudflare/worker.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "assets": {
@@ -24,5 +24,7 @@
     // Public files (avatars, company logo) — served from the bucket's public URL (PUBLIC_FILES_URL).
     { "binding": "PUBLIC_FILES", "bucket_name": "dx-erp-public" }
   ],
+  // Scheduled jobs (reminders, overdue flags, retention, backups); each job is throttled to its own interval.
+  "triggers": { "crons": ["*/15 * * * *"] },
   "observability": { "enabled": true }
 }

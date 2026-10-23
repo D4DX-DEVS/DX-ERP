@@ -1,9 +1,10 @@
 import "server-only";
-import type { Types } from "mongoose";
+import { eq, type SQL } from "drizzle-orm";
 import { can, canAny, type CurrentUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
-import { User, type IMovement } from "@/lib/models";
+import { db } from "@/lib/db";
+import { Movement, User, type IMovement } from "@/lib/models";
 import { directReportIds } from "@/lib/people";
+import { inList } from "@/lib/sql";
 import type { AppSettings, MovementCategory } from "@/lib/config-defaults";
 
 /**
@@ -23,28 +24,28 @@ export async function movementScope(user: CurrentUser): Promise<MovementScope> {
   return { kind: "self" };
 }
 
-export function scopeFilter(user: CurrentUser, scope: MovementScope): Record<string, unknown> {
-  if (scope.kind === "all") return {};
-  if (scope.kind === "team") return { user: { $in: scope.userIds } };
-  return { user: user._id };
+/** SQL condition limiting movements to the scope; `undefined` = no restriction. */
+export function scopeFilter(user: CurrentUser, scope: MovementScope): SQL | undefined {
+  if (scope.kind === "all") return undefined;
+  if (scope.kind === "team") return inList(Movement.user, scope.userIds);
+  return eq(Movement.user, user._id);
 }
 
 /** Manager (or intern mentor) relationship check. */
-export async function managesUser(managerId: string, userId: string | Types.ObjectId): Promise<boolean> {
-  await connectDB();
-  const u = await User.findById(userId, { reportingManager: 1 }).lean();
-  return u?.reportingManager?.toString() === managerId;
+export async function managesUser(managerId: string, userId: string): Promise<boolean> {
+  const [u] = await db().select({ reportingManager: User.reportingManager }).from(User).where(eq(User._id, userId)).limit(1);
+  return u?.reportingManager === managerId;
 }
 
 export async function canViewMovement(user: CurrentUser, m: Pick<IMovement, "user">): Promise<boolean> {
-  if (m.user.toString() === user.id) return true;
+  if (m.user === user.id) return true;
   if (canAny(user, ["movement.view_all", "movement.approve", "movement.manage"])) return true;
   return managesUser(user.id, m.user);
 }
 
 /** Approvers: the person's CURRENT reporting manager or anyone with `movement.approve` — never the person themself (a former manager stored as `approver` no longer counts). */
 export async function canApproveMovement(user: CurrentUser, m: Pick<IMovement, "user" | "approver">): Promise<boolean> {
-  if (m.user.toString() === user.id) return false;
+  if (m.user === user.id) return false;
   if (can(user, "movement.approve")) return true;
   return managesUser(user.id, m.user);
 }
@@ -52,7 +53,7 @@ export async function canApproveMovement(user: CurrentUser, m: Pick<IMovement, "
 /** Whether the viewer may read purpose / destination / remarks of a personal movement. */
 export function personalDetailsVisible(user: CurrentUser, m: Pick<IMovement, "user" | "official">, isManager: boolean): boolean {
   if (m.official) return true;
-  if (m.user.toString() === user.id) return true;
+  if (m.user === user.id) return true;
   if (can(user, "movement.view_personal")) return true;
   return isManager;
 }

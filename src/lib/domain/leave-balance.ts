@@ -1,8 +1,9 @@
 import "server-only";
-import type { Types } from "mongoose";
-import { connectDB } from "@/lib/db";
+import { and, asc, eq, gte, lte } from "drizzle-orm";
+import { db } from "@/lib/db";
 import { LeaveBalance, LeaveRequest, LeaveType, type ILeaveType } from "@/lib/models";
 import type { AppSettings } from "@/lib/config-defaults";
+import { inList, jsonHas } from "@/lib/sql";
 import { monthKey } from "@/lib/time";
 
 export interface LeaveBalanceRow {
@@ -52,37 +53,50 @@ export function accruedFor(type: Pick<ILeaveType, "annualQuota" | "accrual">, qu
  * requests awaiting approval (so the same days cannot be requested twice).
  */
 export async function leaveBalances(
-  userId: string | Types.ObjectId,
+  userId: string,
   personType: string,
   year: number,
   settings: AppSettings,
   asOf: string,
 ): Promise<LeaveBalanceRow[]> {
-  await connectDB();
   const { from, to } = leaveYearRange(year, settings);
   const [types, balances, requests] = await Promise.all([
-    LeaveType.find({ active: true, applicableTo: personType }).sort({ order: 1, name: 1 }).lean(),
-    LeaveBalance.find({ user: userId, year }).lean(),
-    LeaveRequest.find(
-      { user: userId, status: { $in: ["approved", "pending_manager", "pending_hr"] }, startDate: { $lte: to }, endDate: { $gte: from } },
-      { leaveType: 1, days: 1, status: 1 },
-    ).lean(),
+    db()
+      .select()
+      .from(LeaveType)
+      .where(and(eq(LeaveType.active, true), jsonHas(LeaveType.applicableTo, personType)))
+      .orderBy(asc(LeaveType.order), asc(LeaveType.name)),
+    db()
+      .select()
+      .from(LeaveBalance)
+      .where(and(eq(LeaveBalance.user, userId), eq(LeaveBalance.year, year))),
+    db()
+      .select({ leaveType: LeaveRequest.leaveType, days: LeaveRequest.days, status: LeaveRequest.status })
+      .from(LeaveRequest)
+      .where(
+        and(
+          eq(LeaveRequest.user, userId),
+          inList(LeaveRequest.status, ["approved", "pending_manager", "pending_hr"]),
+          lte(LeaveRequest.startDate, to),
+          gte(LeaveRequest.endDate, from),
+        ),
+      ),
   ]);
-  const byType = new Map(balances.map((b) => [b.leaveType.toString(), b]));
+  const byType = new Map(balances.map((b) => [b.leaveType, b]));
   return types.map((t) => {
-    const b = byType.get(t._id.toString());
+    const b = byType.get(t._id);
     const quota = b?.quotaOverride ?? t.annualQuota;
     const accrued = accruedFor(t, quota, year, asOf, settings);
-    const used = requests.filter((r) => r.leaveType.toString() === t._id.toString() && r.status === "approved").reduce((s, r) => s + r.days, 0);
-    const pending = requests.filter((r) => r.leaveType.toString() === t._id.toString() && r.status !== "approved").reduce((s, r) => s + r.days, 0);
+    const used = requests.filter((r) => r.leaveType === t._id && r.status === "approved").reduce((s, r) => s + r.days, 0);
+    const pending = requests.filter((r) => r.leaveType === t._id && r.status !== "approved").reduce((s, r) => s + r.days, 0);
     const carriedForward = b?.carriedForward ?? 0;
     const adjustment = b?.adjustment ?? 0;
     const unlimited = !t.paid;
     return {
-      leaveTypeId: t._id.toString(),
+      leaveTypeId: t._id,
       name: t.name,
       code: t.code,
-      color: t.color,
+      color: t.color ?? undefined,
       paid: t.paid,
       unlimited,
       quota,

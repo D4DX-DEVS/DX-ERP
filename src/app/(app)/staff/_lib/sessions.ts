@@ -1,22 +1,23 @@
 import "server-only";
-import type { Types } from "mongoose";
-import { connectDB } from "@/lib/db";
-import { Session } from "@/lib/models";
+import { and, desc, eq, gt, isNull } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { Session, type Id } from "@/lib/models";
 import { fmtDateTime, timeAgo } from "@/lib/time";
 import type { SessionRow } from "../_components/session-list";
 import { describeAgent } from "./agent";
 
 /** Active (not revoked, not expired) sessions of a user, formatted for display. */
-export async function loadSessions(userId: string | Types.ObjectId, currentSid?: string): Promise<SessionRow[]> {
-  await connectDB();
-  const rows = await Session.find({ user: userId, revokedAt: null, expiresAt: { $gt: new Date() } })
-    .sort({ lastSeenAt: -1 })
-    .limit(25)
-    .lean();
+export async function loadSessions(userId: Id, currentSid?: string): Promise<SessionRow[]> {
+  const rows = await db()
+    .select()
+    .from(Session)
+    .where(and(eq(Session.user, userId), isNull(Session.revokedAt), gt(Session.expiresAt, new Date())))
+    .orderBy(desc(Session.lastSeenAt))
+    .limit(25);
   return rows.map((s) => ({
-    id: s._id.toString(),
+    id: s._id,
     device: describeAgent(s.userAgent),
-    ip: s.ip,
+    ip: s.ip ?? undefined,
     method: s.method,
     signedIn: fmtDateTime(s.createdAt),
     lastActive: timeAgo(s.lastSeenAt),

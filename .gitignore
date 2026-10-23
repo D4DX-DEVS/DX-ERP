@@ -49,3 +49,9 @@ next-env.d.ts
 
 # local data exports (personal data)
 /.data/
+
+# production Worker secrets (filled from .env.cloudflare.example)
+.env.cloudflare
+*.deploy-aside
+!.env.cloudflare.example
+!.env.production

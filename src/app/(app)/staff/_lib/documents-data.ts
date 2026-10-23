@@ -1,5 +1,6 @@
 import "server-only";
-import { connectDB } from "@/lib/db";
+import { and, desc, eq, isNotNull, isNull, ne } from "drizzle-orm";
+import { db } from "@/lib/db";
 import { StoredFile } from "@/lib/models";
 import type { AppSettings } from "@/lib/config-defaults";
 import { titleCase } from "@/lib/format";
@@ -46,17 +47,21 @@ export async function loadDocuments(opts: {
   settings: AppSettings;
   today: string;
 }): Promise<DocumentsData> {
-  await connectDB();
-  const files = await StoredFile.find({
-    entityType: "user",
-    entityId: opts.personId,
-    deletedAt: null,
-    category: { $nin: [null, ""] },
-  })
-    .sort({ createdAt: -1 })
-    .lean();
+  const files = await db()
+    .select()
+    .from(StoredFile)
+    .where(
+      and(
+        eq(StoredFile.entityType, "user"),
+        eq(StoredFile.entityId, opts.personId),
+        isNull(StoredFile.deletedAt),
+        isNotNull(StoredFile.category),
+        ne(StoredFile.category, ""),
+      ),
+    )
+    .orderBy(desc(StoredFile.createdAt));
 
-  const byId = new Map(files.map((f) => [f._id.toString(), f]));
+  const byId = new Map(files.map((f) => [f._id, f]));
   const heads = files.filter((f) => !f.replacedBy);
   const categories = opts.settings.documentCategories;
   const present = new Set(heads.map((f) => f.category!));
@@ -69,31 +74,31 @@ export async function loadDocuments(opts: {
     .filter((f) => opts.includeConfidential || !f.confidential)
     .map((f) => {
       const versions: DocVersion[] = [];
-      let cursor = f.replaces ? byId.get(f.replaces.toString()) : undefined;
+      let cursor = f.replaces ? byId.get(f.replaces) : undefined;
       let guard = 0;
       while (cursor && guard++ < 50) {
         versions.push({
-          id: cursor._id.toString(),
+          id: cursor._id,
           name: cursor.name,
           version: cursor.version,
           uploadedAt: cursor.createdAt.toISOString(),
-          uploadedByName: cursor.uploadedByName,
+          uploadedByName: cursor.uploadedByName ?? undefined,
         });
-        cursor = cursor.replaces ? byId.get(cursor.replaces.toString()) : undefined;
+        cursor = cursor.replaces ? byId.get(cursor.replaces) : undefined;
       }
       return {
-        id: f._id.toString(),
+        id: f._id,
         name: f.name,
         size: f.size,
         category: f.category!,
         categoryLabel: labels.get(f.category!) ?? titleCase(f.category),
         confidential: f.confidential,
-        expiryDate: f.expiryDate,
+        expiryDate: f.expiryDate ?? undefined,
         expiry: expiryInfo(f.expiryDate, opts.today),
         version: f.version,
         uploadedAt: f.createdAt.toISOString(),
-        uploadedByName: f.uploadedByName,
-        notes: f.notes,
+        uploadedByName: f.uploadedByName ?? undefined,
+        notes: f.notes ?? undefined,
         versions,
       };
     })

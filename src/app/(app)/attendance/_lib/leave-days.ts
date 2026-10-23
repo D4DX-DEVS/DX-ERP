@@ -1,5 +1,4 @@
 import "server-only";
-import type { Types } from "mongoose";
 import type { AppSettings } from "@/lib/config-defaults";
 import type { WorkCalendar } from "@/lib/domain/calendar";
 import { eachDay } from "@/lib/time";
@@ -20,7 +19,7 @@ export interface LeaveDayInfo {
 export type LeaveDayMap = Map<string, Map<string, LeaveDayInfo>>;
 
 export function buildLeaveDayMap(
-  requests: { _id: Types.ObjectId; user: Types.ObjectId; startDate: string; endDate: string; halfDay: boolean; leaveTypeName?: string }[],
+  requests: { _id: string; user: string; startDate: string; endDate: string; halfDay: boolean; leaveTypeName?: string | null }[],
   settings: AppSettings,
   cal: WorkCalendar,
   from: string,
@@ -31,10 +30,10 @@ export function buildLeaveDayMap(
     const start = r.startDate > from ? r.startDate : from;
     const end = r.endDate < to ? r.endDate : to;
     if (start > end) continue;
-    const key = r.user.toString();
+    const key = r.user;
     const perUser = map.get(key) ?? new Map<string, LeaveDayInfo>();
     for (const day of leaveDaysIn(settings, cal, start, end)) {
-      perUser.set(day, { half: r.halfDay, typeName: r.leaveTypeName ?? "Leave", endDate: r.endDate, requestId: r._id.toString() });
+      perUser.set(day, { half: r.halfDay, typeName: r.leaveTypeName ?? "Leave", endDate: r.endDate, requestId: r._id });
     }
     map.set(key, perUser);
   }

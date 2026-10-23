@@ -8,7 +8,13 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
-    "hash-password": "node scripts/hash-password.mjs"
+    "hash-password": "node scripts/hash-password.mjs",
+    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "deploy": "bash scripts/cf/deploy.sh",
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply dx-erp --local",
+    "db:migrate:remote": "wrangler d1 migrations apply dx-erp --remote"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1154.0",

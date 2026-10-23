@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { Download, Plus, Upload, UserSearch } from "lucide-react";
 import { can, requirePagePermission } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { and, asc, count, eq, gt, isNotNull, isNull, lte, ne } from "drizzle-orm";
+import { db } from "@/lib/db";
 import { Department, Designation, StoredFile, User } from "@/lib/models";
 import { namesFor } from "@/lib/people";
 import { assignableRoles } from "@/lib/rbac/roles";
@@ -17,6 +18,7 @@ import { PersonCell } from "@/components/ui/avatar";
 import { OptionChip, StatusChip, Tag } from "@/components/ui/chip";
 import { EmptyRow, Td, Th, THead, TableWrap, Tr } from "@/components/ui/table";
 import { statusTone } from "@/lib/status";
+import { inList } from "@/lib/sql";
 import { categoriesFor, expiryInfo, missingRequired } from "./_lib/documents";
 import { staffFilter, STAFF_TYPES } from "./_lib/directory";
 
@@ -27,7 +29,6 @@ const TYPE_LABELS: Record<string, string> = { employee: "Employees", trainee: "T
 export default async function StaffPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePagePermission("staff.view");
   const sp = await searchParams;
-  await connectDB();
   const settings = await getSettings();
   const today = todayKey();
   const page = pageParam(sp);
@@ -37,46 +38,71 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
   const canExport = can(user, "reports.export") || canEdit;
 
   const [rows, total, typeCounts, departments, designations, roles] = await Promise.all([
-    User.find(filter, {
-      employeeId: 1,
-      name: 1,
-      photo: 1,
-      personType: 1,
-      department: 1,
-      designation: 1,
-      reportingManager: 1,
-      joiningDate: 1,
-      status: 1,
-      accountActive: 1,
-    })
-      .sort({ name: 1 })
-      .skip((page - 1) * PAGE_SIZE)
+    db()
+      .select({
+        _id: User._id,
+        employeeId: User.employeeId,
+        name: User.name,
+        photo: User.photo,
+        personType: User.personType,
+        department: User.department,
+        designation: User.designation,
+        reportingManager: User.reportingManager,
+        joiningDate: User.joiningDate,
+        status: User.status,
+        accountActive: User.accountActive,
+      })
+      .from(User)
+      .where(filter)
+      .orderBy(asc(User.name))
       .limit(PAGE_SIZE)
-      .lean(),
-    User.countDocuments(filter),
-    User.aggregate<{ _id: string; n: number }>([{ $match: staffFilter(sp, settings, { ignoreType: true }) }, { $group: { _id: "$personType", n: { $sum: 1 } } }]),
-    Department.find({}, { name: 1 }).sort({ name: 1 }).lean(),
-    Designation.find({}, { name: 1 }).lean(),
+      .offset((page - 1) * PAGE_SIZE),
+    db().$count(User, filter),
+    db()
+      .select({ personType: User.personType, n: count() })
+      .from(User)
+      .where(staffFilter(sp, settings, { ignoreType: true }))
+      .groupBy(User.personType),
+    db().select({ _id: Department._id, name: Department.name }).from(Department).orderBy(asc(Department.name)),
+    db().select({ _id: Designation._id, name: Designation.name }).from(Designation),
     assignableRoles(),
   ]);
 
   const managers = await namesFor(rows.map((r) => r.reportingManager));
-  const deptName = new Map(departments.map((d) => [d._id.toString(), d.name]));
-  const desigName = new Map(designations.map((d) => [d._id.toString(), d.name]));
-  const counts = new Map(typeCounts.map((c) => [c._id, c.n]));
+  const deptName = new Map(departments.map((d) => [d._id, d.name]));
+  const desigName = new Map(designations.map((d) => [d._id, d.name]));
+  const counts = new Map(typeCounts.map((c) => [c.personType, c.n]));
   const allCount = STAFF_TYPES.reduce((sum, t) => sum + (counts.get(t) ?? 0), 0);
 
   // Document completeness for the rows on this page (HR only) and the org-wide expiry banner.
   const docState = new Map<string, { present: Set<string>; expired: boolean; expiring: boolean }>();
   let expiringCount = 0;
   if (canEdit) {
-    const ids = rows.map((r) => r._id.toString());
+    const ids = rows.map((r) => r._id);
     const [files, expiring] = await Promise.all([
-      StoredFile.find(
-        { entityType: "user", entityId: { $in: ids }, deletedAt: null, replacedBy: null, category: { $nin: [null, ""] } },
-        { entityId: 1, category: 1, expiryDate: 1 },
-      ).lean(),
-      StoredFile.countDocuments({ entityType: "user", deletedAt: null, replacedBy: null, expiryDate: { $gt: "", $lte: addDays(today, 30) } }),
+      db()
+        .select({ entityId: StoredFile.entityId, category: StoredFile.category, expiryDate: StoredFile.expiryDate })
+        .from(StoredFile)
+        .where(
+          and(
+            eq(StoredFile.entityType, "user"),
+            inList(StoredFile.entityId, ids),
+            isNull(StoredFile.deletedAt),
+            isNull(StoredFile.replacedBy),
+            isNotNull(StoredFile.category),
+            ne(StoredFile.category, ""),
+          ),
+        ),
+      db().$count(
+        StoredFile,
+        and(
+          eq(StoredFile.entityType, "user"),
+          isNull(StoredFile.deletedAt),
+          isNull(StoredFile.replacedBy),
+          gt(StoredFile.expiryDate, ""),
+          lte(StoredFile.expiryDate, addDays(today, 30)),
+        ),
+      ),
     ]);
     expiringCount = expiring;
     for (const f of files) {
@@ -147,7 +173,7 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
           <ChipFilters param="type" options={typeOptions} />
           <FilterBar>
             <SearchInput placeholder="Name, email or employee ID" />
-            <SelectFilter param="department" label="Department" allLabel="All departments" options={departments.map((d) => ({ value: d._id.toString(), label: d.name }))} />
+            <SelectFilter param="department" label="Department" allLabel="All departments" options={departments.map((d) => ({ value: d._id, label: d.name }))} />
             <SelectFilter param="status" label="Employment status" allLabel="Any status" options={settings.employmentStatuses.map((s) => ({ value: s.key, label: s.label }))} />
             <SelectFilter param="role" label="Role" allLabel="All roles" options={roles.map((r) => ({ value: r.key, label: r.name }))} />
             <SelectFilter
@@ -186,9 +212,9 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
               </EmptyRow>
             )}
             {rows.map((r) => {
-              const id = r._id.toString();
-              const dept = r.department ? deptName.get(r.department.toString()) : undefined;
-              const desig = r.designation ? desigName.get(r.designation.toString()) : undefined;
+              const id = r._id;
+              const dept = r.department ? deptName.get(r.department) : undefined;
+              const desig = r.designation ? desigName.get(r.designation) : undefined;
               const docs = docState.get(id);
               const missing = canEdit ? missingRequired(settings.documentCategories, r.personType, docs?.present ?? new Set()).length : 0;
               const categories = categoriesFor(settings.documentCategories, r.personType).length;
@@ -204,7 +230,7 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
                   <Td>
                     <Tag tone={statusTone("personType", r.personType)}>{r.personType === "employee" ? "Employee" : r.personType === "trainee" ? "Trainee" : "Intern"}</Tag>
                   </Td>
-                  <Td className="text-ink-2">{r.reportingManager ? (managers.get(r.reportingManager.toString()) ?? "—") : "—"}</Td>
+                  <Td className="text-ink-2">{r.reportingManager ? (managers.get(r.reportingManager) ?? "—") : "—"}</Td>
                   <Td className="whitespace-nowrap text-ink-2">{fmtDate(r.joiningDate)}</Td>
                   <Td>
                     <OptionChip options={settings.employmentStatuses} value={r.status} />

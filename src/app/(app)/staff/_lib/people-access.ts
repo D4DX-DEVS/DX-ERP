@@ -1,12 +1,12 @@
 import "server-only";
-import type { Types } from "mongoose";
 import { can, type CurrentUser } from "@/lib/auth/session";
+import type { Id } from "@/lib/models";
 
 export interface AccessTarget {
-  _id: Types.ObjectId;
+  _id: Id;
   personType: string;
-  reportingManager?: Types.ObjectId | null;
-  internship?: { mentor?: Types.ObjectId | null } | null;
+  reportingManager?: Id | null;
+  internship?: { mentor?: Id | null } | null;
 }
 
 export interface PersonAccess {
@@ -28,9 +28,9 @@ export interface PersonAccess {
  * account (personType "admin") is never exposed through the staff routes.
  */
 export function personAccess(user: CurrentUser, target: AccessTarget): PersonAccess {
-  const isSelf = user.id === target._id.toString();
-  const isManager = target.reportingManager?.toString() === user.id;
-  const isMentor = target.internship?.mentor?.toString() === user.id;
+  const isSelf = user.id === target._id;
+  const isManager = target.reportingManager === user.id;
+  const isMentor = target.internship?.mentor === user.id;
   const internLike = target.personType === "intern" || target.personType === "trainee";
   const listed = target.personType !== "admin";
   const canEdit = listed && can(user, "staff.edit");

@@ -1,5 +1,6 @@
 import "server-only";
-import { connectDB } from "@/lib/db";
+import { and, eq, gte, lte } from "drizzle-orm";
+import { db } from "@/lib/db";
 import { Holiday } from "@/lib/models";
 import type { AppSettings } from "@/lib/config-defaults";
 import { eachDay, weekday } from "@/lib/time";
@@ -17,8 +18,10 @@ export interface WorkCalendar {
 
 /** Loads holidays for a date range and returns working-day helpers (FRS §7.2 configurable calendar). */
 export async function workCalendar(settings: AppSettings, from: string, to: string): Promise<WorkCalendar> {
-  await connectDB();
-  const rows = await Holiday.find({ date: { $gte: from, $lte: to }, optional: false }, { date: 1, name: 1 }).lean();
+  const rows = await db()
+    .select({ date: Holiday.date, name: Holiday.name })
+    .from(Holiday)
+    .where(and(gte(Holiday.date, from), lte(Holiday.date, to), eq(Holiday.optional, false)));
   const holidays = new Map(rows.map((h) => [h.date, h.name]));
   const workingDays = new Set(settings.attendance.workingDays);
   const cal: WorkCalendar = {

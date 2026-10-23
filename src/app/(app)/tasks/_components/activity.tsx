@@ -10,7 +10,7 @@ export function CommentList({ comments, empty = "No comments yet." }: { comments
   return (
     <ul className="flex flex-col divide-y divide-line-soft">
       {comments.map((c, i) => (
-        <li key={c._id?.toString() ?? i} className="flex gap-3 py-3.5 first:pt-0">
+        <li key={c._id ?? i} className="flex gap-3 py-3.5 first:pt-0">
           <Avatar name={c.userName} size="sm" />
           <div className="min-w-0 flex-1">
             <div className="text-[13px]">
@@ -18,7 +18,7 @@ export function CommentList({ comments, empty = "No comments yet." }: { comments
             </div>
             <p className="mt-0.5 text-sm leading-relaxed break-words whitespace-pre-line text-ink-2">{c.text}</p>
             {c.attachments && c.attachments.length > 0 && (
-              <AttachmentList className="mt-2" files={c.attachments.map((a) => ({ file: a.file.toString(), name: a.name, size: a.size }))} />
+              <AttachmentList className="mt-2" files={c.attachments.map((a) => ({ file: a.file, name: a.name, size: a.size }))} />
             )}
           </div>
         </li>
@@ -36,7 +36,7 @@ function historyTitle(h: HistoryEntry): string {
 /** Change history, newest first. */
 export function HistoryTimeline({ history, empty = "No history yet." }: { history: HistoryEntry[]; empty?: string }) {
   const items = [...history].reverse().map((h, i) => ({
-    id: h._id?.toString() ?? String(i),
+    id: h._id ?? String(i),
     title: historyTitle(h),
     meta: h.byName ?? "System",
     at: h.at,

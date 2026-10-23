@@ -1,4 +1,5 @@
-import { connectDB } from "@/lib/db";
+import { asc } from "drizzle-orm";
+import { db } from "@/lib/db";
 import { can, getCurrentUser } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { exportResponse, isExportFormat } from "@/lib/export";
@@ -22,36 +23,37 @@ export async function GET(request: Request) {
   const format = url.searchParams.get("format");
   if (!isExportFormat(format)) return new Response("Unknown export format", { status: 400 });
 
-  await connectDB();
   const settings = await getSettings();
   const sp = Object.fromEntries(url.searchParams.entries());
-  const users = await User.find(staffFilter(sp, settings), {
-    employeeId: 1,
-    name: 1,
-    email: 1,
-    phone: 1,
-    personType: 1,
-    role: 1,
-    department: 1,
-    designation: 1,
-    employmentType: 1,
-    joiningDate: 1,
-    status: 1,
-    reportingManager: 1,
-    accountActive: 1,
-  })
-    .sort({ name: 1 })
-    .limit(5000)
-    .lean();
+  const users = await db()
+    .select({
+      employeeId: User.employeeId,
+      name: User.name,
+      email: User.email,
+      phone: User.phone,
+      personType: User.personType,
+      role: User.role,
+      department: User.department,
+      designation: User.designation,
+      employmentType: User.employmentType,
+      joiningDate: User.joiningDate,
+      status: User.status,
+      reportingManager: User.reportingManager,
+      accountActive: User.accountActive,
+    })
+    .from(User)
+    .where(staffFilter(sp, settings))
+    .orderBy(asc(User.name))
+    .limit(5000);
 
   const [departments, designations, roles, managers] = await Promise.all([
-    Department.find({}, { name: 1 }).lean(),
-    Designation.find({}, { name: 1 }).lean(),
-    Role.find({}, { key: 1, name: 1 }).lean(),
+    db().select({ _id: Department._id, name: Department.name }).from(Department),
+    db().select({ _id: Designation._id, name: Designation.name }).from(Designation),
+    db().select({ key: Role.key, name: Role.name }).from(Role),
     namesFor(users.map((u) => u.reportingManager)),
   ]);
-  const dept = new Map(departments.map((d) => [d._id.toString(), d.name]));
-  const desig = new Map(designations.map((d) => [d._id.toString(), d.name]));
+  const dept = new Map(departments.map((d) => [d._id, d.name]));
+  const desig = new Map(designations.map((d) => [d._id, d.name]));
   const role = new Map(roles.map((r) => [r.key, r.name]));
 
   await audit(user, { action: "export", entity: "user", summary: `Exported staff directory (${users.length} records, ${format})` });
@@ -68,12 +70,12 @@ export async function GET(request: Request) {
       { header: "Phone", value: (u) => u.phone ?? "", width: 16 },
       { header: "Type", value: (u) => statusLabel("personType", u.personType), width: 11 },
       { header: "Role", value: (u) => role.get(u.role) ?? u.role, width: 18 },
-      { header: "Department", value: (u) => (u.department ? dept.get(u.department.toString()) : "") ?? "", width: 20 },
-      { header: "Designation", value: (u) => (u.designation ? desig.get(u.designation.toString()) : "") ?? "", width: 22 },
+      { header: "Department", value: (u) => (u.department ? dept.get(u.department) : "") ?? "", width: 20 },
+      { header: "Designation", value: (u) => (u.designation ? desig.get(u.designation) : "") ?? "", width: 22 },
       { header: "Employment", value: (u) => employmentTypeLabel(u.employmentType), width: 13 },
       { header: "Joined", value: (u) => fmtDate(u.joiningDate), width: 13 },
       { header: "Status", value: (u) => optionLabel(settings.employmentStatuses, u.status), width: 14 },
-      { header: "Reports to", value: (u) => (u.reportingManager ? managers.get(u.reportingManager.toString()) : "") ?? "", width: 22 },
+      { header: "Reports to", value: (u) => (u.reportingManager ? managers.get(u.reportingManager) : "") ?? "", width: 22 },
       { header: "Login access", value: (u) => (u.accountActive ? "Enabled" : "Off"), width: 12 },
     ],
   });
