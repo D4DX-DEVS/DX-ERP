@@ -1,6 +1,7 @@
 # D4DX ERP — engineering conventions
 
-Next.js 16 (App Router, Turbopack, React 19.3), MongoDB via Mongoose 9, Tailwind CSS v4, zod 4.
+Next.js 16 (App Router, Turbopack, React 19.3) on Cloudflare Workers (OpenNext), Cloudflare D1 via Drizzle ORM,
+R2 for files, Tailwind CSS v4, zod 4. Database rules and the query cheat sheet: `docs/D1-DRIZZLE.md`.
 Requirements: `docs/FRS.md`. Visual design: `docs/design/*.dc.html` (inline-styled HTML from the
 design canvas; `Sidebar.dc.html`, `Topbar.dc.html`, `Components.dc.html`, `Tokens.dc.html` define the system).
 
@@ -22,7 +23,8 @@ src/
   components/ui/           design-system components (do not fork; extend only if essential)
   components/shell/        app chrome
   lib/
-    models/                Mongoose models (one file per domain; index.ts re-exports all)
+    models/                Drizzle tables (one file per domain; index.ts re-exports all)
+    db.ts  sql.ts          db() per-request D1 client; SQL helpers (inList, jsonHas, jsonPush, searchAny, …)
     auth/session.ts        getCurrentUser / requireUser / requirePagePermission / can / canAny
     actions.ts             runAction / actionUser / actionPermission / ActionError / parse
     validation.ts          zs.* zod helpers for form input
@@ -38,9 +40,10 @@ src/
 
 ```tsx
 import { requirePagePermission, requireUser, can } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
+import { and, desc, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
 import { Movement } from "@/lib/models";
-import { param, pageParam, PAGE_SIZE, searchRegex, type SearchParams } from "@/lib/query";
+import { param, pageParam, PAGE_SIZE, type SearchParams } from "@/lib/query";
 import { PageBody, PageHeader } from "@/components/ui/page";
 
 export const metadata = { title: "Movement register" };
@@ -48,13 +51,11 @@ export const metadata = { title: "Movement register" };
 export default async function Page({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();                        // or requirePagePermission("movement.view_all")
   const sp = await searchParams;
-  await connectDB();
   const page = pageParam(sp);
-  const filter: Record<string, unknown> = {};
-  if (!can(user, "movement.view_all")) filter.user = user._id; // scope on the SERVER, always
+  const where = and(can(user, "movement.view_all") ? undefined : eq(Movement.user, user._id)); // scope on the SERVER, always
   const [rows, total] = await Promise.all([
-    Movement.find(filter).sort({ outTime: -1 }).skip((page - 1) * PAGE_SIZE).limit(PAGE_SIZE).lean(),
-    Movement.countDocuments(filter),
+    db().select().from(Movement).where(where).orderBy(desc(Movement.outTime)).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
+    db().$count(Movement, where),
   ]);
   return (
     <PageBody>
@@ -69,20 +70,23 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   Validate ids with `isObjectId()` and call `notFound()` for bad / missing records.
 * Authorisation is enforced in **every** page and action. Use `requirePagePermission(...)` (renders 403)
   or explicit checks + `forbidden()` from `next/navigation`. Never rely on hiding a button.
-* Use `.lean()` for reads. Server Components may render Dates / ObjectIds directly (call `.toString()`).
+* Ids are strings; optional columns come back as `null`. Select only the columns a page needs (tables carry
+  JSON columns such as `history`). Server Components may render Dates directly.
   **Before passing data to a Client Component, convert it** with `plain()` from `lib/serialize.ts`
   or map to a small view-model of strings/numbers.
+* D1 limits: 100 bound parameters per statement (use `inList`, `insertChunked`) and 50 queries per request on the
+  free plan — no queries inside loops; batch with `inList` + `Map`, or join.
 * Never send confidential fields (`salary`, `salaryHistory`, `bank`, restricted client data, personal
   movement details) to users who lack the permission — project them out in the query.
 * The super admin account has `personType: "admin"`; exclude it from staff lists, attendance,
-  payroll etc. with `personType: { $in: ["employee", "trainee", "intern"] }`. `isStaff(user)` is false
+  payroll etc. with `inList(User.personType, ["employee", "trainee", "intern"])`. `isStaff(user)` is false
   for the super admin (no own attendance / movement / leave).
 
 ## Mutations (Server Actions)
 
 One `actions.ts` per route folder, starting with `"use server"`. Every export returns
-`Promise<ActionResult<T>>` and wraps its body in `runAction` (connects DB, maps zod/mongoose/duplicate
-errors to field errors, rethrows redirects):
+`Promise<ActionResult<T>>` and wraps its body in `runAction` (maps zod / UNIQUE-constraint errors to field
+errors, rethrows redirects):
 
 ```ts
 "use server";

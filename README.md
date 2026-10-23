@@ -4,8 +4,9 @@ Internal ERP for **D4DX Innovations LLP** — people, attendance, office movemen
 projects, timesheets, QA, CRM, proposals, contracts, invoicing, expenses, assets, reports and
 administration in one responsive web app (desktop, tablet and phone).
 
-Built with Next.js 16 (App Router), React 19, MongoDB (Mongoose 9), Tailwind CSS 4 and
-DigitalOcean Spaces for files. Requirements: [`docs/FRS.md`](docs/FRS.md). Engineering
+Built with Next.js 16 (App Router), React 19 and Tailwind CSS 4, hosted on **Cloudflare Workers**
+(via OpenNext) with **Cloudflare D1** (SQLite, through Drizzle ORM) as the database and **Cloudflare R2**
+for files. Database guide: [`docs/D1-DRIZZLE.md`](docs/D1-DRIZZLE.md). Requirements: [`docs/FRS.md`](docs/FRS.md). Engineering
 conventions: [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md). Visual design sources: `docs/design/`.
 
 ---
@@ -15,35 +16,31 @@ conventions: [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md). Visual design sources
 ```bash
 npm install
 cp .env.example .env.local   # then fill in the values (see below)
-npm run dev                  # http://localhost:3000
+npm run db:migrate:local     # create the tables in the local D1 (.wrangler/state)
+npm run dev                  # http://localhost:3000 — uses the local D1 + R2 simulators
+npm run preview              # the real Workers runtime (workerd) locally
 ```
 
-Production:
-
-```bash
-npm run build
-npm start
-```
-
-Requires Node.js 20.19+ (22 LTS or 24 recommended).
+Production runs on Cloudflare — see **7. Deploying to Cloudflare**. Requires Node.js 20.19+ (22 LTS recommended).
 
 ## 2. Environment variables
 
-All configuration lives in environment variables — see [`.env.example`](.env.example) for the
-full, commented list.
+All configuration lives in environment variables — see [`.env.example`](.env.example) (local) and
+[`.env.cloudflare.example`](.env.cloudflare.example) (production Worker secrets). The database (`DB`) and the
+file buckets (`FILES`, `PUBLIC_FILES`) are Worker **bindings** in `wrangler.jsonc`, not variables.
 
 | Variable | Purpose |
 | --- | --- |
 | `APP_URL` | Public URL (no trailing slash). Used for OAuth redirects and links in emails. |
 | `AUTH_SECRET` | ≥ 32 random characters for signing sessions (`openssl rand -base64 48`). |
-| `MONGODB_URI` | MongoDB connection string (include the database name in the path). |
 | `SUPER_ADMIN_EMAIL`, `SUPER_ADMIN_NAME` | The single Super Admin account. |
 | `SUPER_ADMIN_PASSWORD` | Super Admin password for development (use 12+ characters). Leave empty in production. |
 | `SUPER_ADMIN_PASSWORD_HASH` | **Production:** scrypt hash from `npm run hash-password`, used instead of the plain password. |
 | `SUPER_ADMIN_TOTP_SECRET` | **Production:** base32 TOTP secret — the admin sign-in then also needs an authenticator code. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google sign-in for staff. |
 | `GOOGLE_ALLOWED_DOMAIN` | **Production:** restrict sign-in to your Workspace domain. Without it any Google account whose address matches a staff record can sign in as that person. |
-| `DO_SPACES_KEY`, `DO_SPACES_SECRET`, `DO_SPACES_ENDPOINT`, `DO_SPACES_REGION`, `DO_SPACES_BUCKET`, `DO_SPACES_CDN_URL`, `DO_SPACES_FOLDER` | File storage (documents, receipts, contracts, photos, backups). |
+| `PUBLIC_FILES_URL` | Public URL of the `dx-erp-public` R2 bucket (r2.dev or custom domain) for photos and the logo; empty = served through the app. |
+| `FILES_FOLDER` | Key prefix inside the R2 buckets (default `dx-erp`). |
 | `CRON_SECRET` | Protects `/api/cron` (scheduled reminders and backups). |
 | `NEXT_PUBLIC_APP_TIMEZONE` | Company time zone (default `Asia/Kolkata`). |
 | `SMTP_*` | Optional email delivery of notifications. |
@@ -73,13 +70,12 @@ full, commented list.
 4. Configure the OAuth consent screen (Internal for a Google Workspace org).
 5. Put the client ID and secret in `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
 
-### DigitalOcean Spaces
+### File storage (R2)
 
-Create a Space (private by default) and an access key with read/write access to it. Files are
-uploaded through the server, so no bucket CORS rules are needed. Documents are stored privately and
-served through short-lived signed URLs after a permission check; profile photos and the company
-logo are public (served from `DO_SPACES_CDN_URL` when set). Backups go to
-`<DO_SPACES_FOLDER>/backups/`.
+Two R2 buckets, bound to the Worker: `dx-erp-files` (binding `FILES`, private — documents, receipts,
+contracts, backups; streamed by `/api/files/<id>` only after a permission check) and `dx-erp-public`
+(binding `PUBLIC_FILES` — profile photos and the company logo). Uploads go through the server, so no CORS rules
+or access keys are needed. Backups go to `<FILES_FOLDER>/backups/`.
 
 ### First-run checklist (Super Admin)
 
@@ -108,29 +104,56 @@ Reminders and housekeeping (overdue movements and missing In-Time, missing check
 approval reminders, task and milestone deadlines, follow-ups, contract/proposal expiry, overdue
 invoices, document and warranty expiry, retention purges, daily backups) run:
 
-* opportunistically after page loads (at most once a minute per server instance), and
-* from `GET /api/cron` with header `Authorization: Bearer <CRON_SECRET>`.
-
-On Vercel, `vercel.json` registers a daily cron (Vercel sends the bearer header automatically when
-`CRON_SECRET` is set). On other hosts, call the endpoint every 5–15 minutes, e.g.
+* opportunistically after page loads (at most once a minute per Worker isolate), and
+* from a Cloudflare **Cron Trigger** every 15 minutes (`triggers.crons` in `wrangler.jsonc`; the entry point
+  `cloudflare/worker.ts` calls `/api/cron` with `Authorization: Bearer <CRON_SECRET>`). Each job is throttled to
+  its own interval. The endpoint can also be called manually:
 
 ```bash
-curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://erp.example.com/api/cron
+curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://dx-erp.<subdomain>.workers.dev/api/cron
 ```
 
 ## 6. Backups and restore
 
 **Admin → Configuration → Backup & restore** (permission *Run backups and restore data*): run a
-backup on demand (all business collections, gzip-compressed Extended JSON in Spaces), verify a
+backup on demand (all business tables, gzip-compressed JSON in the private R2 bucket), verify a
 backup without writing anything (test restore), download it, or restore it (a safety backup is
-taken first). Automatic daily backups and retention are configured in **Data & security**.
-Database-level backups from your MongoDB provider are still recommended.
+taken first; the restore is applied as one D1 transaction). Automatic daily backups and retention are
+configured in **Data & security**. D1 also keeps point-in-time recovery (Time Travel):
+`npx wrangler d1 time-travel restore dx-erp --timestamp=<ISO time>`.
 
-## 7. Deployment notes
+## 7. Deploying to Cloudflare
 
-* Any Node.js host works (Vercel, DigitalOcean App Platform, a VM with `npm run build && npm start`).
-* Set every environment variable in the host; set `APP_URL` to the public URL.
-* MongoDB must be reachable from the host (allow-list the host's IPs on Atlas / DO Managed DB).
+One-time setup (needs a Cloudflare account; the free plan works for a trial):
+
+```bash
+npx wrangler login                                    # approve in the browser
+npx wrangler d1 create dx-erp                         # copy the printed database_id into wrangler.jsonc
+npx wrangler r2 bucket create dx-erp-files
+npx wrangler r2 bucket create dx-erp-public
+npx wrangler r2 bucket dev-url enable dx-erp-public   # optional public URL → PUBLIC_FILES_URL
+npm run db:migrate:remote                             # create the tables in the remote D1
+cp .env.cloudflare.example .env.cloudflare            # fill in production values (git-ignored)
+npx wrangler secret bulk .env.cloudflare              # upload them as Worker secrets
+```
+
+Deploy (and every later release):
+
+```bash
+npm run deploy
+```
+
+`npm run deploy` (`scripts/cf/deploy.sh`) builds with the local `.env*` files moved aside, because OpenNext
+bundles every env file it finds into the Worker; production values live only in Worker secrets. The app is
+served at `https://dx-erp.<subdomain>.workers.dev` (attach a custom domain in the dashboard). Add
+`<APP_URL>/api/auth/google/callback` to the Google OAuth client's redirect URIs.
+
+Data from the former MongoDB database can be copied once with
+`node --env-file=.env.local --import tsx scripts/cf/export-atlas.ts` (read-only; writes `.data/atlas.sql`),
+then `npx wrangler d1 execute dx-erp --remote --file .data/atlas.sql`.
+
+* Workers Free: 100k requests/day and **10 ms CPU per request**; Workers Paid ($5/month) lifts CPU to 30 s.
+  D1 Free: 5 GB, 5M rows read / 100k rows written per day; R2 Free: 10 GB.
 * Statutory payroll deductions (PF, PT, TDS …) are configurable under **Configuration → Payroll &
   stipends** and must be reviewed before production use (FRS §10.4).
 
@@ -138,8 +161,13 @@ Database-level backups from your MongoDB provider are still recommended.
 
 | Command | What it does |
 | --- | --- |
-| `npm run dev` | Development server |
-| `npm run build` / `npm start` | Production build / server |
+| `npm run dev` | Development server (local D1 / R2 simulators) |
+| `npm run preview` | Build for Workers and run it locally in workerd |
+| `npm run deploy` | Build for Workers and deploy to Cloudflare (without local env files) |
+| `npm run db:generate` | Generate a SQL migration in `drizzle/` after changing `src/lib/models` |
+| `npm run db:migrate:local` / `db:migrate:remote` | Apply migrations to the local / remote D1 |
+| `npm run cf-typegen` | Regenerate `cloudflare-env.d.ts` (binding types) after editing `wrangler.jsonc` |
+| `npm run build` | Next.js production build (used by the Workers build) |
 | `npm run lint` | ESLint |
 | `npm run typecheck` | Route type generation + TypeScript check |
 | `npm run hash-password` | Generate `SUPER_ADMIN_PASSWORD_HASH` |
