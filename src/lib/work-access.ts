@@ -1,8 +1,10 @@
 import "server-only";
-import { connectDB } from "@/lib/db";
-import { Project, Task, User, Types, type HistoryEntry, type IssueStatus, type ObjectId } from "@/lib/models";
+import { and, eq, isNotNull, ne, or, type SQL } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { Issue, Project, Task, TimesheetEntry, User, type HistoryEntry, type Id, type IssueStatus } from "@/lib/models";
 import { can, isInternLike, type CurrentUser } from "@/lib/auth/session";
 import type { StatusOption } from "@/lib/config-defaults";
+import { inList, jsonHas, jsonHasAny, jsonHasField, jsonPath } from "@/lib/sql";
 
 /**
  * Visibility and capability rules for the Work modules (projects, tasks, timesheets, QA).
@@ -10,10 +12,10 @@ import type { StatusOption } from "@/lib/config-defaults";
  * place (FRS §6.3, §11.4, §13.3). Interns and trainees only ever see tasks assigned or shared
  * with them and issues assigned to / reported by them, and never receive client or budget data.
  */
-export type Filter = Record<string, unknown>;
-type Id = { toString(): string };
+/** SQL condition for a list query; `undefined` means "no restriction". Compose with `and(...)`. */
+export type Filter = SQL | undefined;
 
-const sid = (v: Id | null | undefined): string | undefined => v?.toString();
+const sid = (v: Id | null | undefined): string | undefined => v ?? undefined;
 
 /* ------------------------------------------------------------------ */
 /* Small shared helpers                                                */
@@ -36,11 +38,13 @@ export interface PersonLite {
 
 /** id → { name, photo, personType } for a set of users. */
 export async function peopleMap(ids: (Id | null | undefined)[]): Promise<Map<string, PersonLite>> {
-  const unique = [...new Set(ids.filter(Boolean).map((x) => x!.toString()))];
+  const unique = [...new Set(ids.filter((x): x is Id => Boolean(x)))];
   if (unique.length === 0) return new Map();
-  await connectDB();
-  const users = await User.find({ _id: { $in: unique } }, { name: 1, photo: 1, personType: 1 }).lean();
-  return new Map(users.map((u) => [u._id.toString(), { id: u._id.toString(), name: u.name, photo: u.photo, personType: u.personType }]));
+  const users = await db()
+    .select({ id: User._id, name: User.name, photo: User.photo, personType: User.personType })
+    .from(User)
+    .where(inList(User._id, unique));
+  return new Map(users.map((u) => [u.id, { id: u.id, name: u.name, photo: u.photo ?? undefined, personType: u.personType }]));
 }
 
 export function keysInCategories(options: StatusOption[], categories: string[]): string[] {
@@ -62,18 +66,19 @@ export const PROJECT_CLOSED_CATEGORIES = ["completed", "cancelled"];
 /** Issues that are still unresolved (not yet verified or closed). */
 export const ISSUE_RESOLVED_STATUSES = ["verified", "closed"];
 
-export function toObjectIds(ids: string[]): ObjectId[] {
-  return ids.map((id) => new Types.ObjectId(id));
-}
-
 /* ------------------------------------------------------------------ */
 /* Projects                                                            */
 /* ------------------------------------------------------------------ */
 
-/** Mongo filter for the projects a user may see. */
+/** Condition matching the projects a user manages or belongs to. */
+function memberOfProject(userId: Id): SQL {
+  return or(eq(Project.manager, userId), jsonHasField(Project.team, "user", userId))!;
+}
+
+/** Condition for the projects a user may see. */
 export function projectFilter(user: CurrentUser): Filter {
-  if (can(user, "projects.view_all")) return {};
-  return { $or: [{ manager: user._id }, { "team.user": user._id }] };
+  if (can(user, "projects.view_all")) return undefined;
+  return memberOfProject(user._id);
 }
 
 export interface ProjectCaps {
@@ -90,7 +95,7 @@ export interface ProjectCaps {
 
 export function projectCaps(user: CurrentUser, project: { manager?: Id | null; team?: { user: Id }[] }): ProjectCaps {
   const isManager = sid(project.manager) === user.id;
-  const isMember = (project.team ?? []).some((m) => m.user.toString() === user.id);
+  const isMember = (project.team ?? []).some((m) => m.user === user.id);
   const restricted = isInternLike(user);
   return {
     isManager,
@@ -110,33 +115,34 @@ export function canSeeClient(user: CurrentUser, client: { confidential?: boolean
 }
 
 /** Ids of the projects a user manages or belongs to. */
-export async function myProjectIds(user: CurrentUser): Promise<ObjectId[]> {
-  await connectDB();
-  const rows = await Project.find({ $or: [{ manager: user._id }, { "team.user": user._id }] }, { _id: 1 }).lean();
-  return rows.map((r) => r._id);
+export async function myProjectIds(user: CurrentUser): Promise<Id[]> {
+  const rows = await db().select({ id: Project._id }).from(Project).where(memberOfProject(user._id));
+  return rows.map((r) => r.id);
 }
 
 /* ------------------------------------------------------------------ */
 /* Tasks                                                               */
 /* ------------------------------------------------------------------ */
 
-/** Mongo filter for the tasks a user may see (FRS §11.4). */
+/** Condition for the tasks a user may see (FRS §11.4). */
 export async function taskFilter(user: CurrentUser): Promise<Filter> {
-  if (can(user, "tasks.view_all")) return {};
+  if (can(user, "tasks.view_all")) return undefined;
   const me = user._id;
-  if (isInternLike(user)) return { $or: [{ assignees: me }, { sharedWith: me }] };
-  await connectDB();
+  if (isInternLike(user)) return or(jsonHas(Task.assignees, me), jsonHas(Task.sharedWith, me));
   const [projectIds, people] = await Promise.all([
     myProjectIds(user),
-    User.find({ $or: [{ reportingManager: me }, { "internship.mentor": me }] }, { _id: 1 }).lean(),
+    db()
+      .select({ id: User._id })
+      .from(User)
+      .where(or(eq(User.reportingManager, me), eq(jsonPath(User.internship, "mentor"), me))),
   ]);
-  const or: Filter[] = [{ assignees: me }, { sharedWith: me }, { reporter: me }, { reviewer: me }];
-  if (projectIds.length) or.push({ project: { $in: projectIds } });
+  const any: SQL[] = [jsonHas(Task.assignees, me), jsonHas(Task.sharedWith, me), eq(Task.reporter, me), eq(Task.reviewer, me)];
+  if (projectIds.length) any.push(inList(Task.project, projectIds));
   // Managers and mentors can follow the work of their direct reports and mentees.
-  if (people.length) or.push({ assignees: { $in: people.map((p) => p._id) } });
+  if (people.length) any.push(jsonHasAny(Task.assignees, people.map((p) => p.id)));
   // `tasks.review` holders can open work awaiting review (and work they reviewed) even when no reviewer was named.
-  if (can(user, "tasks.review")) or.push({ "submissions.reviewStatus": "pending" }, { "submissions.reviewedBy": me });
-  return { $or: or };
+  if (can(user, "tasks.review")) any.push(jsonHasField(Task.submissions, "reviewStatus", "pending"), jsonHasField(Task.submissions, "reviewedBy", me));
+  return or(...any);
 }
 
 export interface TaskCaps {
@@ -158,7 +164,7 @@ export function taskCaps(
   task: { assignees: Id[]; reporter?: Id | null; reviewer?: Id | null },
   projectManager?: Id | null,
 ): TaskCaps {
-  const isAssignee = task.assignees.some((a) => a.toString() === user.id);
+  const isAssignee = task.assignees.some((a) => a === user.id);
   const isReviewer = sid(task.reviewer) === user.id;
   const isReporter = sid(task.reporter) === user.id;
   const isProjectManager = Boolean(projectManager) && sid(projectManager) === user.id;
@@ -202,15 +208,15 @@ export function canCreateTask(user: CurrentUser, project?: { manager?: Id | null
 /* QA issues                                                           */
 /* ------------------------------------------------------------------ */
 
-/** Mongo filter for the issues a user may see (FRS §13.3). */
+/** Condition for the issues a user may see (FRS §13.3). */
 export async function issueFilter(user: CurrentUser): Promise<Filter> {
-  if (can(user, "qa.view_all")) return {};
+  if (can(user, "qa.view_all")) return undefined;
   const me = user._id;
-  if (isInternLike(user)) return { $or: [{ assignee: me }, { reporter: me }] };
+  if (isInternLike(user)) return or(eq(Issue.assignee, me), eq(Issue.reporter, me));
   const projectIds = await myProjectIds(user);
-  const or: Filter[] = [{ assignee: me }, { reporter: me }];
-  if (projectIds.length) or.push({ project: { $in: projectIds } });
-  return { $or: or };
+  const any: SQL[] = [eq(Issue.assignee, me), eq(Issue.reporter, me)];
+  if (projectIds.length) any.push(inList(Issue.project, projectIds));
+  return or(...any);
 }
 
 export interface IssueCaps {
@@ -226,7 +232,7 @@ export function issueCaps(user: CurrentUser, issue: { assignee?: Id | null; repo
   const isProjectManager = Boolean(projectManager) && sid(projectManager) === user.id;
   return {
     isAssignee: sid(issue.assignee) === user.id,
-    isReporter: issue.reporter.toString() === user.id,
+    isReporter: issue.reporter === user.id,
     isProjectManager,
     manage: can(user, "qa.manage") || isProjectManager,
     verify: can(user, "qa.verify"),
@@ -268,15 +274,15 @@ export function allowedIssueSteps(user: CurrentUser, caps: IssueCaps, issue: { s
 /* ------------------------------------------------------------------ */
 
 /** Projects the user may log time on: their projects plus those of tasks assigned / shared with them. */
-export async function loggableProjectIds(user: CurrentUser): Promise<ObjectId[]> {
-  await connectDB();
+export async function loggableProjectIds(user: CurrentUser): Promise<Id[]> {
   const [mine, viaTasks] = await Promise.all([
     myProjectIds(user),
-    Task.distinct("project", { $or: [{ assignees: user._id }, { sharedWith: user._id }], project: { $exists: true, $ne: null } }),
+    db()
+      .selectDistinct({ project: Task.project })
+      .from(Task)
+      .where(and(or(jsonHas(Task.assignees, user._id), jsonHas(Task.sharedWith, user._id)), isNotNull(Task.project))),
   ]);
-  const seen = new Map<string, ObjectId>();
-  for (const id of [...mine, ...(viaTasks as ObjectId[])]) seen.set(id.toString(), id);
-  return [...seen.values()];
+  return [...new Set([...mine, ...viaTasks.map((t) => t.project!)])];
 }
 
 export interface TimesheetScope {
@@ -286,8 +292,8 @@ export interface TimesheetScope {
   reports: Set<string>;
   /** Whether the user has any review responsibility at all. */
   hasAccess: boolean;
-  /** Mongo filter matching the entries in scope (excludes the user's own entries). */
-  filter: Filter;
+  /** Condition matching the entries in scope (excludes the user's own entries). */
+  filter: SQL;
   /** True when the entry falls inside the scope (never the user's own entry). */
   includes: (entry: { user: Id; project?: Id | null; reviewer?: Id | null }) => boolean;
 }
@@ -297,18 +303,18 @@ export interface TimesheetScope {
  * managers review entries on their projects; reporting managers review their direct reports.
  */
 export async function timesheetScope(user: CurrentUser, mode: "approve" | "view" = "approve"): Promise<TimesheetScope> {
-  await connectDB();
   const all = can(user, "timesheets.approve") || (mode === "view" && can(user, "timesheets.view_all"));
   const [projects, reports] = await Promise.all([
-    Project.find({ manager: user._id }, { _id: 1 }).lean(),
-    User.find({ reportingManager: user._id }, { _id: 1 }).lean(),
+    db().select({ id: Project._id }).from(Project).where(eq(Project.manager, user._id)),
+    db().select({ id: User._id }).from(User).where(eq(User.reportingManager, user._id)),
   ]);
-  const managedProjects = new Set(projects.map((p) => p._id.toString()));
-  const reportSet = new Set(reports.map((r) => r._id.toString()));
-  const or: Filter[] = [{ reviewer: user._id }];
-  if (projects.length) or.push({ project: { $in: projects.map((p) => p._id) } });
-  if (reports.length) or.push({ user: { $in: reports.map((r) => r._id) } });
-  const filter: Filter = all ? { user: { $ne: user._id } } : { $and: [{ user: { $ne: user._id } }, { $or: or }] };
+  const managedProjects = new Set(projects.map((p) => p.id));
+  const reportSet = new Set(reports.map((r) => r.id));
+  const any: SQL[] = [eq(TimesheetEntry.reviewer, user._id)];
+  if (projects.length) any.push(inList(TimesheetEntry.project, [...managedProjects]));
+  if (reports.length) any.push(inList(TimesheetEntry.user, [...reportSet]));
+  const notMine = ne(TimesheetEntry.user, user._id);
+  const filter: SQL = all ? notMine : and(notMine, or(...any))!;
   const hasAccess = all || managedProjects.size > 0 || reportSet.size > 0;
   return {
     all,
@@ -317,11 +323,11 @@ export async function timesheetScope(user: CurrentUser, mode: "approve" | "view"
     hasAccess,
     filter,
     includes: (entry) => {
-      if (entry.user.toString() === user.id) return false;
+      if (entry.user === user.id) return false;
       if (all) return true;
       if (sid(entry.reviewer) === user.id) return true;
-      if (entry.project && managedProjects.has(entry.project.toString())) return true;
-      return reportSet.has(entry.user.toString());
+      if (entry.project && managedProjects.has(entry.project)) return true;
+      return reportSet.has(entry.user);
     },
   };
 }

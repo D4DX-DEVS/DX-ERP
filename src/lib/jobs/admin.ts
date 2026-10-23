@@ -68,7 +68,7 @@ async function serviceReminders(): Promise<string> {
 async function automaticBackup(): Promise<string> {
   const settings = await getSettings();
   if (!settings.data.autoBackup) return "automatic backup is off";
-  if (!env.spaces.configured) return "skipped: file storage is not configured";
+  if (!env.storage.configured) return "skipped: file storage is not configured";
   try {
     const backup = await createBackup("scheduled");
     const pruned = await pruneBackups(settings.data.backupRetentionCount);

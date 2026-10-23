@@ -1,17 +1,17 @@
 import "server-only";
-import { connectDB } from "@/lib/db";
+import { sql } from "drizzle-orm";
+import { db } from "@/lib/db";
 import { Counter } from "@/lib/models";
 import { monthKey } from "@/lib/time";
 
 /** Atomically increments and returns the next value of a named sequence. */
 export async function nextSeq(name: string): Promise<number> {
-  await connectDB();
-  const doc = await Counter.findOneAndUpdate(
-    { _id: name },
-    { $inc: { seq: 1 } },
-    { upsert: true, returnDocument: "after" },
-  ).lean();
-  return doc!.seq;
+  const [row] = await db()
+    .insert(Counter)
+    .values({ _id: name, seq: 1 })
+    .onConflictDoUpdate({ target: Counter._id, set: { seq: sql`${Counter.seq} + 1` } })
+    .returning({ seq: Counter.seq });
+  return row.seq;
 }
 
 /** e.g. nextNumber("movement", "MOV-", 6) → "MOV-000124" */

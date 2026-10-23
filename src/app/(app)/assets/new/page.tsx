@@ -15,7 +15,7 @@ export default async function Page() {
   return (
     <PageBody className="max-w-3xl">
       <PageHeader back={{ href: "/assets", label: "Assets" }} title="Add asset" />
-      <AssetForm categories={settings.assetCategories} departments={departments.map((d) => ({ id: d._id.toString(), name: d.name }))} storageConfigured={env.spaces.configured} />
+      <AssetForm categories={settings.assetCategories} departments={departments.map((d) => ({ id: d._id.toString(), name: d.name }))} storageConfigured={env.storage.configured} />
     </PageBody>
   );
 }

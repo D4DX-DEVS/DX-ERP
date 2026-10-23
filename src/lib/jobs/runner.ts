@@ -1,5 +1,6 @@
 import "server-only";
-import { connectDB } from "@/lib/db";
+import { and, eq, isNull, lt, or } from "drizzle-orm";
+import { db } from "@/lib/db";
 import { SystemJob } from "@/lib/models";
 import { JOBS } from "./registry";
 
@@ -13,31 +14,26 @@ async function acquire(name: string, intervalMinutes: number, force: boolean): P
   const now = new Date();
   const dueBefore = new Date(now.getTime() - intervalMinutes * 60_000);
   const lockUntil = new Date(now.getTime() + 5 * 60_000);
-  const filter = force
-    ? { _id: name, $or: [{ lockedUntil: null }, { lockedUntil: { $lt: now } }] }
-    : {
-        _id: name,
-        $and: [
-          { $or: [{ lockedUntil: null }, { lockedUntil: { $lt: now } }] },
-          { $or: [{ lastRunAt: null }, { lastRunAt: { $lt: dueBefore } }] },
-        ],
-      };
-  try {
-    const res = await SystemJob.findOneAndUpdate(filter, { $set: { lockedUntil: lockUntil } }, { upsert: true, returnDocument: "after" }).lean();
-    return Boolean(res);
-  } catch (error) {
-    // Duplicate key on upsert = another instance holds the lock or the job is not due.
-    if ((error as { code?: number }).code === 11000) return false;
-    throw error;
-  }
+  const unlocked = or(isNull(SystemJob.lockedUntil), lt(SystemJob.lockedUntil, now));
+  const due = or(isNull(SystemJob.lastRunAt), lt(SystemJob.lastRunAt, dueBefore));
+  // Atomic: a new job row is inserted locked; an existing row is only re-locked when free (and due).
+  // No row comes back when another instance holds the lock or the job is not due yet.
+  const rows = await db()
+    .insert(SystemJob)
+    .values({ _id: name, lockedUntil: lockUntil })
+    .onConflictDoUpdate({ target: SystemJob._id, set: { lockedUntil: lockUntil }, setWhere: force ? unlocked : and(unlocked, due) })
+    .returning({ id: SystemJob._id });
+  return rows.length > 0;
 }
 
 async function release(name: string, result: string): Promise<void> {
-  await SystemJob.updateOne({ _id: name }, { $set: { lastRunAt: new Date(), lockedUntil: null, lastResult: result.slice(0, 500) } });
+  await db()
+    .update(SystemJob)
+    .set({ lastRunAt: new Date(), lockedUntil: null, lastResult: result.slice(0, 500) })
+    .where(eq(SystemJob._id, name));
 }
 
 export async function runJobs(opts: { force?: boolean; only?: string[] } = {}): Promise<Record<string, string>> {
-  await connectDB();
   const results: Record<string, string> = {};
   for (const job of JOBS) {
     if (opts.only && !opts.only.includes(job.name)) continue;

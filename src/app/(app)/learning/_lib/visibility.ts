@@ -1,37 +1,39 @@
 import "server-only";
-import type { Types } from "mongoose";
+import { and, eq, isNull, or, type SQL } from "drizzle-orm";
+import { LearningResource, type Id } from "@/lib/models";
+import { jsonHas, jsonHasAny } from "@/lib/sql";
 
 export interface Learner {
-  id: string | Types.ObjectId;
+  id: Id;
   personType: string;
-  department?: string | Types.ObjectId | null;
+  department?: Id | null;
 }
 
 /**
- * Mongo filter for the active learning resources a person can see: assigned to them, or aimed at
+ * Condition for the active learning resources a person can see: assigned to them, or aimed at
  * their person type / "all" (and, when the resource names a department, that department).
  */
-export function visibleResourceFilter(p: Learner): Record<string, unknown> {
-  return {
-    active: true,
-    $or: [
-      { assignedTo: p.id },
-      {
-        audience: { $in: [p.personType, "all"] },
-        $or: [{ department: null }, ...(p.department ? [{ department: p.department }] : [])],
-      },
-    ],
-  };
+export function visibleResourceFilter(p: Learner): SQL {
+  return and(
+    eq(LearningResource.active, true),
+    or(
+      jsonHas(LearningResource.assignedTo, p.id),
+      and(
+        jsonHasAny(LearningResource.audience, [p.personType, "all"]),
+        p.department ? or(isNull(LearningResource.department), eq(LearningResource.department, p.department)) : isNull(LearningResource.department),
+      ),
+    ),
+  )!;
 }
 
 /** In-memory twin of `visibleResourceFilter` (used by the completion matrix). */
 export function resourceAppliesTo(
-  r: { active: boolean; audience: string[]; department?: { toString(): string } | null; assignedTo: { toString(): string }[] },
+  r: { active: boolean; audience: string[]; department?: Id | null; assignedTo: Id[] },
   p: { id: string; personType: string; department?: string },
 ): boolean {
   if (!r.active) return false;
-  if (r.assignedTo.some((a) => a.toString() === p.id)) return true;
+  if (r.assignedTo.includes(p.id)) return true;
   const audienceOk = r.audience.includes(p.personType) || r.audience.includes("all");
-  const deptOk = !r.department || r.department.toString() === p.department;
+  const deptOk = !r.department || r.department === p.department;
   return audienceOk && deptOk;
 }

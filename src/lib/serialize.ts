@@ -1,12 +1,8 @@
-import type { Types } from "mongoose";
-
 /**
- * Converts Mongo documents into plain JSON-safe values for Client Components:
- * ObjectId → string, Date → ISO string. Use on lean() results before passing as props.
+ * Converts query rows into plain JSON-safe values for Client Components (Date → ISO string,
+ * `null` columns kept as null). Use on query results before passing them as props.
  */
-export type Plain<T> = T extends Types.ObjectId
-  ? string
-  : T extends Date
+export type Plain<T> = T extends Date
     ? string
     : T extends (infer U)[]
       ? Plain<U>[]

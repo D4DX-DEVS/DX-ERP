@@ -82,7 +82,7 @@ async function SectionBody({ section, sp, user }: { section: string; sp: SearchP
 
   switch (section) {
     case "company":
-      return <CompanyForm key={stamp(settings.company)} company={settings.company} storageConfigured={env.spaces.configured} />;
+      return <CompanyForm key={stamp(settings.company)} company={settings.company} storageConfigured={env.storage.configured} />;
 
     case "organization": {
       const [depts, desigs, deptPeople, desigPeople, people] = await Promise.all([
@@ -290,7 +290,7 @@ async function SectionBody({ section, sp, user }: { section: string; sp: SearchP
         total: b.collections.reduce((n, c) => n + c.count, 0),
         collections: b.collections.map((c) => ({ name: c.name ?? "", count: c.count ?? 0 })),
       }));
-      return <BackupPanel backups={rows} storageConfigured={env.spaces.configured} autoBackup={settings.data.autoBackup} retention={settings.data.backupRetentionCount} />;
+      return <BackupPanel backups={rows} storageConfigured={env.storage.configured} autoBackup={settings.data.autoBackup} retention={settings.data.backupRetentionCount} />;
     }
 
     default:

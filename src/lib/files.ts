@@ -1,5 +1,6 @@
 import "server-only";
-import { connectDB } from "@/lib/db";
+import { and, eq, isNull } from "drizzle-orm";
+import { db } from "@/lib/db";
 import {
   Activity,
   Client,
@@ -16,13 +17,14 @@ import {
   type FileRef,
   type IStoredFile,
 } from "@/lib/models";
+import { inList, jsonHasField } from "@/lib/sql";
 import { can, isInternLike, type CurrentUser } from "@/lib/auth/session";
 import { visibleResourceFilter } from "@/app/(app)/learning/_lib/visibility";
 import { buildKey, publicUrl, putObject } from "@/lib/storage";
 import { taskFilter } from "@/lib/work-access";
 
 export interface UploadInput {
-  buffer: Buffer;
+  buffer: Uint8Array;
   name: string;
   mime: string;
   entityType: string;
@@ -35,19 +37,20 @@ export interface UploadInput {
   replaces?: string;
 }
 
-/** Stores a file in Spaces and records it in the StoredFile collection. */
+/** Stores a file in R2 and records it in the StoredFile table. */
 export async function storeFile(user: Pick<CurrentUser, "_id" | "name">, input: UploadInput): Promise<IStoredFile> {
-  await connectDB();
   const key = buildKey(input.entityType, input.name);
   await putObject(key, input.buffer, input.mime, Boolean(input.isPublic));
 
   let version = 1;
   if (input.replaces) {
-    const previous = await StoredFile.findById(input.replaces).lean();
+    const [previous] = await db().select({ version: StoredFile.version }).from(StoredFile).where(eq(StoredFile._id, input.replaces)).limit(1);
     if (previous) version = (previous.version ?? 1) + 1;
   }
 
-  const doc = await StoredFile.create({
+  const [doc] = await db()
+    .insert(StoredFile)
+    .values({
     key,
     name: input.name,
     size: input.buffer.length,
@@ -64,27 +67,30 @@ export async function storeFile(user: Pick<CurrentUser, "_id" | "name">, input: 
     replaces: input.replaces,
     uploadedBy: user._id,
     uploadedByName: user.name,
-  });
+  })
+    .returning();
   if (input.replaces) {
-    await StoredFile.updateOne({ _id: input.replaces }, { $set: { replacedBy: doc._id } });
+    await db().update(StoredFile).set({ replacedBy: doc._id }).where(eq(StoredFile._id, input.replaces));
   }
-  return doc.toObject();
+  return doc;
 }
 
 /** Converts a stored file into the embedded reference used by tasks, issues, expenses, … */
 export function toFileRef(file: Pick<IStoredFile, "_id" | "name" | "size" | "mime" | "uploadedBy">): FileRef {
-  return { file: file._id, name: file.name, size: file.size, mime: file.mime, uploadedAt: new Date(), uploadedBy: file.uploadedBy };
+  return { file: file._id, name: file.name, size: file.size, mime: file.mime, uploadedAt: new Date(), uploadedBy: file.uploadedBy ?? undefined };
 }
 
 /** Validates client-supplied file ids and returns embeddable refs (only files the user uploaded or may access). */
 export async function resolveFileRefs(user: CurrentUser, ids: string[] | undefined): Promise<FileRef[]> {
   if (!ids || ids.length === 0) return [];
-  await connectDB();
-  const files = await StoredFile.find({ _id: { $in: ids }, deletedAt: null }).lean();
+  const files = await db()
+    .select()
+    .from(StoredFile)
+    .where(and(inList(StoredFile._id, ids), isNull(StoredFile.deletedAt)));
   const allowed: FileRef[] = [];
   for (const f of files) {
     // The person attaching the file owns the reference (and the right to remove it), not the original uploader.
-    if (f.uploadedBy?.toString() === user.id || (await canAccessFile(user, f))) allowed.push({ ...toFileRef(f), uploadedBy: user._id });
+    if (f.uploadedBy === user.id || (await canAccessFile(user, f))) allowed.push({ ...toFileRef(f), uploadedBy: user._id });
   }
   return allowed;
 }
@@ -93,9 +99,9 @@ export async function resolveFileRefs(user: CurrentUser, ids: string[] | undefin
 export async function canAccessFile(user: CurrentUser, file: IStoredFile): Promise<boolean> {
   if (file.deletedAt) return false;
   if (user.isSuperAdmin || file.isPublic) return true;
-  if (file.uploadedBy?.toString() === user.id) return true;
+  if (file.uploadedBy === user.id) return true;
   const id = file.entityId;
-  await connectDB();
+  const one = async <T,>(rows: Promise<T[]>): Promise<T | undefined> => (await rows)[0];
 
   switch (file.entityType) {
     case "company":
@@ -104,66 +110,107 @@ export async function canAccessFile(user: CurrentUser, file: IStoredFile): Promi
     case "learning": {
       // Same audience rules as the Learning page: assigned to the person, or aimed at their person type / department.
       if (can(user, "interns.manage")) return true;
-      return Boolean(await LearningResource.exists({ "attachments.file": file._id, ...visibleResourceFilter({ id: user._id, personType: user.personType, department: user.departmentId }) }));
+      return Boolean(
+        await one(
+          db()
+            .select({ id: LearningResource._id })
+            .from(LearningResource)
+            .where(
+              and(
+                jsonHasField(LearningResource.attachments, "file", file._id),
+                visibleResourceFilter({ id: user._id, personType: user.personType, department: user.departmentId }),
+              ),
+            )
+            .limit(1),
+        ),
+      );
     }
     case "user": {
       if (id === user.id) return true;
       if (file.confidential) return can(user, "staff.confidential");
       if (can(user, "staff.view")) return true;
-      const target = id ? await User.findById(id, { personType: 1, reportingManager: 1, "internship.mentor": 1 }).lean() : null;
+      const target = id
+        ? await one(
+            db()
+              .select({ personType: User.personType, reportingManager: User.reportingManager, internship: User.internship })
+              .from(User)
+              .where(eq(User._id, id))
+              .limit(1),
+          )
+        : undefined;
       if (!target) return false;
       // `interns.manage` covers interns and trainees only, not every employee's documents.
       if (can(user, "interns.manage") && isInternLike(target)) return true;
-      return target.reportingManager?.toString() === user.id || target.internship?.mentor?.toString() === user.id;
+      return target.reportingManager === user.id || target.internship?.mentor === user.id;
     }
     case "task":
     case "submission": {
       if (can(user, "tasks.view_all")) return true;
-      const task = id ? await Task.findById(id, { assignees: 1, sharedWith: 1, reporter: 1, reviewer: 1, project: 1 }).lean() : null;
-      if (!task) return false;
-      const people = [...task.assignees, ...task.sharedWith, task.reporter, task.reviewer].filter(Boolean).map(String);
+      const task = id
+        ? await one(
+            db()
+              .select({ assignees: Task.assignees, sharedWith: Task.sharedWith, reporter: Task.reporter, reviewer: Task.reviewer, project: Task.project })
+              .from(Task)
+              .where(eq(Task._id, id))
+              .limit(1),
+          )
+        : undefined;
+      if (!task || !id) return false;
+      const people = [...task.assignees, ...task.sharedWith, task.reporter, task.reviewer].filter(Boolean);
       if (people.includes(user.id)) return true;
       if (task.project) {
-        const project = await Project.findById(task.project, { manager: 1, "team.user": 1 }).lean();
-        if (project?.manager?.toString() === user.id) return true;
+        const project = await projectAccess(task.project);
+        if (project?.manager === user.id) return true;
         // Team members (not interns / trainees, who only see assigned or shared tasks) can open task files.
         const internLike = user.personType === "intern" || user.personType === "trainee";
-        if (!internLike && project?.team.some((m) => m.user.toString() === user.id)) return true;
+        if (!internLike && project?.team.some((m) => m.user === user.id)) return true;
       }
       // Reviewers, reporting managers and mentors reach tasks through the shared task visibility rules.
-      return Boolean(await Task.exists({ $and: [{ _id: id }, await taskFilter(user)] }));
+      return Boolean(
+        await one(
+          db()
+            .select({ id: Task._id })
+            .from(Task)
+            .where(and(eq(Task._id, id), await taskFilter(user)))
+            .limit(1),
+        ),
+      );
     }
     case "project": {
       if (can(user, "projects.view_all")) return true;
-      const project = id ? await Project.findById(id, { manager: 1, "team.user": 1 }).lean() : null;
-      return Boolean(project && (project.manager?.toString() === user.id || project.team.some((m) => m.user.toString() === user.id)));
+      const project = id ? await projectAccess(id) : undefined;
+      return Boolean(project && (project.manager === user.id || project.team.some((m) => m.user === user.id)));
     }
     case "issue": {
       if (can(user, "qa.view_all")) return true;
-      const issue = id ? await Issue.findById(id, { assignee: 1, reporter: 1, project: 1 }).lean() : null;
+      const issue = id
+        ? await one(db().select({ assignee: Issue.assignee, reporter: Issue.reporter, project: Issue.project }).from(Issue).where(eq(Issue._id, id)).limit(1))
+        : undefined;
       if (!issue) return false;
-      if ([issue.assignee, issue.reporter].filter(Boolean).map(String).includes(user.id)) return true;
-      const project = await Project.findById(issue.project, { manager: 1, "team.user": 1 }).lean();
+      if ([issue.assignee, issue.reporter].filter(Boolean).includes(user.id)) return true;
+      const project = await projectAccess(issue.project);
       // Interns / trainees only see issues assigned to or reported by them.
       const internLike = user.personType === "intern" || user.personType === "trainee";
-      return Boolean(project && (project.manager?.toString() === user.id || (!internLike && project.team.some((m) => m.user.toString() === user.id))));
+      return Boolean(project && (project.manager === user.id || (!internLike && project.team.some((m) => m.user === user.id))));
     }
     case "expense": {
       if (can(user, "expenses.view_all") || can(user, "expenses.approve")) return true;
-      const expense = id ? await Expense.findById(id, { user: 1 }).lean() : null;
-      return expense?.user.toString() === user.id;
+      const expense = id ? await one(db().select({ user: Expense.user }).from(Expense).where(eq(Expense._id, id)).limit(1)) : undefined;
+      return expense?.user === user.id;
     }
     case "leave": {
       if (can(user, "leave.view_all") || can(user, "leave.approve")) return true;
-      const leave = id ? await LeaveRequest.findById(id, { user: 1, manager: 1 }).lean() : null;
-      return Boolean(leave && (leave.user.toString() === user.id || leave.manager?.toString() === user.id));
+      const leave = id
+        ? await one(db().select({ user: LeaveRequest.user, manager: LeaveRequest.manager }).from(LeaveRequest).where(eq(LeaveRequest._id, id)).limit(1))
+        : undefined;
+      return Boolean(leave && (leave.user === user.id || leave.manager === user.id));
     }
     case "contract": {
       if (!can(user, "contracts.view")) return false;
       if (!file.confidential) return true;
       if (can(user, "contracts.manage") || can(user, "crm.confidential")) return true;
-      const contract = id ? await Contract.findById(id, { createdBy: 1 }).lean() : null;
-      return contract?.createdBy?.toString() === user.id;
+      const contract = id ? await one(db().select({ createdBy: Contract.createdBy }).from(Contract).where(eq(Contract._id, id)).limit(1)) : undefined;
+      return contract?.createdBy === user.id;
     }
     case "proposal":
       return can(user, "proposals.view");
@@ -175,19 +222,21 @@ export async function canAccessFile(user: CurrentUser, file: IStoredFile): Promi
       // `crm.confidential` holders, the client owner and (for leads) the assignee.
       let clientId: string | undefined;
       let assignee: string | undefined;
-      if (file.entityType === "client") clientId = id;
+      if (file.entityType === "client") clientId = id ?? undefined;
       else if (file.entityType === "lead" && id) {
-        const lead = await Lead.findById(id, { client: 1, assignedTo: 1 }).lean();
-        clientId = lead?.client?.toString();
-        assignee = lead?.assignedTo?.toString();
+        const lead = await one(db().select({ client: Lead.client, assignedTo: Lead.assignedTo }).from(Lead).where(eq(Lead._id, id)).limit(1));
+        clientId = lead?.client ?? undefined;
+        assignee = lead?.assignedTo ?? undefined;
       } else if (id) {
-        const activity = await Activity.findById(id, { client: 1, lead: 1 }).lean();
-        clientId = activity?.client?.toString();
+        const activity = await one(db().select({ client: Activity.client }).from(Activity).where(eq(Activity._id, id)).limit(1));
+        clientId = activity?.client ?? undefined;
       }
-      const client = clientId ? await Client.findById(clientId, { confidential: 1, owner: 1 }).lean() : null;
+      const client = clientId
+        ? await one(db().select({ confidential: Client.confidential, owner: Client.owner }).from(Client).where(eq(Client._id, clientId)).limit(1))
+        : undefined;
       const restricted = file.confidential || Boolean(client?.confidential);
       if (!restricted) return true;
-      return can(user, "crm.confidential") || client?.owner?.toString() === user.id || assignee === user.id;
+      return can(user, "crm.confidential") || client?.owner === user.id || assignee === user.id;
     }
     case "asset":
       return can(user, "assets.view");
@@ -198,4 +247,9 @@ export async function canAccessFile(user: CurrentUser, file: IStoredFile): Promi
     default:
       return false;
   }
+}
+
+async function projectAccess(projectId: string): Promise<{ manager: string | null; team: { user: string }[] } | undefined> {
+  const [project] = await db().select({ manager: Project.manager, team: Project.team }).from(Project).where(eq(Project._id, projectId)).limit(1);
+  return project;
 }

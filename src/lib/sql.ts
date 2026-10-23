@@ -1,4 +1,4 @@
-import { getTableColumns, sql, type Column, type SQL } from "drizzle-orm";
+import { getTableColumns, or, sql, type Column, type SQL } from "drizzle-orm";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import type { Database } from "@/lib/db";
 
@@ -74,6 +74,12 @@ export function containsText(col: Operand, q: string): SQL | undefined {
   return sql`${col} like ${`%${escapeLike(t)}%`} escape '\\'`;
 }
 
+/** Search box over several columns: any column contains `q`. `undefined` when `q` is blank. */
+export function searchAny(q: string, ...cols: Operand[]): SQL | undefined {
+  if (!q.trim()) return undefined;
+  return or(...cols.map((c) => containsText(c, q)));
+}
+
 /** Case-insensitive "starts with". */
 export function startsWithText(col: Operand, q: string): SQL {
   return sql`${col} like ${`${escapeLike(q)}%`} escape '\\'`;
@@ -94,12 +100,21 @@ export function isUniqueViolation(error: unknown): boolean {
   return false;
 }
 
-/** Inserts rows in chunks small enough for D1's 100-bound-parameter limit. */
-export async function insertChunked<T extends SQLiteTable>(database: Database, table: T, rows: T["$inferInsert"][]): Promise<void> {
+/**
+ * Inserts rows in chunks small enough for D1's 100-bound-parameter limit. `ignoreConflicts` skips rows
+ * that hit a UNIQUE index (MongoDB `insertMany(…, { ordered: false })` + ignoring E11000).
+ */
+export async function insertChunked<T extends SQLiteTable>(
+  database: Database,
+  table: T,
+  rows: T["$inferInsert"][],
+  opts: { ignoreConflicts?: boolean } = {},
+): Promise<void> {
   if (!rows.length) return;
   const perRow = Object.keys(getTableColumns(table)).length;
   const size = Math.max(1, Math.floor(100 / perRow));
   for (let i = 0; i < rows.length; i += size) {
-    await database.insert(table).values(rows.slice(i, i + size));
+    const insert = database.insert(table).values(rows.slice(i, i + size));
+    await (opts.ignoreConflicts ? insert.onConflictDoNothing() : insert);
   }
 }

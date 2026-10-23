@@ -31,7 +31,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       <AssetForm
         categories={settings.assetCategories}
         departments={options}
-        storageConfigured={env.spaces.configured}
+        storageConfigured={env.storage.configured}
         asset={{
           id,
           assetNo: asset.assetNo,

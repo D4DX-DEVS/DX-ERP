@@ -3,18 +3,18 @@ import { randomBytes } from "node:crypto";
 import { cache } from "react";
 import { cookies, headers } from "next/headers";
 import { redirect, forbidden } from "next/navigation";
-import { connectDB } from "@/lib/db";
-import { Department, Designation, Role, Session, User, type IUser } from "@/lib/models";
-import { permissionsForRole } from "@/lib/rbac/roles";
+import { and, eq, gt, isNull } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { Department, Designation, Role, Session, User, type Id, type IUser } from "@/lib/models";
+import { effectivePermissions } from "@/lib/rbac/roles";
 import { ROLE_LABELS, type Permission } from "@/lib/rbac/permissions";
 import { SESSION_COOKIE, signToken, verifyToken, type SessionClaims } from "@/lib/auth/token";
 import { getSettings } from "@/lib/settings";
 import { env } from "@/lib/env";
-import type { Types } from "mongoose";
 
 export interface CurrentUser {
   id: string;
-  _id: Types.ObjectId;
+  _id: Id;
   sid: string;
   name: string;
   email: string;
@@ -40,15 +40,14 @@ export async function requestMeta(): Promise<{ ip?: string; userAgent?: string }
 }
 
 /** Creates a DB-backed session and sets the signed session cookie. */
-export async function createSession(userId: Types.ObjectId, method: "google" | "password", remember: boolean): Promise<void> {
-  await connectDB();
+export async function createSession(userId: Id, method: "google" | "password", remember: boolean): Promise<void> {
   const settings = await getSettings();
   const ttlMs = remember ? settings.security.rememberDays * 86_400_000 : settings.security.sessionHours * 3_600_000;
   const expiresAt = new Date(Date.now() + ttlMs);
   const sid = randomBytes(24).toString("base64url");
   const meta = await requestMeta();
-  await Session.create({ sid, user: userId, expiresAt, method, ip: meta.ip, userAgent: meta.userAgent });
-  const token = await signToken({ sid, uid: userId.toString() } satisfies SessionClaims, expiresAt);
+  await db().insert(Session).values({ sid, user: userId, expiresAt, method, ip: meta.ip, userAgent: meta.userAgent });
+  const token = await signToken({ sid, uid: userId } satisfies SessionClaims, expiresAt);
   const jar = await cookies();
   jar.set(SESSION_COOKIE, token, {
     httpOnly: true,
@@ -57,23 +56,24 @@ export async function createSession(userId: Types.ObjectId, method: "google" | "
     path: "/",
     expires: remember ? expiresAt : undefined,
   });
-  await User.updateOne({ _id: userId }, { $set: { lastLoginAt: new Date() } });
+  await db().update(User).set({ lastLoginAt: new Date() }).where(eq(User._id, userId));
 }
 
 export async function destroySession(): Promise<void> {
   const jar = await cookies();
   const claims = await verifyToken<SessionClaims & Record<string, unknown>>(jar.get(SESSION_COOKIE)?.value);
   if (claims?.sid) {
-    await connectDB();
-    await Session.updateOne({ sid: claims.sid }, { $set: { revokedAt: new Date(), revokedReason: "logout" } });
+    await db().update(Session).set({ revokedAt: new Date(), revokedReason: "logout" }).where(eq(Session.sid, claims.sid));
   }
   jar.delete(SESSION_COOKIE);
 }
 
 /** Revokes every active session of a user (deactivation, role change, forced sign-out). */
-export async function revokeUserSessions(userId: string | Types.ObjectId, reason: string): Promise<void> {
-  await connectDB();
-  await Session.updateMany({ user: userId, revokedAt: null }, { $set: { revokedAt: new Date(), revokedReason: reason } });
+export async function revokeUserSessions(userId: Id, reason: string): Promise<void> {
+  await db()
+    .update(Session)
+    .set({ revokedAt: new Date(), revokedReason: reason })
+    .where(and(eq(Session.user, userId), isNull(Session.revokedAt)));
 }
 
 /** Resolves the signed-in user for this request (memoised per request). */
@@ -82,54 +82,61 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   const claims = await verifyToken<SessionClaims & Record<string, unknown>>(jar.get(SESSION_COOKIE)?.value);
   if (!claims?.sid || !claims.uid) return null;
 
-  await connectDB();
-  const session = await Session.findOne({ sid: claims.sid, revokedAt: null, expiresAt: { $gt: new Date() } }).lean();
-  if (!session || session.user.toString() !== claims.uid) return null;
-
-  const user = await User.findById(claims.uid, {
-    name: 1,
-    email: 1,
-    employeeId: 1,
-    photo: 1,
-    role: 1,
-    personType: 1,
-    isSuperAdmin: 1,
-    department: 1,
-    designation: 1,
-    reportingManager: 1,
-    accountActive: 1,
-    status: 1,
-  }).lean();
-  if (!user) return null;
+  // One query: session + user + role/department/designation names (D1 counts every round trip).
+  const [row] = await db()
+    .select({
+      sessionId: Session._id,
+      lastSeenAt: Session.lastSeenAt,
+      _id: User._id,
+      name: User.name,
+      email: User.email,
+      employeeId: User.employeeId,
+      photo: User.photo,
+      role: User.role,
+      personType: User.personType,
+      isSuperAdmin: User.isSuperAdmin,
+      department: User.department,
+      reportingManager: User.reportingManager,
+      accountActive: User.accountActive,
+      status: User.status,
+      roleName: Role.name,
+      rolePermissions: Role.permissions,
+      departmentName: Department.name,
+      designationName: Designation.name,
+    })
+    .from(Session)
+    .innerJoin(User, eq(User._id, Session.user))
+    .leftJoin(Role, eq(Role.key, User.role))
+    .leftJoin(Department, eq(Department._id, User.department))
+    .leftJoin(Designation, eq(Designation._id, User.designation))
+    .where(and(eq(Session.sid, claims.sid), isNull(Session.revokedAt), gt(Session.expiresAt, new Date()), eq(Session.user, claims.uid)))
+    .limit(1);
+  if (!row) return null;
+  const user = row;
   if (!user.isSuperAdmin && (!user.accountActive || EXITED_STATUSES.has(user.status))) return null;
 
-  if (Date.now() - new Date(session.lastSeenAt).getTime() > 5 * 60_000) {
-    await Session.updateOne({ _id: session._id }, { $set: { lastSeenAt: new Date() } });
+  if (Date.now() - user.lastSeenAt.getTime() > 5 * 60_000) {
+    await db().update(Session).set({ lastSeenAt: new Date() }).where(eq(Session._id, user.sessionId));
   }
 
-  const [permissions, role, department, designation] = await Promise.all([
-    permissionsForRole(user.isSuperAdmin ? "super_admin" : user.role),
-    user.isSuperAdmin ? null : Role.findOne({ key: user.role }, { name: 1 }).lean(),
-    user.department ? Department.findById(user.department, { name: 1 }).lean() : null,
-    user.designation ? Designation.findById(user.designation, { name: 1 }).lean() : null,
-  ]);
+  const permissions = effectivePermissions(user.isSuperAdmin ? "super_admin" : user.role, user.rolePermissions);
 
   return {
-    id: user._id.toString(),
+    id: user._id,
     _id: user._id,
     sid: claims.sid,
     name: user.name,
     email: user.email,
     employeeId: user.employeeId,
-    photo: user.photo,
+    photo: user.photo ?? undefined,
     role: user.isSuperAdmin ? "super_admin" : user.role,
-    roleName: user.isSuperAdmin ? ROLE_LABELS.super_admin : role?.name ?? ROLE_LABELS[user.role] ?? user.role,
+    roleName: user.isSuperAdmin ? ROLE_LABELS.super_admin : user.roleName ?? ROLE_LABELS[user.role] ?? user.role,
     personType: user.personType,
     isSuperAdmin: Boolean(user.isSuperAdmin),
-    departmentId: user.department?.toString(),
-    departmentName: department?.name,
-    designationName: designation?.name,
-    reportingManagerId: user.reportingManager?.toString(),
+    departmentId: user.department ?? undefined,
+    departmentName: user.departmentName ?? undefined,
+    designationName: user.designationName ?? undefined,
+    reportingManagerId: user.reportingManager ?? undefined,
     permissions,
   };
 });

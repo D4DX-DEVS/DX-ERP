@@ -1,21 +1,19 @@
 import "server-only";
 import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
-import mongoose from "mongoose";
 import { ActionError, type ActionResult } from "@/lib/action-result";
 import { can, getCurrentUser, type CurrentUser } from "@/lib/auth/session";
-import { connectDB } from "@/lib/db";
 import type { Permission } from "@/lib/rbac/permissions";
+import { isUniqueViolation } from "@/lib/sql";
 
 export { ActionError, type ActionResult };
 
 /**
- * Wraps a server action body: connects to the DB, converts known errors into an
+ * Wraps a server action body: converts known errors into an
  * `ActionResult`, and lets Next.js control-flow errors (redirect / notFound) propagate.
  */
 export async function runAction<T>(fn: () => Promise<T>, message?: string): Promise<ActionResult<T>> {
   try {
-    await connectDB();
     const data = await fn();
     return { ok: true, data, message };
   } catch (error) {
@@ -31,14 +29,9 @@ export async function runAction<T>(fn: () => Promise<T>, message?: string): Prom
       }
       return { ok: false, error: "Please correct the highlighted fields.", fieldErrors };
     }
-    if (error instanceof mongoose.Error.ValidationError) {
-      const fieldErrors: Record<string, string> = {};
-      for (const [key, e] of Object.entries(error.errors)) fieldErrors[key] = e.message;
-      return { ok: false, error: "Some values are invalid.", fieldErrors };
-    }
-    if (typeof error === "object" && error && "code" in error && (error as { code?: number }).code === 11000) {
-      const keyValue = (error as { keyValue?: Record<string, unknown> }).keyValue ?? {};
-      const field = Object.keys(keyValue)[0];
+    if (isUniqueViolation(error)) {
+      // SQLite reports "UNIQUE constraint failed: users.email" (compound indexes list several columns).
+      const field = /UNIQUE constraint failed: \w+\.(\w+)/.exec(uniqueMessage(error))?.[1];
       return {
         ok: false,
         error: field ? `A record with this ${field} already exists.` : "This record already exists.",
@@ -48,6 +41,15 @@ export async function runAction<T>(fn: () => Promise<T>, message?: string): Prom
     console.error("[action] unexpected error", error);
     return { ok: false, error: "Something went wrong. Please try again." };
   }
+}
+
+function uniqueMessage(error: unknown): string {
+  let e: unknown = error;
+  for (let depth = 0; e && depth < 5; depth++) {
+    if (e instanceof Error && /UNIQUE constraint failed/i.test(e.message)) return e.message;
+    e = (e as { cause?: unknown }).cause;
+  }
+  return "";
 }
 
 /** Throws an ActionError when not signed in. */

@@ -1,25 +1,16 @@
 import "server-only";
-import { randomBytes } from "node:crypto";
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { env } from "@/lib/env";
 
-/** DigitalOcean Spaces (S3-compatible) storage. */
-let client: S3Client | null = null;
-
-function s3(): S3Client {
-  if (!env.spaces.configured) {
-    throw new Error("File storage is not configured. Set the DO_SPACES_* environment variables.");
-  }
-  if (!client) {
-    client = new S3Client({
-      endpoint: env.spaces.endpoint,
-      region: env.spaces.region,
-      forcePathStyle: false,
-      credentials: { accessKeyId: env.spaces.key, secretAccessKey: env.spaces.secret },
-    });
-  }
-  return client;
+/**
+ * Cloudflare R2 storage via Worker bindings: `FILES` (private — documents, receipts, backups; only
+ * ever streamed through an access-checked route) and `PUBLIC_FILES` (avatars, company logo).
+ */
+function bucket(isPublic: boolean): R2Bucket {
+  const bindings = getCloudflareContext().env;
+  const b = isPublic ? bindings.PUBLIC_FILES : bindings.FILES;
+  if (!b) throw new Error("File storage is not configured. Add the FILES and PUBLIC_FILES R2 bindings in wrangler.jsonc.");
+  return b;
 }
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -42,62 +33,60 @@ export const ALLOWED_MIME = new Set([
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 ]);
 
-function safeName(name: string): string {
+export function safeName(name: string): string {
   const base = name.normalize("NFKD").replace(/[^\w.\- ]+/g, "").replace(/\s+/g, "-").slice(-120);
   return base || "file";
+}
+
+function randomHex(bytes: number): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /** Builds an object key under the configured folder: <folder>/<area>/<yyyy>/<mm>/<random>-<name> */
 export function buildKey(area: string, fileName: string): string {
   const now = new Date();
-  const rand = randomBytes(8).toString("hex");
   return [
-    env.spaces.folder,
+    env.storage.folder,
     area.replace(/[^a-z0-9_-]/gi, ""),
     String(now.getUTCFullYear()),
     String(now.getUTCMonth() + 1).padStart(2, "0"),
-    `${rand}-${safeName(fileName)}`,
+    `${randomHex(8)}-${safeName(fileName)}`,
   ]
     .filter(Boolean)
     .join("/");
 }
 
-/** Public URL (CDN when configured) for objects uploaded with `public-read`. */
+/** URL for objects in the public bucket: its public domain when configured, else the app's streaming route. */
 export function publicUrl(key: string): string {
-  if (env.spaces.cdnUrl) return `${env.spaces.cdnUrl}/${key}`;
-  const endpoint = new URL(env.spaces.endpoint);
-  return `${endpoint.protocol}//${env.spaces.bucket}.${endpoint.host}/${key}`;
+  const base = env.storage.publicUrl;
+  return base ? `${base}/${key}` : `/api/public-files/${key}`;
 }
 
-export async function putObject(key: string, body: Buffer | Uint8Array, contentType: string, isPublic: boolean): Promise<void> {
-  await s3().send(
-    new PutObjectCommand({
-      Bucket: env.spaces.bucket,
-      Key: key,
-      Body: body,
-      ContentType: contentType,
-      ACL: isPublic ? "public-read" : "private",
-      CacheControl: isPublic ? "public, max-age=31536000, immutable" : "private, max-age=0",
-    }),
-  );
+export async function putObject(key: string, body: Uint8Array | ArrayBuffer, contentType: string, isPublic: boolean): Promise<void> {
+  await bucket(isPublic).put(key, body, {
+    httpMetadata: {
+      contentType,
+      cacheControl: isPublic ? "public, max-age=31536000, immutable" : "private, max-age=0",
+    },
+  });
 }
 
-export async function getObjectBuffer(key: string): Promise<Buffer> {
-  const res = await s3().send(new GetObjectCommand({ Bucket: env.spaces.bucket, Key: key }));
-  const bytes = await res.Body!.transformToByteArray();
-  return Buffer.from(bytes);
+/** Object body + metadata for streaming, or null when missing. */
+export async function getObject(key: string, isPublic = false): Promise<R2ObjectBody | null> {
+  return bucket(isPublic).get(key);
 }
 
-export async function deleteObject(key: string): Promise<void> {
-  await s3().send(new DeleteObjectCommand({ Bucket: env.spaces.bucket, Key: key }));
+export async function getObjectBuffer(key: string, isPublic = false): Promise<Uint8Array> {
+  const object = await getObject(key, isPublic);
+  if (!object) throw new Error(`Object not found: ${key}`);
+  return new Uint8Array(await object.arrayBuffer());
 }
 
-/** Short-lived signed download URL for private objects. */
-export async function signedDownloadUrl(key: string, fileName: string, inline = true, expiresIn = 120): Promise<string> {
-  const disposition = `${inline ? "inline" : "attachment"}; filename="${safeName(fileName)}"`;
-  return getSignedUrl(
-    s3(),
-    new GetObjectCommand({ Bucket: env.spaces.bucket, Key: key, ResponseContentDisposition: disposition }),
-    { expiresIn },
-  );
+export async function deleteObject(key: string, isPublic = false): Promise<void> {
+  await bucket(isPublic).delete(key);
+}
+
+/** `Content-Disposition` value for a download (inline preview or attachment). */
+export function contentDisposition(fileName: string, inline: boolean): string {
+  return `${inline ? "inline" : "attachment"}; filename="${safeName(fileName)}"`;
 }

@@ -1,6 +1,7 @@
 import "server-only";
 import { cache } from "react";
-import { connectDB } from "@/lib/db";
+import { eq, sql } from "drizzle-orm";
+import { db } from "@/lib/db";
 import { Settings } from "@/lib/models";
 import { DEFAULT_SETTINGS, type AppSettings } from "@/lib/config-defaults";
 
@@ -24,9 +25,8 @@ function merge<T>(base: T, override: unknown): T {
 
 /** Effective configuration for this request (defaults + stored overrides). */
 export const getSettings = cache(async (): Promise<AppSettings> => {
-  await connectDB();
-  const doc = await Settings.findById("global").lean();
-  return merge(structuredClone(DEFAULT_SETTINGS), doc?.value ?? {});
+  const [row] = await db().select({ value: Settings.value }).from(Settings).where(eq(Settings._id, "global")).limit(1);
+  return merge(structuredClone(DEFAULT_SETTINGS), row?.value ?? {});
 });
 
 /** Replaces one top-level settings section. */
@@ -35,10 +35,16 @@ export async function saveSettingsSection<K extends keyof AppSettings>(
   value: AppSettings[K],
   userId?: string,
 ): Promise<void> {
-  await connectDB();
-  await Settings.updateOne(
-    { _id: "global" },
-    { $set: { [`value.${String(section)}`]: value, updatedBy: userId } },
-    { upsert: true },
-  );
+  // Upsert that replaces only `value.<section>` (json_set), so concurrent saves of other sections are kept.
+  await db()
+    .insert(Settings)
+    .values({ _id: "global", value: { [section]: value }, updatedBy: userId })
+    .onConflictDoUpdate({
+      target: Settings._id,
+      set: {
+        value: sql`json_set(${Settings.value}, ${`$.${String(section)}`}, json(${JSON.stringify(value)}))`,
+        updatedBy: userId,
+        updatedAt: new Date(),
+      },
+    });
 }

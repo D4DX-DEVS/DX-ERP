@@ -1,5 +1,5 @@
 import "server-only";
-import { connectDB } from "@/lib/db";
+import { db } from "@/lib/db";
 import { AuditLog } from "@/lib/models";
 import { requestMeta, type CurrentUser } from "@/lib/auth/session";
 
@@ -53,9 +53,8 @@ export async function audit(
   input: AuditInput,
 ): Promise<void> {
   try {
-    await connectDB();
     const meta = await requestMeta().catch(() => ({ ip: undefined, userAgent: undefined }));
-    await AuditLog.create({
+    await db().insert(AuditLog).values({
       actor: actor?._id,
       actorName: actor?.name ?? "System",
       actorRole: actor?.role,

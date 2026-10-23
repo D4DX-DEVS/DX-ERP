@@ -1,20 +1,27 @@
 import "server-only";
-import { connectDB } from "@/lib/db";
+import { count } from "drizzle-orm";
+import { db } from "@/lib/db";
 import { Department, Designation, LeaveType, Settings } from "@/lib/models";
 import { ensureRoles } from "@/lib/rbac/roles";
+import { insertChunked } from "@/lib/sql";
+import type { SQLiteTable } from "drizzle-orm/sqlite-core";
+
+async function isEmpty(table: SQLiteTable): Promise<boolean> {
+  const [row] = await db().select({ n: count() }).from(table);
+  return (row?.n ?? 0) === 0;
+}
 
 /**
  * First-run setup (idempotent): built-in roles, settings document, leave types and a starter set
  * of departments / designations. Runs when the Super Admin signs in.
  */
 export async function ensureSeeded(): Promise<void> {
-  await connectDB();
   await ensureRoles();
 
-  await Settings.updateOne({ _id: "global" }, { $setOnInsert: { value: {} } }, { upsert: true });
+  await db().insert(Settings).values({ _id: "global", value: {} }).onConflictDoNothing();
 
-  if ((await LeaveType.estimatedDocumentCount()) === 0) {
-    await LeaveType.insertMany([
+  if (await isEmpty(LeaveType)) {
+    await insertChunked(db(), LeaveType, [
       { name: "Casual leave", code: "CL", color: "#284CC7", annualQuota: 12, accrual: "monthly", carryForward: false, paid: true, allowHalfDay: true, requiresHrApproval: false, applicableTo: ["employee", "trainee", "intern"], order: 1 },
       { name: "Sick leave", code: "SL", color: "#0E9F75", annualQuota: 8, accrual: "upfront", carryForward: false, paid: true, allowHalfDay: true, requiresHrApproval: false, requiresAttachmentAfterDays: 2, applicableTo: ["employee", "trainee", "intern"], order: 2 },
       { name: "Annual leave", code: "AL", color: "#6D28D9", annualQuota: 15, accrual: "monthly", carryForward: true, maxCarryForward: 10, paid: true, allowHalfDay: false, requiresHrApproval: true, applicableTo: ["employee"], order: 3 },
@@ -23,8 +30,10 @@ export async function ensureSeeded(): Promise<void> {
     ]);
   }
 
-  if ((await Department.estimatedDocumentCount()) === 0) {
-    await Department.insertMany(
+  if (await isEmpty(Department)) {
+    await insertChunked(
+      db(),
+      Department,
       [
         ["Engineering", "ENG"],
         ["Design", "DES"],
@@ -38,8 +47,10 @@ export async function ensureSeeded(): Promise<void> {
     );
   }
 
-  if ((await Designation.estimatedDocumentCount()) === 0) {
-    await Designation.insertMany(
+  if (await isEmpty(Designation)) {
+    await insertChunked(
+      db(),
+      Designation,
       [
         "Managing Partner",
         "Project Manager",

@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { connectDB } from "@/lib/db";
 import { can, getCurrentUser } from "@/lib/auth/session";
 import { storeFile } from "@/lib/files";
 import { ALLOWED_MIME, MAX_UPLOAD_BYTES } from "@/lib/storage";
@@ -53,7 +52,7 @@ function matchesSignature(mime: string, buffer: Buffer): boolean {
 export async function POST(request: Request) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ ok: false, error: "Not signed in" }, { status: 401 });
-  if (!env.spaces.configured) {
+  if (!env.storage.configured) {
     return NextResponse.json({ ok: false, error: "File storage is not configured on the server." }, { status: 503 });
   }
   // Refuse oversized bodies before buffering the multipart payload (the per-file limit is checked again below).
@@ -102,7 +101,6 @@ export async function POST(request: Request) {
   }
 
   try {
-    await connectDB();
     const buffer = Buffer.from(await file.arrayBuffer());
     if (!matchesSignature(mime, buffer) || buffer.subarray(0, 512).toString("latin1").toLowerCase().includes("<svg")) {
       return NextResponse.json({ ok: false, error: "The file's content does not match its type" }, { status: 415 });
@@ -124,7 +122,7 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({
       ok: true,
-      file: { id: stored._id.toString(), name: stored.name, size: stored.size, mime: stored.mime, url: stored.url },
+      file: { id: stored._id, name: stored.name, size: stored.size, mime: stored.mime, url: stored.url },
     });
   } catch (error) {
     console.error("[upload] failed", error);

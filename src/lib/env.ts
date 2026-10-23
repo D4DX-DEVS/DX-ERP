@@ -1,4 +1,5 @@
 import "server-only";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 /**
  * Typed access to environment variables. Values are read lazily so `next build`
@@ -12,18 +13,21 @@ function required(name: string): string {
   return value.trim();
 }
 
+function storageBound(): boolean {
+  try {
+    const bindings = getCloudflareContext().env;
+    return Boolean(bindings.FILES && bindings.PUBLIC_FILES);
+  } catch {
+    return false;
+  }
+}
+
 function optional(name: string, fallback = ""): string {
   const value = process.env[name];
   return value && value.trim() ? value.trim() : fallback;
 }
 
 export const env = {
-  get mongoUri() {
-    return required("MONGODB_URI");
-  },
-  get mongoDb() {
-    return optional("MONGODB_DB");
-  },
   get authSecret() {
     const secret = required("AUTH_SECRET");
     if (secret.length < 32) throw new Error("AUTH_SECRET must be at least 32 characters long");
@@ -72,36 +76,18 @@ export const env = {
       return optional("SUPER_ADMIN_TOTP_SECRET").replace(/\s+/g, "").toUpperCase();
     },
   },
-  spaces: {
-    get key() {
-      return required("DO_SPACES_KEY");
-    },
-    get secret() {
-      return required("DO_SPACES_SECRET");
-    },
-    get endpoint() {
-      const raw = required("DO_SPACES_ENDPOINT");
-      return raw.startsWith("http") ? raw.replace(/\/+$/, "") : `https://${raw.replace(/\/+$/, "")}`;
-    },
-    get region() {
-      return optional("DO_SPACES_REGION", "us-east-1");
-    },
-    get bucket() {
-      return required("DO_SPACES_BUCKET");
-    },
-    get cdnUrl() {
-      return optional("DO_SPACES_CDN_URL").replace(/\/+$/, "");
-    },
+  /** R2 file storage. The buckets are Worker bindings (`FILES`, `PUBLIC_FILES` in wrangler.jsonc), not env vars. */
+  storage: {
+    /** Key prefix inside both buckets. */
     get folder() {
-      return optional("DO_SPACES_FOLDER", "dx-erp").replace(/^\/+|\/+$/g, "");
+      return optional("FILES_FOLDER", "dx-erp").replace(/^\/+|\/+$/g, "");
+    },
+    /** Public base URL of the public bucket (r2.dev URL or custom domain). Empty = serve via /api/public-files. */
+    get publicUrl() {
+      return optional("PUBLIC_FILES_URL").replace(/\/+$/, "");
     },
     get configured() {
-      return Boolean(
-        process.env.DO_SPACES_KEY &&
-          process.env.DO_SPACES_SECRET &&
-          process.env.DO_SPACES_ENDPOINT &&
-          process.env.DO_SPACES_BUCKET,
-      );
+      return storageBound();
     },
   },
   smtp: {

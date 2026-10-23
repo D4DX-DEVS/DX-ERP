@@ -1,4 +1,3 @@
-import { escapeRegex } from "@/lib/format";
 import { isObjectId } from "@/lib/validation";
 
 /** Next.js page `searchParams` after awaiting. */
@@ -30,12 +29,6 @@ export function monthParam(sp: SearchParams, key: string): string | undefined {
 export function pageParam(sp: SearchParams): number {
   const n = Number.parseInt(param(sp, "page"), 10);
   return Number.isFinite(n) && n > 0 ? Math.min(n, 10_000) : 1;
-}
-
-/** Case-insensitive "contains" regex for search boxes (escaped, length-capped). */
-export function searchRegex(q: string): RegExp | undefined {
-  const t = q.trim().slice(0, 100);
-  return t ? new RegExp(escapeRegex(t), "i") : undefined;
 }
 
 /** Builds a URL with the given params merged into the current ones. */
