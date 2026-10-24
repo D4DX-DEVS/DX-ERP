@@ -13,8 +13,7 @@
     {
       "binding": "DB",
       "database_name": "dx-erp",
-      // Replaced with the real id from `wrangler d1 create dx-erp` before the first remote deploy.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "46017b31-1fb5-4f00-8c0d-90b4e5eab169",
       "migrations_dir": "drizzle"
     }
   ],
