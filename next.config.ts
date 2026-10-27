@@ -25,6 +25,10 @@ const nextConfig: NextConfig = {
     authInterrupts: true,
     serverActions: {
       bodySizeLimit: "12mb",
+      // erp.d4dx.co reaches the Worker through a proxy rule in the d4dx.co Cloudflare account, so requests arrive
+      // addressed to the workers.dev host while the browser's Origin is erp.d4dx.co. Without this, Next.js aborts
+      // every Server Action (sign-in, forms) as cross-origin.
+      allowedOrigins: ["erp.d4dx.co"],
     },
   },
   async headers() {
