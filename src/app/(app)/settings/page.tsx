@@ -245,8 +245,9 @@ async function SectionBody({ section, sp, user }: { section: string; sp: SearchP
     }
 
     case "lists": {
-      const [assets, expenses, leads, docs] = await Promise.all([
-        groupCounts(db().select({ key: Asset.category, n: count() }).from(Asset).groupBy(Asset.category)),
+      const [assets, companyAssets, expenses, leads, docs] = await Promise.all([
+        groupCounts(db().select({ key: Asset.category, n: count() }).from(Asset).where(eq(Asset.kind, "staff")).groupBy(Asset.category)),
+        groupCounts(db().select({ key: Asset.category, n: count() }).from(Asset).where(eq(Asset.kind, "company")).groupBy(Asset.category)),
         groupCounts(db().select({ key: Expense.category, n: count() }).from(Expense).groupBy(Expense.category)),
         groupCounts(db().select({ key: Lead.source, n: count() }).from(Lead).groupBy(Lead.source)),
         groupCounts(
@@ -260,7 +261,8 @@ async function SectionBody({ section, sp, user }: { section: string; sp: SearchP
       return (
         <>
           <StringListEditor key={stamp(settings.expenseCategories)} title="Expense categories" description="Offered when claiming an expense." listKey="expenseCategories" items={settings.expenseCategories} usage={expenses} noun="expenses" />
-          <StringListEditor key={stamp(settings.assetCategories)} title="Asset categories" description="Used to classify company assets." listKey="assetCategories" items={settings.assetCategories} usage={assets} noun="assets" />
+          <StringListEditor key={stamp(settings.assetCategories)} title="Staff asset categories" description="Assets issued to people (laptops, phones…)." listKey="assetCategories" items={settings.assetCategories} usage={assets} noun="assets" />
+          <StringListEditor key={stamp(settings.companyAssetCategories)} title="Company asset categories" description="Assets bought for the office itself (AC, inverter…), kept for reporting." listKey="companyAssetCategories" items={settings.companyAssetCategories} usage={companyAssets} noun="assets" />
           <StringListEditor key={stamp(settings.leadSources)} title="Lead sources" description="Where enquiries come from." listKey="leadSources" items={settings.leadSources} usage={leads} noun="leads" />
           <DocumentCategoriesEditor key={stamp(settings.documentCategories)} items={settings.documentCategories} usage={docs} />
         </>

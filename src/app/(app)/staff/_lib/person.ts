@@ -16,7 +16,9 @@ import {
   Role,
   StoredFile,
   User,
+  GENDERS,
   newId,
+  type Gender,
   type Id,
   type Internship,
   type LifecycleEvent,
@@ -33,6 +35,7 @@ import { todayKey } from "@/lib/time";
 import { zs } from "@/lib/validation";
 import { AUTO_ONBOARDING_KEY, DEFAULT_EMPLOYMENT_TYPE, EMPLOYMENT_TYPE_KEYS, ONBOARDING_STEPS, type NewPersonType } from "./constants";
 import { missingRequired } from "./documents";
+import { EDUCATION_CATEGORY, EDUCATION_FILE_CATEGORY } from "./education";
 
 const EXITED = ["resigned", "terminated", "inactive"];
 
@@ -162,7 +165,9 @@ export async function autoCompleteSteps(userId: Id): Promise<void> {
         ne(StoredFile.category, ""),
       ),
     );
-  if (missingRequired(settings.documentCategories, u.personType, new Set(files.map((f) => f.category!))).length === 0) ready.push("documents");
+  // Structured education certificates satisfy a required "education" category.
+  const present = new Set(files.map((f) => (f.category === EDUCATION_FILE_CATEGORY ? EDUCATION_CATEGORY : f.category!)));
+  if (missingRequired(settings.documentCategories, u.personType, present).length === 0) ready.push("documents");
 
   const pending = ready.filter((key) => !done.has(key));
   if (pending.length === 0) return;
@@ -214,14 +219,21 @@ export function buildSalary(input: { basic: number; allowances: MoneyLine[]; ded
 
 const optPeriod = z.preprocess((v) => (v === "" || v == null ? undefined : v), z.enum(["monthly", "one_time"]).default("monthly"));
 
+/** Optional gender: male or female only. */
+export const optGender = z.preprocess(
+  (v) => (v === "" || v == null ? undefined : String(v).trim().toLowerCase()),
+  z.enum(GENDERS, { error: "Choose male or female" }).optional(),
+);
+
 /** Form schema for /staff/new (money-line arrays are parsed separately with `parseMoneyLines`). */
 export const createPersonSchema = z.object({
   name: zs.text("Name", 120),
   email: zs.email("Work email"),
   phone: zs.optText(30),
+  whatsapp: zs.optText(30),
   personalEmail: zs.optEmail(),
   dob: zs.optDate(),
-  gender: zs.optText(20),
+  gender: optGender,
   bloodGroup: zs.optText(5),
   personType: z.enum(["employee", "trainee", "intern"], { error: "Choose a person type" }),
   role: zs.text("Role", 60),
@@ -229,6 +241,9 @@ export const createPersonSchema = z.object({
   designation: zs.optId(),
   employmentType: zs.optText(30),
   joiningDate: zs.date("Joining date"),
+  contractStart: zs.optDate(),
+  contractEnd: zs.optDate(),
+  documentUploadOpen: zs.bool(),
   reportingManager: zs.optId(),
   team: zs.optText(80),
   internStartDate: zs.optDate(),
@@ -249,9 +264,10 @@ export interface NewPerson {
   name: string;
   email: string;
   phone?: string;
+  whatsapp?: string;
   personalEmail?: string;
   dob?: string;
-  gender?: string;
+  gender?: Gender;
   bloodGroup?: string;
   personType: NewPersonType;
   role: string;
@@ -259,6 +275,9 @@ export interface NewPerson {
   designation?: string;
   employmentType?: string;
   joiningDate?: string;
+  contractStart?: string;
+  contractEnd?: string;
+  documentUploadOpen?: boolean;
   reportingManager?: string;
   team?: string;
   internship?: {
@@ -278,10 +297,21 @@ function isActiveStaff(u: { personType: string; status: string }): boolean {
   return u.personType !== "admin" && !EXITED.includes(u.status);
 }
 
+/**
+ * Validated contract period: an end date without a start runs from the joining date; the end can't precede the start.
+ * Empty values mean "no contract period".
+ */
+export function contractPeriod(start: string | undefined, end: string | undefined, joiningDate: string | undefined): { start?: string; end?: string } {
+  const from = start ?? (end ? joiningDate : undefined);
+  if (from && end && end < from) throw new ActionError("The contract can't end before it starts.", { contractEnd: "Before the contract start" });
+  return { start: from, end };
+}
+
 /** Builds the user row (checklist, joined event, internship, initial salary) for an already validated person. */
 function buildPersonRow(actor: CurrentUser, p: NewPerson, employeeId: string, email: string, employmentType: string, designationName: string | undefined): typeof User.$inferInsert & { _id: Id } {
   const today = todayKey();
   const joiningDate = p.joiningDate;
+  const contract = contractPeriod(p.contractStart, p.contractEnd, joiningDate);
   const mentorId = p.internship?.mentor;
   let internship: Internship | undefined;
   if (p.personType !== "employee") {
@@ -312,6 +342,7 @@ function buildPersonRow(actor: CurrentUser, p: NewPerson, employeeId: string, em
     email,
     personalEmail: p.personalEmail?.trim().toLowerCase(),
     phone: p.phone,
+    whatsapp: p.whatsapp,
     personType: p.personType,
     role: p.role,
     isSuperAdmin: false,
@@ -319,6 +350,9 @@ function buildPersonRow(actor: CurrentUser, p: NewPerson, employeeId: string, em
     designation: p.designation,
     employmentType,
     joiningDate,
+    contractStart: contract.start,
+    contractEnd: contract.end,
+    documentUploadOpen: p.documentUploadOpen ?? false,
     status: "active",
     accountActive: p.accountActive,
     reportingManager: p.reportingManager,

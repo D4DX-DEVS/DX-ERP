@@ -2,7 +2,8 @@ import { forbidden, notFound } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { can, requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { Project, Task } from "@/lib/models";
+import { Project, Task, User } from "@/lib/models";
+import { inList } from "@/lib/sql";
 import { getSettings } from "@/lib/settings";
 import { isObjectId } from "@/lib/validation";
 import { taskCaps, taskFilter } from "@/lib/work-access";
@@ -28,6 +29,11 @@ export default async function EditTaskPage({ params }: { params: Promise<{ id: s
 
   const settings = await getSettings();
   const options = await loadTaskFormOptions(user, settings, project ? [project._id] : []);
+  // People on the task who have since left aren't in the picker options; list them so they can be seen and removed.
+  const listed = new Set(options.people.map((p) => p.id));
+  const missing = [...new Set([...task.assignees, ...task.sharedWith, ...(task.reviewer ? [task.reviewer] : [])])].filter((p) => !listed.has(p));
+  const leavers = missing.length ? await db().select({ id: User._id, name: User.name, employeeId: User.employeeId }).from(User).where(inList(User._id, missing)) : [];
+  const people = [...options.people, ...leavers.map((l) => ({ id: l.id, name: `${l.name} (left)`, employeeId: l.employeeId }))];
 
   return (
     <PageBody>
@@ -37,7 +43,7 @@ export default async function EditTaskPage({ params }: { params: Promise<{ id: s
           <TaskForm
             projects={options.projects}
             dependencies={options.dependencies}
-            people={options.people}
+            people={people}
             canPickNoProject={can(user, "tasks.manage")}
             lockProject
             initial={{

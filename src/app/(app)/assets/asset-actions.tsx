@@ -15,6 +15,15 @@ import { ASSET_CONDITIONS } from "./meta";
 
 type Kind = "issue" | "return" | "transfer" | "repair" | "back" | "damaged" | "lost" | "retire" | "restore" | "service";
 
+/** Company assets stay in the office: no issue / return, and "in use" replaces "available". */
+const COMPANY_BY_STATUS: Record<string, { primary: Kind[]; more: Kind[] }> = {
+  in_use: { primary: ["service", "repair"], more: ["transfer", "damaged", "lost", "retire"] },
+  in_repair: { primary: ["back", "service"], more: ["damaged", "lost", "retire"] },
+  damaged: { primary: ["repair", "restore"], more: ["service", "lost", "retire"] },
+  lost: { primary: ["restore", "retire"], more: [] },
+  retired: { primary: [], more: [] },
+};
+
 const BY_STATUS: Record<string, { primary: Kind[]; more: Kind[] }> = {
   available: { primary: ["issue", "repair", "service"], more: ["transfer", "damaged", "lost", "retire"] },
   assigned: { primary: ["return", "transfer", "repair"], more: ["service", "damaged", "lost"] },
@@ -26,7 +35,9 @@ const BY_STATUS: Record<string, { primary: Kind[]; more: Kind[] }> = {
 
 const DANGER: Kind[] = ["damaged", "lost", "retire"];
 
-function label(kind: Kind, status: string): string {
+function label(kind: Kind, status: string, company = false): string {
+  if (company && kind === "restore") return status === "lost" ? "Found: put back in use" : "Put back in use";
+  if (company && kind === "transfer") return "Move to department";
   switch (kind) {
     case "issue":
       return "Issue to person";
@@ -88,6 +99,7 @@ function NoteField({ label: text = "Note", required, placeholder }: { label?: st
 
 export function AssetActions({
   id,
+  assetKind = "staff",
   status,
   condition,
   holder,
@@ -96,6 +108,7 @@ export function AssetActions({
   today,
 }: {
   id: string;
+  assetKind?: string;
   status: string;
   condition: string;
   holder?: string;
@@ -105,7 +118,10 @@ export function AssetActions({
   today: string;
 }) {
   const [kind, setKind] = useState<Kind | null>(null);
-  const config = BY_STATUS[status] ?? { primary: [], more: [] };
+  const company = assetKind === "company";
+  const config = (company ? COMPANY_BY_STATUS : BY_STATUS)[status] ?? { primary: [], more: [] };
+  const describe = (k: Kind) =>
+    company && k === "back" ? "The repaired asset is back in use." : company && k === "restore" ? "Put the asset back into use in the office." : company && k === "transfer" ? "Move the asset to another department." : DESCRIPTION[k];
 
   if (config.primary.length === 0 && config.more.length === 0) {
     return <span className="text-[13px] text-muted">Retired assets are read-only.</span>;
@@ -132,7 +148,7 @@ export function AssetActions({
     damaged: "Marked as damaged",
     lost: "Marked as lost",
     retire: "Asset retired",
-    restore: "Returned to stock",
+    restore: company ? "Back in use" : "Returned to stock",
     service: "Service recorded",
   };
 
@@ -164,7 +180,7 @@ export function AssetActions({
     ),
     transfer: (
       <FormGrid>
-        {status === "assigned" ? (
+        {company ? null : status === "assigned" ? (
           <Field label="Transfer to person" name="toPerson" hint={holder ? `Currently with ${holder}.` : undefined} className="sm:col-span-2">
             <PeoplePicker name="toPerson" options={people} placeholder="Keep with current holder" />
           </Field>
@@ -245,7 +261,7 @@ export function AssetActions({
       <div className="flex flex-wrap items-center gap-2">
         {config.primary.map((k, i) => (
           <Button key={k} variant={i === 0 ? "primary" : "secondary"} onClick={() => setKind(k)}>
-            {label(k, status)}
+            {label(k, status, company)}
           </Button>
         ))}
         {config.more.length > 0 && (
@@ -256,11 +272,11 @@ export function AssetActions({
                 More
               </Button>
             }
-            items={config.more.map((k) => ({ label: label(k, status), onSelect: () => setKind(k), danger: DANGER.includes(k) }))}
+            items={config.more.map((k) => ({ label: label(k, status, company), onSelect: () => setKind(k), danger: DANGER.includes(k) }))}
           />
         )}
       </div>
-      <Dialog open={kind !== null} onOpenChange={(open) => !open && setKind(null)} title={kind ? label(kind, status) : ""} description={kind ? DESCRIPTION[kind] : undefined}>
+      <Dialog open={kind !== null} onOpenChange={(open) => !open && setKind(null)} title={kind ? label(kind, status, company) : ""} description={kind ? describe(kind) : undefined}>
         {kind && (
           <ActionForm key={kind} action={actions[kind]} successMessage={success[kind]} onSuccess={() => setKind(null)}>
             {fields[kind]}
@@ -268,7 +284,7 @@ export function AssetActions({
               <Button variant="secondary" onClick={() => setKind(null)}>
                 Cancel
               </Button>
-              <SubmitButton variant={DANGER.includes(kind) ? "danger" : "primary"}>{label(kind, status)}</SubmitButton>
+              <SubmitButton variant={DANGER.includes(kind) ? "danger" : "primary"}>{label(kind, status, company)}</SubmitButton>
             </FormActions>
           </ActionForm>
         )}

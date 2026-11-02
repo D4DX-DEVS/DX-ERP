@@ -30,11 +30,12 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     <PageBody className="max-w-3xl">
       <PageHeader back={{ href: `/assets/${id}`, label: asset.name }} title={`Edit ${asset.assetNo}`} />
       <AssetForm
-        categories={settings.assetCategories}
+        categories={asset.kind === "company" ? settings.companyAssetCategories : settings.assetCategories}
         departments={options}
         storageConfigured={env.storage.configured}
         asset={{
           id,
+          kind: asset.kind,
           assetNo: asset.assetNo,
           name: asset.name,
           category: asset.category,

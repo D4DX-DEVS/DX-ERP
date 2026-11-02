@@ -285,14 +285,14 @@ export async function saveEmploymentStatuses(input: Record<string, unknown>): Pr
 /* ───────────────────────────── Lists ───────────────────────────── */
 
 const simpleListSchema = z.object({
-  list: z.enum(["expenseCategories", "assetCategories", "leadSources"]),
+  list: z.enum(["expenseCategories", "assetCategories", "companyAssetCategories", "leadSources"]),
   items: z.preprocess(
     (v) => (Array.isArray(v) ? v.map((x) => String(x ?? "").trim()).filter(Boolean) : []),
     z.array(z.string().max(60, "Keep each entry under 60 characters")).min(1, "Keep at least one entry").max(100),
   ),
 });
 
-const LIST_LABELS = { expenseCategories: "Expense categories", assetCategories: "Asset categories", leadSources: "Lead sources" } as const;
+const LIST_LABELS = { expenseCategories: "Expense categories", assetCategories: "Staff asset categories", companyAssetCategories: "Company asset categories", leadSources: "Lead sources" } as const;
 
 export async function saveSimpleList(input: Record<string, unknown>): Promise<Saved> {
   return runAction(async () => {

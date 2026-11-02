@@ -313,7 +313,7 @@ export function StringListEditor({
 }: {
   title: string;
   description: string;
-  listKey: "expenseCategories" | "assetCategories" | "leadSources";
+  listKey: "expenseCategories" | "assetCategories" | "companyAssetCategories" | "leadSources";
   items: string[];
   usage: Record<string, number>;
   noun: string;

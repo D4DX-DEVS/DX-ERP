@@ -25,6 +25,7 @@ export type NavIcon =
   | "settings"
   | "roles"
   | "audit"
+  | "credentials"
   | "notifications"
   | "profile";
 
@@ -109,6 +110,7 @@ export function buildNav({ user, isManager, isMentor, badges }: NavContext): Nav
   if (canAny(user, ["settings.manage", "backup.manage"])) admin.push(item("settings", "Configuration", "/settings", "settings"));
   if (canAny(user, ["roles.manage", "users.manage"])) admin.push(item("roles", "Roles & access", "/roles", "roles"));
   if (can(user, "audit.view")) admin.push(item("audit", "Audit trail", "/audit", "audit"));
+  if (user.isSuperAdmin) admin.push(item("credentials", "Credential storage", "/credentials", "credentials"));
   if (admin.length) sections.push({ label: "Admin", items: admin });
 
   return sections;

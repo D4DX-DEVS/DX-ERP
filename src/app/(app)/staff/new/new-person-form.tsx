@@ -10,6 +10,7 @@ import { Input, Select, Switch } from "@/components/ui/input";
 import { PeoplePicker, type PickerOption } from "@/components/ui/people-picker";
 import { cn } from "@/lib/cn";
 import { createPerson } from "../actions";
+import { ContractPeriodFields, PhoneFields } from "../_components/contact-fields";
 import { MoneyLines } from "../_components/money-lines";
 import { BLOOD_GROUPS, DEFAULT_EMPLOYMENT_TYPE, DEFAULT_ROLE_FOR, EMPLOYMENT_TYPE_OPTIONS, GENDER_OPTIONS, NEW_PERSON_TYPES, STIPEND_PERIODS, type NewPersonType } from "../_lib/constants";
 
@@ -33,6 +34,7 @@ export function NewPersonForm({ today, defaultType, roles, departments, designat
   const [employmentType, setEmploymentType] = useState(DEFAULT_EMPLOYMENT_TYPE[defaultType]);
   const [department, setDepartment] = useState("");
   const [stipend, setStipend] = useState(false);
+  const [joiningDate, setJoiningDate] = useState(today);
   const internLike = personType !== "employee";
   const shownDesignations = designations.filter((d) => !department || !d.department || d.department === department);
   const docs = documentCategories.filter((c) => c.appliesTo.includes(personType));
@@ -56,9 +58,7 @@ export function NewPersonForm({ today, defaultType, roles, departments, designat
                 <Field label="Work email" name="email" required hint="Must be unique and different from the super admin email">
                   <Input id="email" name="email" type="email" autoComplete="off" inputMode="email" />
                 </Field>
-                <Field label="Phone" name="phone">
-                  <Input id="phone" name="phone" type="tel" inputMode="tel" maxLength={30} />
-                </Field>
+                <PhoneFields />
                 <Field label="Personal email" name="personalEmail">
                   <Input id="personalEmail" name="personalEmail" type="email" inputMode="email" />
                 </Field>
@@ -151,7 +151,7 @@ export function NewPersonForm({ today, defaultType, roles, departments, designat
                   </Select>
                 </Field>
                 <Field label="Joining date" name="joiningDate" required>
-                  <Input id="joiningDate" name="joiningDate" type="date" defaultValue={today} />
+                  <Input id="joiningDate" name="joiningDate" type="date" value={joiningDate} onChange={(e) => setJoiningDate(e.target.value)} />
                 </Field>
                 <Field label="Team" name="team">
                   <Input id="team" name="team" maxLength={80} placeholder="e.g. Commerce squad" />
@@ -160,6 +160,10 @@ export function NewPersonForm({ today, defaultType, roles, departments, designat
                   <PeoplePicker name="reportingManager" options={people} placeholder="Select reporting manager" />
                 </Field>
               </FormGrid>
+            </FormSection>
+
+            <FormSection title="Contract period" description="Pick a length to fill the end date, or leave the end empty for an open-ended contract. HR is reminded 30 days before it ends.">
+              <ContractPeriodFields fallbackStart={joiningDate} />
             </FormSection>
 
             {internLike && (
@@ -221,6 +225,14 @@ export function NewPersonForm({ today, defaultType, roles, departments, designat
               </FormSection>
             )}
 
+            <FormSection title="Documents">
+              <Switch
+                name="documentUploadOpen"
+                label="Let this person upload restricted documents"
+                description="ID proof, PAN, address proof, bank proof and other restricted categories. They upload from My profile; you can switch this off any time from the Documents tab."
+              />
+            </FormSection>
+
             {canAccess && (
               <FormSection title="Access">
                 <Switch name="loginAccess" label="Enable login access" description="Lets the person sign in with their work Google account. You can change this later from the Access tab." />
@@ -254,7 +266,7 @@ export function NewPersonForm({ today, defaultType, roles, departments, designat
                 ))}
               </ul>
             )}
-            <p className="text-xs text-muted">Upload these from the Documents tab once the record is created.</p>
+            <p className="text-xs text-muted">Upload these from the Documents tab once the record is created — or switch on &ldquo;Let this person upload restricted documents&rdquo; so they upload them from their own profile.</p>
           </div>
         </Card>
         <section className="flex flex-col gap-2.5 rounded-[14px] bg-navy p-5 text-[13px] leading-relaxed text-[#e3e9fc]">

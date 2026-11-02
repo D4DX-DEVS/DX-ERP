@@ -15,7 +15,7 @@ import { peopleOptions } from "@/lib/people";
 import { fmtDate, todayKey } from "@/lib/time";
 import { isObjectId } from "@/lib/validation";
 import { AssetActions } from "../asset-actions";
-import { HISTORY_ACTIONS, serviceState, warrantyState } from "../meta";
+import { ASSET_KIND_LABELS, HISTORY_ACTIONS, serviceState, warrantyState } from "../meta";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -41,7 +41,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const [[holder], [dept], people, departments] = await Promise.all([
     asset.assignedTo ? db().select({ _id: User._id, name: User.name, employeeId: User.employeeId, photo: User.photo }).from(User).where(eq(User._id, asset.assignedTo)).limit(1) : Promise.resolve([]),
     asset.department ? db().select({ name: Department.name }).from(Department).where(eq(Department._id, asset.department)).limit(1) : Promise.resolve([]),
-    canManage ? peopleOptions() : [],
+    canManage && asset.kind === "staff" ? peopleOptions() : [],
     canManage ? db().select({ _id: Department._id, name: Department.name }).from(Department).where(eq(Department.active, true)).orderBy(asc(Department.name)) : [],
   ]);
 
@@ -57,7 +57,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   return (
     <PageBody>
       <PageHeader
-        back={canViewAll ? { href: "/assets", label: "Assets" } : undefined}
+        back={canViewAll ? (asset.kind === "company" ? { href: "/assets?kind=company", label: "Company assets" } : { href: "/assets", label: "Assets" }) : undefined}
         overline={canViewAll ? undefined : "My equipment"}
         title={
           <span className="flex flex-wrap items-center gap-3">
@@ -65,7 +65,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             <StatusChip domain="asset" value={asset.status} />
           </span>
         }
-        description={`${asset.assetNo} · ${asset.category}${asset.serialNo ? ` · Serial ${asset.serialNo}` : ""}`}
+        description={`${asset.assetNo} · ${ASSET_KIND_LABELS[asset.kind]?.label ?? "Asset"} · ${asset.category}${asset.serialNo ? ` · Serial ${asset.serialNo}` : ""}`}
         actions={
           canManage ? (
             <>
@@ -74,6 +74,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
               </ButtonLink>
               <AssetActions
                 id={id}
+                assetKind={asset.kind}
                 status={asset.status}
                 condition={asset.condition}
                 holder={holder?.name}
@@ -169,9 +170,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
 
         <div className="flex min-w-0 flex-col gap-5">
           <Card>
-            <CardHeader title="Assignment" />
+            <CardHeader title={asset.kind === "company" ? "Placement" : "Assignment"} />
             <CardBody className="flex flex-col gap-3">
-              {holder ? (
+              {asset.kind === "company" ? (
+                <p className="text-sm text-ink-2">
+                  Company asset — kept in the office, not issued to people.
+                  {dept || asset.location ? ` ${[dept?.name, asset.location].filter(Boolean).join(" · ")}.` : " Add a department or location from Edit."}
+                </p>
+              ) : holder ? (
                 <>
                   <PersonCell name={holder.name} photo={holder.photo ?? undefined} sub={holder.employeeId} />
                   <p className="text-[13px] text-muted">

@@ -12,6 +12,7 @@ import {
   Attendance,
   Department,
   Designation,
+  Education,
   LeaveRequest,
   LearningResource,
   Movement,
@@ -33,6 +34,7 @@ import { addDays, fmtDate } from "@/lib/time";
 import { isObjectId, zs } from "@/lib/validation";
 import { adviseRotationForUser } from "@/lib/vault/service";
 import { AUTO_ONBOARDING_KEY, salaryTotals } from "../_lib/constants";
+import { documentActor } from "../_lib/document-actor";
 import {
   autoCompleteSteps,
   buildSalary,
@@ -213,19 +215,27 @@ export async function changeManager(input: Record<string, unknown>): Promise<Act
         history: jsonPush(User.history, lifecycleEvent(user, { type: "manager_change", date: data.effectiveDate, summary, from: prev?.name, to: next?.name, note: data.note })),
       })
       .where(eq(User._id, target._id));
+    // Leave requests still waiting for the manager move with the person: to the new manager, or to HR when there is none.
+    const movedLeave = await db()
+      .update(LeaveRequest)
+      .set(next && data.reportingManager ? { manager: data.reportingManager } : { manager: null, status: "pending_hr" })
+      .where(and(eq(LeaveRequest.user, target._id), eq(LeaveRequest.status, "pending_manager")))
+      .returning({ id: LeaveRequest._id });
     await autoCompleteSteps(target._id);
     await audit(user, {
       action: "update",
       entity: "user",
       entityId: target._id,
       ref: target.employeeId,
-      summary: `${summary} — ${target.name}`,
+      summary: `${summary} — ${target.name}${movedLeave.length ? ` (${movedLeave.length} pending leave request${movedLeave.length === 1 ? "" : "s"} moved ${next ? `to ${next.name}` : "to HR"})` : ""}`,
       changes: [{ field: "reportingManager", from: prev?.name, to: next?.name }],
     });
     const type = target.personType === "employee" ? "system" : "internship";
     await notify([target._id], { type: "system", title: "Your reporting manager changed", body: next ? `You now report to ${next.name}.` : "You no longer have a reporting manager assigned.", link: "/profile" }, [user._id]);
     if (data.reportingManager) {
-      await notify([data.reportingManager], { type, title: `${target.name} now reports to you`, link: `/staff/${data.userId}` }, [user._id]);
+      await notify([data.reportingManager], { type, title: `${target.name} now reports to you`, body: movedLeave.length ? `${movedLeave.length} leave request${movedLeave.length === 1 ? " is" : "s are"} waiting for your approval.` : undefined, link: movedLeave.length ? "/leave/approvals" : `/staff/${data.userId}` }, [user._id]);
+    } else if (movedLeave.length) {
+      await notifyPermission("leave.approve", { type: "leave", title: `Leave awaiting HR approval · ${target.name}`, body: `${target.name} no longer has a reporting manager, so ${movedLeave.length === 1 ? "their pending request" : `${movedLeave.length} pending requests`} moved to HR.`, link: "/leave/approvals", actionable: true }, [target._id, user._id]);
     }
     if (current) await notify([current], { type, title: `${target.name} no longer reports to you`, link: `/staff/${data.userId}` }, [user._id, data.reportingManager]);
     return null;
@@ -396,18 +406,6 @@ export async function toggleOnboardingStep(userId: string, key: string, done: bo
 /* Documents                                                           */
 /* ------------------------------------------------------------------ */
 
-async function documentActor(personId: string) {
-  const user = await actionUser();
-  if (!isObjectId(personId)) throw new ActionError("Person not found.");
-  const [target] = await db().select({ _id: User._id, personType: User.personType, name: User.name, employeeId: User.employeeId }).from(User).where(eq(User._id, personId)).limit(1);
-  if (!target || target.personType === "admin") throw new ActionError("Person not found.");
-  const internLike = target.personType === "intern" || target.personType === "trainee";
-  const self = user.id === personId;
-  const manage = can(user, "staff.edit") || (internLike && can(user, "interns.manage"));
-  if (!self && !manage) throw new ActionError("You don't have permission to manage this person's documents.");
-  return { user, target, self, manage };
-}
-
 const registerSchema = z.object({
   personId: zs.id("Person"),
   fileId: zs.ids(),
@@ -432,7 +430,8 @@ export async function registerDocument(input: Record<string, unknown>): Promise<
     const settings = await getSettings();
     const category = settings.documentCategories.find((c) => c.key === data.category);
     if (!category || !category.appliesTo.includes(target.personType)) throw new ActionError("Choose a document category.", { category: "Invalid category" });
-    if (!manage && category.confidential) throw new ActionError("This document is confidential — please hand it to HR to upload.", { category: "HR uploads this category" });
+    // Restricted categories are HR-only unless HR opened them for this person (User.documentUploadOpen).
+    if (!manage && category.confidential && !target.documentUploadOpen) throw new ActionError("This document is restricted — please hand it to HR to upload.", { category: "HR uploads this category" });
 
     const [file] = await db().select().from(StoredFile).where(eq(StoredFile._id, fileId)).limit(1);
     if (!file || file.deletedAt || file.entityType !== "user" || file.entityId !== data.personId) throw new ActionError("Uploaded file not found. Please upload it again.", { fileId: "Upload again" });
@@ -451,7 +450,7 @@ export async function registerDocument(input: Record<string, unknown>): Promise<
       if (!old || old.deletedAt || old.entityType !== "user" || old.entityId !== data.personId || old.category !== category.key) {
         throw new ActionError("The document to replace was not found in this category.");
       }
-      if (!manage && (old.confidential || old.uploadedBy !== user.id)) throw new ActionError("Only HR can replace this document.");
+      if (!manage && ((old.confidential && !target.documentUploadOpen) || old.uploadedBy !== user.id)) throw new ActionError("Only HR can replace this document.");
       const linked = await db()
         .update(StoredFile)
         .set({ replacedBy: file._id })
@@ -476,6 +475,30 @@ export async function registerDocument(input: Record<string, unknown>): Promise<
     }
     return null;
   }, "Document saved");
+}
+
+/** Opens (or closes) the restricted document categories for the person to upload themself. */
+export async function setDocumentUploadOpen(personId: string, open: boolean): Promise<ActionResult<null>> {
+  return runAction(async () => {
+    const { user, target, manage } = await documentActor(personId);
+    if (!manage) throw new ActionError("You don't have permission to change document access.");
+    if (target._id === user.id) throw new ActionError("You can't change document access on your own record.");
+    const next = open === true;
+    if (target.documentUploadOpen === next) return null;
+    await db().update(User).set({ documentUploadOpen: next }).where(eq(User._id, target._id));
+    await audit(user, {
+      action: "update",
+      entity: "user",
+      entityId: target._id,
+      ref: target.employeeId,
+      summary: `${next ? "Allowed" : "Stopped"} ${target.name} ${next ? "to upload" : "uploading"} restricted documents`,
+      changes: [{ field: "documentUploadOpen", from: String(target.documentUploadOpen), to: String(next) }],
+    });
+    if (next) {
+      await notify([target._id], { type: "document", title: "Please upload your documents", body: "HR has opened all document categories for you, including ID, PAN and bank proof. Upload them from My profile → Documents.", link: "/profile#documents", actionable: true }, [user._id]);
+    }
+    return null;
+  }, open ? "Staff can now upload restricted documents" : "Restricted documents are HR-only again");
 }
 
 /** Soft-deletes a document; an older version (if any) becomes current again. */
@@ -726,6 +749,7 @@ export async function deletePerson(userId: string): Promise<ActionResult<null>> 
         .set({ deletedAt: new Date(), deletedBy: user._id })
         .where(and(inList(StoredFile.entityType, ["user", "avatar"]), eq(StoredFile.entityId, id), isNull(StoredFile.deletedAt))),
       db().delete(Review).where(eq(Review.user, id)),
+      db().delete(Education).where(eq(Education.user, id)),
       db().delete(Session).where(eq(Session.user, id)),
       db().delete(Notification).where(eq(Notification.user, id)),
       // `$pull` the person from every learning resource's assignees and completions.

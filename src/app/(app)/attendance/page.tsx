@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { and, desc, eq, gte, isNotNull, isNull, lt, lte, ne } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, lt } from "drizzle-orm";
 import { Plus } from "lucide-react";
 import { ActionButton } from "@/components/ui/actions";
 import { Button } from "@/components/ui/button";
@@ -10,13 +10,11 @@ import { Alert, PageBody, PageHeader, StatCard } from "@/components/ui/page";
 import { EmptyRow, TableWrap, THead, Td, Th, Tr } from "@/components/ui/table";
 import { isStaff, requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { workCalendar } from "@/lib/domain/calendar";
-import { Attendance, AttendanceCorrection, LeaveRequest, Movement, type IAttendance } from "@/lib/models";
+import { leaveBalances, leaveYearOf } from "@/lib/domain/leave-balance";
+import { Attendance, AttendanceCorrection } from "@/lib/models";
 import type { SearchParams } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
-import { inList } from "@/lib/sql";
-import { TONE_CLASSES } from "@/lib/status";
-import { addDays, eachDay, formatDuration, fmtDate, fmtTime, monthKey, monthRange, todayKey, weekday } from "@/lib/time";
+import { addDays, formatDuration, fmtDate, fmtTime, monthKey, todayKey } from "@/lib/time";
 import { cn } from "@/lib/cn";
 import { cancelCorrection } from "./actions";
 import { CorrectionDialog } from "./_components/correction-dialog";
@@ -26,66 +24,13 @@ import { AttendanceTabs } from "./_components/tabs";
 import { attendanceAccess } from "./_lib/access";
 import { currentTime } from "./_lib/clock";
 import { decidableFilter } from "./_lib/corrections";
-import { classifyDay, dayChipInfo, provisionalWork, summarizeDays, type DayClass, type DayKey } from "./_lib/day";
-import { buildLeaveDayMap } from "./_lib/leave-days";
+import { loadMonthLog, type LogMovement } from "./_lib/month";
+import { CalendarLegend, MonthCalendar } from "./_components/month-calendar";
+import { LeaveBalanceCard } from "../leave/_components/balance-card";
 import { validMonthParam } from "./_lib/params";
 import { TodayAttendanceCard } from "./today-card";
 
 export const metadata = { title: "My attendance" };
-
-interface LogMovement {
-  id: string;
-  no: string;
-  minutes: number;
-  official: boolean;
-  open: boolean;
-}
-
-type LogAttendance = Pick<
-  IAttendance,
-  "date" | "checkIn" | "checkOut" | "breaks" | "breakMinutes" | "workMinutes" | "status" | "late" | "lateMinutes" | "earlyDeparture" | "earlyMinutes"
->;
-
-interface LogDay {
-  date: string;
-  att?: LogAttendance;
-  cls: DayClass;
-  holidayName?: string;
-  leaveLabel?: string;
-  moves: LogMovement[];
-  worked: number | null;
-}
-
-/** Calendar cell appearance per day status (design: Present / Late / Leave / Missing check-out / Holiday-weekend). */
-function cellTone(key: DayKey): string {
-  if (key === "weekend" || key === "holiday") return "bg-ground text-subtle";
-  if (key === "upcoming" || key === "not_checked_in") return "border border-dashed border-line-strong bg-white text-subtle";
-  const t = TONE_CLASSES[dayChipInfo(key).tone];
-  return cn(t.bg, t.fg);
-}
-
-function cellNote(d: LogDay): string {
-  switch (d.cls.key) {
-    case "present":
-    case "late":
-    case "early":
-    case "half_day":
-      return d.worked ? formatDuration(d.worked) : "";
-    case "in_progress":
-      return d.worked ? formatDuration(d.worked) : "In";
-    case "on_leave":
-    case "half_leave":
-      return "Leave";
-    case "absent":
-      return "Absent";
-    case "missing_checkout":
-      return "No out";
-    case "holiday":
-      return "Holiday";
-    default:
-      return "";
-  }
-}
 
 function MovementLinks({ moves }: { moves: LogMovement[] }) {
   if (moves.length === 0) return <span className="text-muted">—</span>;
@@ -111,58 +56,10 @@ export default async function MyAttendancePage({ searchParams }: { searchParams:
   const thisMonth = monthKey(now);
   const requested = validMonthParam(sp, "month") ?? thisMonth;
   const month = requested > thisMonth ? thisMonth : requested;
-  const { from, to } = monthRange(month);
-  const last = to < today ? to : today;
 
-  const [records, movements, leaves, cal, corrections, openDays, pendingForMe] = await Promise.all([
-    db()
-      .select({
-        date: Attendance.date,
-        checkIn: Attendance.checkIn,
-        checkOut: Attendance.checkOut,
-        breaks: Attendance.breaks,
-        breakMinutes: Attendance.breakMinutes,
-        workMinutes: Attendance.workMinutes,
-        status: Attendance.status,
-        late: Attendance.late,
-        lateMinutes: Attendance.lateMinutes,
-        earlyDeparture: Attendance.earlyDeparture,
-        earlyMinutes: Attendance.earlyMinutes,
-      })
-      .from(Attendance)
-      .where(and(eq(Attendance.user, user._id), gte(Attendance.date, from), lte(Attendance.date, to))),
-    db()
-      .select({
-        _id: Movement._id,
-        movementNo: Movement.movementNo,
-        date: Movement.date,
-        status: Movement.status,
-        durationMinutes: Movement.durationMinutes,
-        official: Movement.official,
-        outTime: Movement.outTime,
-      })
-      .from(Movement)
-      .where(
-        and(
-          eq(Movement.user, user._id),
-          gte(Movement.date, from),
-          lte(Movement.date, to),
-          inList(Movement.status, ["out", "returned"]),
-          ne(Movement.approvalStatus, "rejected"),
-        ),
-      ),
-    db()
-      .select({
-        _id: LeaveRequest._id,
-        user: LeaveRequest.user,
-        startDate: LeaveRequest.startDate,
-        endDate: LeaveRequest.endDate,
-        halfDay: LeaveRequest.halfDay,
-        leaveTypeName: LeaveRequest.leaveTypeName,
-      })
-      .from(LeaveRequest)
-      .where(and(eq(LeaveRequest.user, user._id), eq(LeaveRequest.status, "approved"), lte(LeaveRequest.startDate, to), gte(LeaveRequest.endDate, from))),
-    workCalendar(settings, from, to),
+  const year = leaveYearOf(today, settings);
+  const [log, corrections, openDays, pendingForMe, balances] = await Promise.all([
+    loadMonthLog(user._id, month, settings, today, now),
     db().select().from(AttendanceCorrection).where(eq(AttendanceCorrection.user, user._id)).orderBy(desc(AttendanceCorrection.createdAt)).limit(8),
     db()
       .select({ date: Attendance.date, checkIn: Attendance.checkIn })
@@ -178,48 +75,16 @@ export default async function MyAttendancePage({ searchParams }: { searchParams:
       )
       .orderBy(desc(Attendance.date)),
     access.canDecide ? db().$count(AttendanceCorrection, and(eq(AttendanceCorrection.status, "pending"), decidableFilter(user, access))) : Promise.resolve(0),
+    leaveBalances(user._id, user.personType, year, settings, today),
   ]);
 
-  const leaveMap = buildLeaveDayMap(leaves, settings, cal, from, to).get(user.id);
-  const recByDate = new Map(records.map((r) => [r.date, r]));
-  const movesByDate = new Map<string, typeof movements>();
-  for (const m of movements) movesByDate.set(m.date, [...(movesByDate.get(m.date) ?? []), m]);
-
-  const days: LogDay[] = eachDay(from, to).map((date) => {
-    const att = recByDate.get(date);
-    const l = leaveMap?.get(date);
-    const cls = classifyDay({ date, today, now, att, leave: l ? (l.half ? "half" : "full") : null, holiday: cal.isHoliday(date), settings });
-    const dayMoves = movesByDate.get(date) ?? [];
-    let worked: number | null = null;
-    if (att?.checkIn) {
-      if (att.checkOut) worked = att.workMinutes;
-      else if (date === today && cls.key === "in_progress") worked = provisionalWork({ date, checkIn: att.checkIn, checkOut: null, breaks: att.breaks }, dayMoves, settings, now);
-    }
-    return {
-      date,
-      att,
-      cls,
-      holidayName: cal.holidays.get(date),
-      leaveLabel: l?.typeName,
-      worked,
-      moves: dayMoves.map((m) => ({
-        id: m._id,
-        no: m.movementNo,
-        minutes: m.durationMinutes ?? 0,
-        official: m.official,
-        open: m.status === "out",
-      })),
-    };
-  });
-
-  const elapsed = days.filter((d) => d.date <= last);
-  const stats = summarizeDays(elapsed.map((d) => ({ key: d.cls.key, att: d.att })));
+  const { days, elapsed, stats } = log;
+  const recByDate = new Map(days.flatMap((d) => (d.att ? [[d.date, d.att] as const] : [])));
   const pendingDates = new Set(corrections.filter((c) => c.status === "pending").map((c) => c.date));
   const missing = [
     ...openDays.map((r) => r.date),
     ...(recByDate.get(today) && days.find((d) => d.date === today)?.cls.key === "missing_checkout" ? [today] : []),
   ].sort((x, y) => (x < y ? 1 : -1));
-  const lead = (weekday(from) + 6) % 7;
   const a = settings.attendance;
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -284,55 +149,15 @@ export default async function MyAttendancePage({ searchParams }: { searchParams:
         <Card className="lg:col-span-2">
           <CardHeader
             title={fmtDate(`${month}-01`, "MMMM")}
-            action={
-              <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-ink-2" aria-hidden>
-                {(
-                  [
-                    ["Present", "green"],
-                    ["Late", "amber"],
-                    ["Leave", "blue"],
-                    ["Missing check-out", "orange"],
-                    ["Absent", "red"],
-                    ["Holiday / weekend", "gray"],
-                  ] as const
-                ).map(([label, tone]) => (
-                  <span key={label} className="flex items-center gap-1.5">
-                    <span className={cn("size-2.5 rounded-[3px]", TONE_CLASSES[tone].dot)} />
-                    {label}
-                  </span>
-                ))}
-              </div>
-            }
+            action={<CalendarLegend />}
           />
           <CardBody>
-            <div className="grid grid-cols-7 gap-1 sm:gap-1.5">
-              {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
-                <span key={d} className="py-1 text-center text-xs font-semibold text-muted">
-                  {d}
-                </span>
-              ))}
-              {Array.from({ length: lead }, (_, i) => (
-                <span key={`b${i}`} />
-              ))}
-              {days.map((d) => (
-                <div
-                  key={d.date}
-                  title={`${fmtDate(d.date, "EEE d MMM")} · ${dayChipInfo(d.cls.key).label}${d.holidayName ? ` · ${d.holidayName}` : ""}`}
-                  className={cn(
-                    "flex min-h-12 flex-col justify-between rounded-[10px] p-1 text-[10px] sm:min-h-[58px] sm:px-2 sm:py-1.5 sm:text-[11px]",
-                    cellTone(d.cls.key),
-                    d.date === today && "ring-2 ring-brand-500",
-                  )}
-                >
-                  <span className="text-xs font-semibold">{Number(d.date.slice(8))}</span>
-                  <span className="truncate">{cellNote(d)}</span>
-                </div>
-              ))}
-            </div>
+            <MonthCalendar days={days} today={today} />
           </CardBody>
         </Card>
 
         <div className="flex flex-col gap-4">
+          <LeaveBalanceCard balances={balances} />
           <Card>
             <CardHeader title="Correction requests" />
             <CardBody className="pb-3">

@@ -2,7 +2,8 @@
  * Client-safe constants and small pure helpers shared by the People module
  * (staff, interns, learning, profile). No server-only imports here.
  */
-import { diffDays, todayKey } from "@/lib/time";
+import type { Tone } from "@/lib/config-defaults";
+import { addDays, diffDays, todayKey } from "@/lib/time";
 
 export type NewPersonType = "employee" | "trainee" | "intern";
 
@@ -41,17 +42,16 @@ export const DEFAULT_ROLE_FOR: Record<NewPersonType, string> = {
   intern: "intern",
 };
 
-export const GENDER_OPTIONS: { value: string; label: string }[] = [
-  { value: "female", label: "Female" },
+/** Gender is recorded as male or female only (same keys as GENDERS in the User model). */
+export const GENDER_OPTIONS: { value: "male" | "female"; label: string }[] = [
   { value: "male", label: "Male" },
-  { value: "non_binary", label: "Non-binary" },
-  { value: "undisclosed", label: "Prefer not to say" },
+  { value: "female", label: "Female" },
 ];
 
 export const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
 
 export function genderLabel(value: string | null | undefined): string {
-  return GENDER_OPTIONS.find((o) => o.value === value)?.label ?? (value ? value : "—");
+  return GENDER_OPTIONS.find((o) => o.value === value)?.label ?? "—";
 }
 
 export const STIPEND_PERIODS: { value: "monthly" | "one_time"; label: string }[] = [
@@ -112,4 +112,74 @@ export function salaryTotals(s: SalaryLike): { gross: number; deductions: number
   const gross = s.basic + s.allowances.reduce((sum, l) => sum + l.amount, 0);
   const deductions = s.deductions.reduce((sum, l) => sum + l.amount, 0);
   return { gross, deductions, net: gross - deductions };
+}
+
+/* ------------------------------------------------------------------ */
+/* Contract period                                                     */
+/* ------------------------------------------------------------------ */
+
+/** Quick-pick contract lengths (months) offered in the forms. */
+export const CONTRACT_DURATIONS = [3, 6, 11, 12, 24, 36];
+export const CONTRACT_WARNING_DAYS = 30;
+
+/** Last day of a contract of `months` months starting on `start` (2026-01-15 + 12 → 2027-01-14). */
+export function contractEndFor(start: string, months: number): string {
+  const [y, m, d] = start.split("-").map(Number);
+  const total = m - 1 + months;
+  const ey = y + Math.floor(total / 12);
+  const em = (total % 12) + 1;
+  const lastDay = new Date(Date.UTC(ey, em, 0)).getUTCDate();
+  const month = `${ey}-${String(em).padStart(2, "0")}`;
+  // 31 Jan + 1 month ends on the last day of February; otherwise the day before the anniversary.
+  return d > lastDay ? `${month}-${String(lastDay).padStart(2, "0")}` : addDays(`${month}-${String(d).padStart(2, "0")}`, -1);
+}
+
+/** "12 months", "2 years", "1 y 6 m", "45 days" — the length of [start, end] (both days included). */
+export function contractLengthLabel(start: string | null | undefined, end: string | null | undefined): string {
+  if (!start || !end || end < start) return "";
+  const after = addDays(end, 1);
+  const [sy, sm, sd] = start.split("-").map(Number);
+  const [ay, am, ad] = after.split("-").map(Number);
+  let months = (ay - sy) * 12 + (am - sm);
+  if (ad < sd) months -= 1;
+  if (months < 1) {
+    const days = diffDays(start, after);
+    return `${days} ${days === 1 ? "day" : "days"}`;
+  }
+  const years = Math.floor(months / 12);
+  const rest = months % 12;
+  if (years === 0) return `${rest} ${rest === 1 ? "month" : "months"}`;
+  if (rest === 0) return `${years} ${years === 1 ? "year" : "years"}`;
+  return `${years} y ${rest} m`;
+}
+
+export interface ContractStatus {
+  state: "upcoming" | "active" | "open" | "ending" | "ended";
+  /** Short chip text: "Contract ends in 12 days", "Contract ended". */
+  label: string;
+  tone: Tone;
+  /** Days until the last contract day (negative once ended); null for open-ended contracts. */
+  daysLeft: number | null;
+}
+
+/** Where a person stands in their contract period; null when no contract period is recorded. */
+export function contractStatus(start: string | null | undefined, end: string | null | undefined, today: string = todayKey()): ContractStatus | null {
+  if (!start && !end) return null;
+  if (start && start > today) {
+    const days = diffDays(today, start);
+    return { state: "upcoming", label: `Contract starts in ${days} ${days === 1 ? "day" : "days"}`, tone: "blue", daysLeft: end ? diffDays(today, end) : null };
+  }
+  if (!end) return { state: "open", label: "Contract · open-ended", tone: "gray", daysLeft: null };
+  const days = diffDays(today, end);
+  if (days < 0) return { state: "ended", label: `Contract ended ${Math.abs(days)} ${Math.abs(days) === 1 ? "day" : "days"} ago`, tone: "red", daysLeft: days };
+  if (days <= CONTRACT_WARNING_DAYS) return { state: "ending", label: days === 0 ? "Contract ends today" : `Contract ends in ${days} ${days === 1 ? "day" : "days"}`, tone: "amber", daysLeft: days };
+  const months = Math.floor(days / 30.44);
+  return { state: "active", label: `Contract · ${months} ${months === 1 ? "month" : "months"} left`, tone: "green", daysLeft: days };
+}
+
+/** WhatsApp chat link for a phone number (digits only; a 10-digit Indian number gets the 91 prefix). */
+export function whatsappLink(number: string | null | undefined): string | null {
+  const digits = (number ?? "").replace(/\D/g, "");
+  if (digits.length < 8) return null;
+  return `https://wa.me/${digits.length === 10 ? `91${digits}` : digits}`;
 }

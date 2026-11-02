@@ -9,12 +9,14 @@ import { FileUpload, type UploadedFile } from "@/components/ui/file-upload";
 import { ActionForm, Field, FormActions, FormGrid, FormSection, SubmitButton } from "@/components/ui/form";
 import { Input, Select, Textarea } from "@/components/ui/input";
 import { Alert } from "@/components/ui/page";
+import { cn } from "@/lib/cn";
 import { statusLabel } from "@/lib/status";
 import { findDuplicateSerial, saveAsset } from "./actions";
-import { ASSET_CONDITIONS } from "./meta";
+import { ASSET_CONDITIONS, ASSET_KIND_LABELS, ASSET_KINDS, type AssetKindKey } from "./meta";
 
 export interface AssetFormValues {
   id: string;
+  kind: string;
   assetNo: string;
   name: string;
   category: string;
@@ -37,17 +39,26 @@ export interface AssetFormValues {
 
 export function AssetForm({
   asset,
-  categories,
+  defaultKind = "staff",
+  categories: staffCategories,
+  companyCategories,
   departments,
   storageConfigured,
 }: {
   asset?: AssetFormValues;
+  defaultKind?: AssetKindKey;
+  /** Categories for the asset's kind (staff categories on create). */
   categories: string[];
+  /** Company asset categories (create only — the kind can't change afterwards). */
+  companyCategories?: string[];
   departments: { id: string; name: string }[];
   storageConfigured: boolean;
 }) {
   const router = useRouter();
   const [duplicates, setDuplicates] = useState<{ id: string; assetNo: string; name: string }[]>([]);
+  const [kind, setKind] = useState<string>(asset?.kind ?? defaultKind);
+  const company = kind === "company";
+  const categories = !asset && company && companyCategories ? companyCategories : staffCategories;
   // A legacy category that has since been removed from the list stays selectable while editing.
   const categoryOptions = asset && !categories.includes(asset.category) ? [asset.category, ...categories] : categories;
 
@@ -72,13 +83,33 @@ export function AssetForm({
             router.push(`/assets/${r.id}`);
           }}
         >
-          <FormSection title="Asset" description={asset ? `${asset.assetNo}` : "The asset number (AST-0001, …) is generated when you save."}>
+          <FormSection title="Asset" description={asset ? `${asset.assetNo} · ${ASSET_KIND_LABELS[kind as AssetKindKey]?.label ?? "Asset"}` : "The asset number (AST-0001, …) is generated when you save."}>
+            {!asset && (
+              <fieldset className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                <legend className="sr-only">Asset type</legend>
+                {ASSET_KINDS.map((k) => (
+                  <label
+                    key={k}
+                    className={cn(
+                      "flex cursor-pointer items-start gap-3 rounded-xl border p-3.5 text-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand-500",
+                      kind === k ? "border-2 border-brand-600 bg-brand-50" : "border-line-strong bg-white hover:bg-field",
+                    )}
+                  >
+                    <input type="radio" name="kind" value={k} checked={kind === k} onChange={() => setKind(k)} className="mt-0.5 size-[18px] accent-brand-600" />
+                    <span>
+                      <strong className="block font-semibold text-ink">{ASSET_KIND_LABELS[k].label}</strong>
+                      <span className="text-xs text-muted">{ASSET_KIND_LABELS[k].hint}</span>
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+            )}
             <FormGrid>
               <Field label="Name" name="name" required className="sm:col-span-2">
-                <Input id="name" name="name" defaultValue={asset?.name} maxLength={200} placeholder='e.g. MacBook Air 13" M3' />
+                <Input id="name" name="name" defaultValue={asset?.name} maxLength={200} placeholder={company ? "e.g. Daikin 1.5 ton split AC — conference room" : 'e.g. MacBook Air 13" M3'} />
               </Field>
               <Field label="Category" name="category" required>
-                <Select id="category" name="category" defaultValue={asset?.category ?? ""}>
+                <Select key={kind} id="category" name="category" defaultValue={asset?.category ?? ""}>
                   <option value="" disabled>
                     Select category
                   </option>
@@ -176,7 +207,7 @@ export function AssetForm({
           </FormSection>
 
           <FormActions>
-            <ButtonLink href={asset ? `/assets/${asset.id}` : "/assets"} variant="secondary">
+            <ButtonLink href={asset ? `/assets/${asset.id}` : company ? "/assets?kind=company" : "/assets"} variant="secondary">
               Cancel
             </ButtonLink>
             <SubmitButton>{asset ? "Save changes" : "Add asset"}</SubmitButton>

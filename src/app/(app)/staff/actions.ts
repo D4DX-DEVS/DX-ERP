@@ -9,17 +9,20 @@ import { db } from "@/lib/db";
 import { Role, User, type Address, type EmergencyContact, type Internship, type LifecycleEvent, type NewUser } from "@/lib/models";
 import { notify, notifyMany } from "@/lib/notify";
 import { jsonPush } from "@/lib/sql";
+import { fmtDate } from "@/lib/time";
 import { isObjectId, zs } from "@/lib/validation";
 import { EMPLOYMENT_TYPE_KEYS } from "./_lib/constants";
 import { analyseImport, importSchema, type ImportPreviewRow } from "./_lib/import";
 import {
   autoCompleteSteps,
   buildSalary,
+  contractPeriod,
   createPeopleBulk,
   createPersonRecord,
   createPersonSchema,
   emailMatch,
   lifecycleEvent,
+  optGender,
   orNull,
   parseMoneyLines,
   superAdminEmail,
@@ -47,6 +50,7 @@ export async function createPerson(input: Record<string, unknown>): Promise<Acti
       name: data.name,
       email: data.email,
       phone: data.phone,
+      whatsapp: data.whatsapp,
       personalEmail: data.personalEmail,
       dob: data.dob,
       gender: data.gender,
@@ -57,6 +61,9 @@ export async function createPerson(input: Record<string, unknown>): Promise<Acti
       designation: data.designation,
       employmentType: data.employmentType,
       joiningDate: data.joiningDate,
+      contractStart: data.contractStart,
+      contractEnd: data.contractEnd,
+      documentUploadOpen: data.documentUploadOpen,
       reportingManager: data.reportingManager,
       team: data.team,
       internship: internLike
@@ -86,6 +93,7 @@ const editableColumns = {
   name: User.name,
   email: User.email,
   phone: User.phone,
+  whatsapp: User.whatsapp,
   personalEmail: User.personalEmail,
   personType: User.personType,
   role: User.role,
@@ -97,6 +105,8 @@ const editableColumns = {
   employmentType: User.employmentType,
   team: User.team,
   joiningDate: User.joiningDate,
+  contractStart: User.contractStart,
+  contractEnd: User.contractEnd,
   internship: User.internship,
 };
 
@@ -105,9 +115,10 @@ const updateSchema = z.object({
   name: zs.text("Name", 120),
   email: zs.optEmail(),
   phone: zs.optText(30),
+  whatsapp: zs.optText(30),
   personalEmail: zs.optEmail(),
   dob: zs.optDate(),
-  gender: zs.optText(20),
+  gender: optGender,
   bloodGroup: zs.optText(5),
   addrLine1: zs.optText(150),
   addrLine2: zs.optText(150),
@@ -121,6 +132,8 @@ const updateSchema = z.object({
   employmentType: zs.optText(30),
   team: zs.optText(80),
   joiningDate: zs.date("Joining date"),
+  contractStart: zs.optDate(),
+  contractEnd: zs.optDate(),
   internStartDate: zs.optDate(),
   internEndDate: zs.optDate(),
   college: zs.optText(150),
@@ -136,7 +149,7 @@ export async function updatePerson(input: Record<string, unknown>): Promise<Acti
 
 /** Fields each profile section's edit dialog may change; everything else keeps its current value. */
 const SECTION_FIELDS = {
-  employment: ["email", "phone", "employmentType", "team", "joiningDate"],
+  employment: ["email", "phone", "whatsapp", "employmentType", "team", "joiningDate", "contractStart", "contractEnd"],
   personal: ["name", "dob", "gender", "bloodGroup", "personalEmail", "addrLine1", "addrLine2", "city", "state", "postalCode", "country", "emergencyName", "emergencyRelation", "emergencyPhone"],
   internship: ["internStartDate", "internEndDate", "college", "course", "assignedRole", "mentor"],
 } as const;
@@ -159,6 +172,7 @@ export async function updatePersonSection(userId: string, section: ProfileSectio
       name: target.name,
       email: target.email,
       phone: target.phone,
+      whatsapp: target.whatsapp,
       personalEmail: target.personalEmail,
       dob: target.dob,
       gender: target.gender,
@@ -175,6 +189,8 @@ export async function updatePersonSection(userId: string, section: ProfileSectio
       employmentType: target.employmentType,
       team: target.team,
       joiningDate: target.joiningDate,
+      contractStart: target.contractStart,
+      contractEnd: target.contractEnd,
       internStartDate: i?.startDate,
       internEndDate: i?.endDate,
       college: i?.college,
@@ -210,6 +226,7 @@ async function savePerson(user: CurrentUser, input: Record<string, unknown>): Pr
   const set: Partial<NewUser> = {
     name: data.name,
     phone: data.phone ?? null,
+    whatsapp: data.whatsapp ?? null,
     personalEmail: data.personalEmail ?? null,
     dob: data.dob ?? null,
     gender: data.gender ?? null,
@@ -226,6 +243,20 @@ async function savePerson(user: CurrentUser, input: Record<string, unknown>): Pr
   }
 
   const events: LifecycleEvent[] = [];
+  const contract = contractPeriod(data.contractStart, data.contractEnd, data.joiningDate);
+  set.contractStart = contract.start ?? null;
+  set.contractEnd = contract.end ?? null;
+  if ((contract.start ?? null) !== target.contractStart || (contract.end ?? null) !== target.contractEnd) {
+    const period = (start?: string | null, end?: string | null) => (start || end ? `${fmtDate(start)} – ${end ? fmtDate(end) : "open-ended"}` : "none");
+    events.push(
+      lifecycleEvent(user, {
+        type: "note",
+        summary: contract.start || contract.end ? `Contract period set: ${period(contract.start, contract.end)}` : "Contract period removed",
+        from: period(target.contractStart, target.contractEnd),
+        to: period(contract.start, contract.end),
+      }),
+    );
+  }
   let emailChanged = false;
   if (data.email && data.email !== target.email) {
     if (!can(user, "users.manage")) throw new ActionError("Only users who manage access can change the work email.", { email: "Not allowed" });
@@ -331,10 +362,10 @@ async function savePerson(user: CurrentUser, input: Record<string, unknown>): Pr
     ref: target.employeeId,
     summary: `Updated details of ${data.name} (${target.employeeId})`,
     changes: diff(
-      { name: target.name, email: target.email, phone: target.phone, personalEmail: target.personalEmail, dob: target.dob, gender: target.gender, bloodGroup: target.bloodGroup, team: target.team, employmentType: target.employmentType, joiningDate: target.joiningDate },
-      { name: data.name, email: data.email ?? target.email, phone: data.phone, personalEmail: data.personalEmail, dob: data.dob, gender: data.gender, bloodGroup: data.bloodGroup, team: data.team, employmentType: data.employmentType ?? target.employmentType, joiningDate: data.joiningDate },
-      ["name", "email", "phone", "personalEmail", "dob", "gender", "bloodGroup", "team", "employmentType", "joiningDate"],
-      ["phone", "personalEmail", "dob"],
+      { name: target.name, email: target.email, phone: target.phone, whatsapp: target.whatsapp, personalEmail: target.personalEmail, dob: target.dob, gender: target.gender, bloodGroup: target.bloodGroup, team: target.team, employmentType: target.employmentType, joiningDate: target.joiningDate, contractStart: target.contractStart, contractEnd: target.contractEnd },
+      { name: data.name, email: data.email ?? target.email, phone: data.phone, whatsapp: data.whatsapp, personalEmail: data.personalEmail, dob: data.dob, gender: data.gender, bloodGroup: data.bloodGroup, team: data.team, employmentType: data.employmentType ?? target.employmentType, joiningDate: data.joiningDate, contractStart: contract.start, contractEnd: contract.end },
+      ["name", "email", "phone", "whatsapp", "personalEmail", "dob", "gender", "bloodGroup", "team", "employmentType", "joiningDate", "contractStart", "contractEnd"],
+      ["phone", "whatsapp", "personalEmail", "dob"],
     ),
   });
   return { id: data.userId };

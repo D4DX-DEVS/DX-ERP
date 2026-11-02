@@ -39,7 +39,8 @@ export default async function NewTaskPage({ searchParams }: { searchParams: Prom
         .limit(1)
     : [];
   if (projectId && !project) forbidden();
-  if (!canCreateTask(user, project)) forbidden();
+  // Without a project, project managers (no tasks.manage) pick one of their own projects in the form.
+  if (projectId && !canCreateTask(user, project)) forbidden();
 
   const options = await loadTaskFormOptions(user, settings, project ? [project._id] : []);
   const milestone = parent?.milestone ?? idParam(sp, "milestone");

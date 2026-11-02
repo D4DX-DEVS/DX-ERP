@@ -85,14 +85,18 @@ async function dependsOn(start: string[], target: string): Promise<boolean> {
   return false;
 }
 
-/** Validates the relations of a task form against its project. */
-async function validateTaskInput(data: TaskInput, projectId: string | undefined, selfId?: string) {
+/**
+ * Validates the relations of a task form against its project. When editing, people already on the task (`existing`)
+ * are not re-checked, so a task whose assignee or reviewer has since left can still be edited (and the leaver removed).
+ */
+async function validateTaskInput(data: TaskInput, projectId: string | undefined, selfId?: string, existing?: { assignees: string[]; sharedWith: string[]; reviewer?: string | null }) {
   if (data.startDate && data.dueDate && data.dueDate < data.startDate) {
     throw new ActionError("The due date is before the start date.", { dueDate: "Must be on or after the start date" });
   }
-  await assertStaff(data.assignees, "assignees");
-  await assertStaff(data.sharedWith, "sharedWith");
-  if (data.reviewer) await assertStaff([data.reviewer], "reviewer");
+  const added = (ids: string[], current: string[] = []) => ids.filter((x) => !current.includes(x));
+  await assertStaff(added(data.assignees, existing?.assignees), "assignees");
+  await assertStaff(added(data.sharedWith, existing?.sharedWith), "sharedWith");
+  if (data.reviewer && data.reviewer !== existing?.reviewer) await assertStaff([data.reviewer], "reviewer");
   if (data.milestone) {
     const [project] = projectId ? await db().select({ milestones: Project.milestones }).from(Project).where(eq(Project._id, projectId)).limit(1) : [];
     if (!project?.milestones.some((m) => m._id === data.milestone)) {
@@ -199,7 +203,7 @@ export async function updateTask(id: string, input: Record<string, unknown>): Pr
     if (!caps.manage) throw new ActionError("You don't have permission to edit this task.");
     const data = parse(taskSchema, input);
     const projectId = task.project ?? undefined;
-    await validateTaskInput(data, projectId, task._id);
+    await validateTaskInput(data, projectId, task._id, task);
 
     const before = {
       title: task.title,
@@ -461,17 +465,22 @@ export async function submitWork(id: string, input: Record<string, unknown>): Pr
     const settings = await getSettings();
     const cat = categoryOf(settings.taskStatuses, task.status);
     if (cat === "done" || cat === "cancelled") throw new ActionError("This task is already closed.");
-    if (task.submissions.some((s) => s.reviewStatus === "pending")) throw new ActionError("Your previous submission is still awaiting review.");
+    const stale = task.submissions.some((s) => s.reviewStatus === "pending");
+    if (stale && cat === "review") throw new ActionError("Your previous submission is still awaiting review.");
     const reviewStatus = firstInCategory(settings.taskStatuses, "review");
     if (!reviewStatus) throw new ActionError("No review status is configured. Ask an administrator to add one.");
 
     const attachments = await resolveFileRefs(user, data.attachments);
     const previous = task.status;
     const submission: TaskSubmission = { _id: newId(), note: data.note, link: data.link, attachments: withIds(attachments), submittedBy: user._id, submittedByName: user.name, submittedAt: new Date(), reviewStatus: "pending" };
+    // A submission left "pending" after the task was moved out of review (pulled back, reopened) is superseded by this one.
+    const superseded = stale
+      ? [...task.submissions.map((s) => (s.reviewStatus === "pending" ? { ...s, reviewStatus: "changes_requested" as const, reviewNote: s.reviewNote ?? "Superseded by a newer submission" } : s)), submission]
+      : null;
     await db()
       .update(Task)
       .set({
-        submissions: jsonPush(Task.submissions, submission),
+        submissions: superseded ?? jsonPush(Task.submissions, submission),
         status: reviewStatus,
         history: jsonPush(Task.history, historyEntry(user, "Work submitted for review", { from: optionLabel(settings.taskStatuses, previous), to: optionLabel(settings.taskStatuses, reviewStatus), note: data.note.slice(0, 300) })),
       })

@@ -5,6 +5,7 @@ import { StoredFile } from "@/lib/models";
 import type { AppSettings } from "@/lib/config-defaults";
 import { titleCase } from "@/lib/format";
 import { expiryInfo, missingRequired, type ExpiryInfo } from "./documents";
+import { EDUCATION_CATEGORY, EDUCATION_FILE_CATEGORY } from "./education";
 
 export interface DocVersion {
   id: string;
@@ -47,7 +48,7 @@ export async function loadDocuments(opts: {
   settings: AppSettings;
   today: string;
 }): Promise<DocumentsData> {
-  const files = await db()
+  const all = await db()
     .select()
     .from(StoredFile)
     .where(
@@ -60,11 +61,15 @@ export async function loadDocuments(opts: {
       ),
     )
     .orderBy(desc(StoredFile.createdAt));
+  // Certificates of structured education records are listed by the education section, not as documents.
+  const files = all.filter((f) => f.category !== EDUCATION_FILE_CATEGORY);
+  const hasEducationCertificates = all.length !== files.length;
 
   const byId = new Map(files.map((f) => [f._id, f]));
   const heads = files.filter((f) => !f.replacedBy);
   const categories = opts.settings.documentCategories;
   const present = new Set(heads.map((f) => f.category!));
+  if (hasEducationCertificates) present.add(EDUCATION_CATEGORY);
   const missing = missingRequired(categories, opts.personType, present).map((c) => ({ key: c.key, label: c.label }));
 
   const order = new Map(categories.map((c, i) => [c.key, i]));

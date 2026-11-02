@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { forbidden, notFound } from "next/navigation";
-import { FileText, GraduationCap, History, LayoutDashboard, Pencil, ShieldCheck, Wallet } from "lucide-react";
+import { CalendarDays, FileText, GraduationCap, History, LayoutDashboard, Pencil, ShieldCheck, Wallet } from "lucide-react";
 import { and, asc, eq } from "drizzle-orm";
 import { can, requireUser } from "@/lib/auth/session";
 import { cn } from "@/lib/cn";
@@ -13,20 +13,23 @@ import { param, type SearchParams } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
 import { jsonPath } from "@/lib/sql";
 import { statusTone } from "@/lib/status";
-import { diffDays, fmtDate, todayKey } from "@/lib/time";
+import { diffDays, fmtDate, monthKey, todayKey } from "@/lib/time";
 import { isObjectId } from "@/lib/validation";
 import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { OptionChip, StatusChip, Tag } from "@/components/ui/chip";
+import { Chip, OptionChip, StatusChip, Tag } from "@/components/ui/chip";
 import { Alert, PageBody } from "@/components/ui/page";
 import { LinkTabs } from "@/components/ui/tabs";
 import { DeletePersonButton } from "../_components/access-controls";
 import { LifecycleActions, LifecycleProvider, type LifecycleProps } from "../_components/lifecycle-actions";
 import { PhotoUpload } from "../_components/photo-upload";
-import { tenureLabel } from "../_lib/constants";
+import { contractStatus, tenureLabel } from "../_lib/constants";
 import { personProfileColumns } from "../_lib/columns";
 import { personAccess } from "../_lib/people-access";
 import { AccessTab } from "./_tabs/access";
+import { AttendanceTab } from "./_tabs/attendance";
+import { currentTime } from "../../attendance/_lib/clock";
+import { validMonthParam } from "../../attendance/_lib/params";
 import { DocumentsTab } from "./_tabs/documents";
 import { HistoryTab } from "./_tabs/history";
 import { OverviewTab } from "./_tabs/overview";
@@ -63,12 +66,15 @@ export default async function StaffProfilePage({ params, searchParams }: { param
   const manager = toRef(managerDoc);
   const mentor = toRef(mentorDoc);
 
-  const tabKeys = ["overview", "documents", ...(access.canConfidential ? ["salary"] : []), "history", ...(access.canManageUsers ? ["access"] : [])];
+  // Attendance & leave: the person, their manager / mentor, and people with org-wide attendance or leave access.
+  const canSeeAttendance = access.isSelf || access.isManager || access.isMentor || can(user, "attendance.view_all") || can(user, "leave.view_all");
+  const tabKeys = ["overview", ...(canSeeAttendance ? ["attendance"] : []), "documents", ...(access.canConfidential ? ["salary"] : []), "history", ...(access.canManageUsers ? ["access"] : [])];
   const requested = param(sp, "tab");
   const tab = tabKeys.includes(requested) ? requested : "overview";
   const tabIcon = "size-[18px]";
   const tabMeta: Record<string, { label: string; icon: ReactNode }> = {
     overview: { label: "Overview", icon: <LayoutDashboard className={tabIcon} /> },
+    attendance: { label: "Attendance & leave", icon: <CalendarDays className={tabIcon} /> },
     documents: { label: "Documents", icon: <FileText className={tabIcon} /> },
     salary: { label: "Salary", icon: <Wallet className={tabIcon} /> },
     history: { label: "History", icon: <History className={tabIcon} /> },
@@ -105,7 +111,11 @@ export default async function StaffProfilePage({ params, searchParams }: { param
   }
 
   const tabProps = { user, person, access, settings, today };
+  const thisMonth = monthKey(currentTime());
+  const requestedMonth = validMonthParam(sp, "month") ?? thisMonth;
+  const month = requestedMonth > thisMonth ? thisMonth : requestedMonth;
   const tenure = tenureLabel(person.joiningDate, today);
+  const contract = contractStatus(person.contractStart, person.contractEnd, today);
   const noticeDaysLeft = person.exit?.stage === "notice" && person.exit.lastWorkingDay ? diffDays(today, person.exit.lastWorkingDay) : null;
   const typeLabel = person.personType === "employee" ? "Employee" : person.personType === "trainee" ? "Trainee" : "Intern";
 
@@ -131,6 +141,11 @@ export default async function StaffProfilePage({ params, searchParams }: { param
               <OptionChip options={settings.employmentStatuses} value={person.status} />
               <Tag tone={statusTone("personType", person.personType)}>{typeLabel}</Tag>
               <StatusChip domain="account" value={person.accountActive ? "active" : "inactive"} size="sm" />
+              {contract && contract.state !== "active" && contract.state !== "open" && (
+                <Chip tone={contract.tone} size="sm">
+                  {contract.label}
+                </Chip>
+              )}
             </div>
             <div className="text-sm text-ink-2">{[designation?.name, department?.name, person.employeeId].filter(Boolean).join(" · ")}</div>
             <div className="flex flex-wrap gap-x-5 gap-y-1 text-[13px] text-muted">
@@ -192,6 +207,7 @@ export default async function StaffProfilePage({ params, searchParams }: { param
       <LinkTabs items={tabItems} />
 
       {tab === "overview" && <OverviewTab {...tabProps} department={department?.name} designation={designation?.name} manager={manager} mentor={mentor} people={lifecycle?.people} />}
+      {tab === "attendance" && <AttendanceTab {...tabProps} month={month} thisMonth={thisMonth} />}
       {tab === "documents" && <DocumentsTab {...tabProps} />}
       {tab === "salary" && <SalaryTab {...tabProps} />}
       {tab === "history" && <HistoryTab {...tabProps} />}

@@ -8,13 +8,23 @@ import { inList } from "@/lib/sql";
 import { fmtDate } from "@/lib/time";
 import { PersonCell } from "@/components/ui/avatar";
 import { Card, CardBody, CardHeader, DetailList } from "@/components/ui/card";
-import { OptionChip, StatusChip } from "@/components/ui/chip";
+import { Chip, OptionChip, StatusChip } from "@/components/ui/chip";
 import { Progress } from "@/components/ui/page";
 import type { PickerOption } from "@/components/ui/people-picker";
 import { LifecycleEditButton } from "../../_components/lifecycle-actions";
 import { OnboardingChecklist } from "../../_components/onboarding-checklist";
 import { SectionEditButton, SelfContactEditButton, type SectionPerson } from "../../_components/section-edit";
-import { AUTO_ONBOARDING_KEY, employmentTypeLabel, genderLabel, internshipProgress, ONBOARDING_STEPS, tenureLabel } from "../../_lib/constants";
+import {
+  AUTO_ONBOARDING_KEY,
+  contractLengthLabel,
+  contractStatus,
+  employmentTypeLabel,
+  genderLabel,
+  internshipProgress,
+  ONBOARDING_STEPS,
+  tenureLabel,
+  whatsappLink,
+} from "../../_lib/constants";
 import type { PersonRef, TabProps } from "./types";
 
 function formatAddress(a: TabProps["person"]["address"]): string {
@@ -65,6 +75,9 @@ export async function OverviewTab({
   const address = formatAddress(person.address);
   const ec = person.emergencyContact;
   const emergency = ec ? [ec.name, ec.relation, ec.phone].filter(Boolean).join(" · ") : "";
+  const contract = contractStatus(person.contractStart, person.contractEnd, today);
+  const contractLength = contractLengthLabel(person.contractStart, person.contractEnd);
+  const wa = whatsappLink(person.whatsapp);
 
   // Values with their own lifecycle form get an inline ✎ (rendered only for staff.edit, via LifecycleProvider).
   const withEdit = (value: React.ReactNode, kind: "designation" | "department" | "status", label: string) => (
@@ -76,11 +89,42 @@ export async function OverviewTab({
   const items = [
     { label: "Work email", value: <a href={`mailto:${person.email}`} className="text-brand-600 hover:underline">{person.email}</a> },
     { label: "Phone", value: person.phone || "—" },
+    {
+      label: "WhatsApp",
+      value: person.whatsapp ? (
+        wa ? (
+          <a href={wa} target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:underline">
+            {person.whatsapp}
+          </a>
+        ) : (
+          person.whatsapp
+        )
+      ) : (
+        "—"
+      ),
+    },
     { label: "Department", value: withEdit(department ?? "—", "department", "Transfer department") },
     { label: "Designation", value: withEdit(designation ?? "—", "designation", "Change designation / promote") },
     { label: "Team", value: person.team || "—" },
     { label: "Employment type", value: employmentTypeLabel(person.employmentType) },
     { label: "Joining date", value: person.joiningDate ? `${fmtDate(person.joiningDate)}${tenure ? ` · ${tenure}` : ""}` : "—" },
+    {
+      label: "Contract period",
+      full: true,
+      value: contract ? (
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span>
+            {fmtDate(person.contractStart)} – {person.contractEnd ? fmtDate(person.contractEnd) : "open-ended"}
+            {contractLength ? ` · ${contractLength}` : ""}
+          </span>
+          <Chip tone={contract.tone} size="sm">
+            {contract.label}
+          </Chip>
+        </span>
+      ) : (
+        "—"
+      ),
+    },
     { label: "Status", value: withEdit(<OptionChip options={settings.employmentStatuses} value={person.status} />, "status", "Change employment status") },
     ...(person.exit && person.exit.stage !== "none"
       ? [
@@ -104,6 +148,7 @@ export async function OverviewTab({
     name: person.name,
     email: person.email,
     phone: person.phone ?? undefined,
+    whatsapp: person.whatsapp ?? undefined,
     personalEmail: person.personalEmail ?? undefined,
     dob: person.dob ?? undefined,
     gender: person.gender ?? undefined,
@@ -120,6 +165,8 @@ export async function OverviewTab({
     employmentType: person.employmentType,
     team: person.team ?? undefined,
     joiningDate: person.joiningDate ?? undefined,
+    contractStart: person.contractStart ?? undefined,
+    contractEnd: person.contractEnd ?? undefined,
     internship: internship
       ? { startDate: internship.startDate, endDate: internship.endDate, college: internship.college, course: internship.course, assignedRole: internship.assignedRole, mentor: internship.mentor }
       : undefined,

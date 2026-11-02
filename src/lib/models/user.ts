@@ -3,6 +3,8 @@ import { index, sqliteTable, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { bool, date, json, pk, ref, text, timestamps, type Address, type Id } from "./_base";
 
 export type PersonType = "employee" | "trainee" | "intern" | "admin";
+export const GENDERS = ["male", "female"] as const;
+export type Gender = (typeof GENDERS)[number];
 export const PERSON_TYPES: PersonType[] = ["employee", "trainee", "intern"];
 
 export const EMPLOYMENT_TYPES = [
@@ -132,6 +134,7 @@ export const User = sqliteTable(
     email: text().notNull(),
     personalEmail: text(),
     phone: text(),
+    whatsapp: text(),
     photo: text(),
     personType: text().$type<PersonType>().notNull().default("employee"),
     role: text().notNull(),
@@ -140,12 +143,16 @@ export const User = sqliteTable(
     designation: ref(),
     employmentType: text().notNull().default("full_time"),
     joiningDate: text(),
+    /** Employment contract period ("yyyy-MM-dd"); no end date = open-ended. */
+    contractStart: text(),
+    contractEnd: text(),
     status: text().notNull().default("active"),
     accountActive: bool().notNull().default(false),
     reportingManager: ref(),
     team: text(),
     dob: text(),
-    gender: text(),
+    /** "male" | "female" (the only values accepted). */
+    gender: text().$type<Gender>(),
     bloodGroup: text(),
     address: json<Address>(),
     emergencyContact: json<EmergencyContact>(),
@@ -155,6 +162,8 @@ export const User = sqliteTable(
     exit: json<ExitInfo>().notNull().$defaultFn(() => ({ stage: "none" })),
     internship: json<Internship>(),
     onboarding: json<OnboardingStep[]>().notNull().$defaultFn(() => []),
+    /** HR opened restricted document categories for the person to upload themself. */
+    documentUploadOpen: bool().notNull().default(false),
     history: json<LifecycleEvent[]>().notNull().$defaultFn(() => []),
     googleSub: text(),
     lastLoginAt: date(),
@@ -171,6 +180,7 @@ export const User = sqliteTable(
     index("users_department").on(t.department),
     index("users_status").on(t.status),
     index("users_reporting_manager").on(t.reportingManager),
+    index("users_contract_end").on(t.contractEnd),
   ],
 );
 

@@ -3,9 +3,11 @@
 import { Field, FormGrid, FormSection } from "@/components/ui/form";
 import { Input, Select } from "@/components/ui/input";
 import { RELATIONS } from "../_lib/constants";
+import { PhoneFields } from "./contact-fields";
 
 export interface PersonalDefaults {
   phone?: string;
+  whatsapp?: string;
   personalEmail?: string;
   addrLine1?: string;
   addrLine2?: string;
@@ -24,11 +26,7 @@ export function PersonalFields({ defaults, withPhone = true }: { defaults: Perso
     <>
       <FormSection title="Contact">
         <FormGrid>
-          {withPhone && (
-            <Field label="Phone" name="phone">
-              <Input id="phone" name="phone" type="tel" inputMode="tel" maxLength={30} defaultValue={defaults.phone ?? ""} />
-            </Field>
-          )}
+          {withPhone && <PhoneFields defaultPhone={defaults.phone ?? ""} defaultWhatsapp={defaults.whatsapp ?? ""} />}
           <Field label="Personal email" name="personalEmail">
             <Input id="personalEmail" name="personalEmail" type="email" inputMode="email" defaultValue={defaults.personalEmail ?? ""} />
           </Field>

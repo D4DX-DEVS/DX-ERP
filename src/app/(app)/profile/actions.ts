@@ -11,6 +11,7 @@ import { orNull } from "../staff/_lib/person";
 
 const profileSchema = z.object({
   phone: zs.optText(30),
+  whatsapp: zs.optText(30),
   personalEmail: zs.optEmail(),
   addrLine1: zs.optText(150),
   addrLine2: zs.optText(150),
@@ -37,6 +38,7 @@ export async function updateMyProfile(input: Record<string, unknown>): Promise<A
       .update(User)
       .set({
         phone: data.phone ?? null,
+        whatsapp: data.whatsapp ?? null,
         personalEmail: data.personalEmail ?? null,
         address: orNull(address),
         emergencyContact: orNull(emergencyContact),

@@ -6,9 +6,9 @@ import { ActionButton } from "@/components/ui/actions";
 import { Button, type ButtonProps } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { FileUpload } from "@/components/ui/file-upload";
-import { ActionForm, Field, FormActions, SubmitButton } from "@/components/ui/form";
-import { Checkbox, Input, Select } from "@/components/ui/input";
-import { deleteDocument, registerDocument } from "../[id]/actions";
+import { ActionForm, Field, FormActions, SubmitButton, useServerAction } from "@/components/ui/form";
+import { Checkbox, Input, Select, Switch } from "@/components/ui/input";
+import { deleteDocument, registerDocument, setDocumentUploadOpen } from "../[id]/actions";
 
 export interface CategoryOption {
   key: string;
@@ -116,5 +116,26 @@ export function DeleteDocumentButton({ personId, fileId, name }: { personId: str
     >
       <Trash2 className="size-4 text-subtle" />
     </ActionButton>
+  );
+}
+
+/** HR switch: lets the person upload restricted document categories (ID, PAN, bank proof…) from their own profile. */
+export function DocumentAccessSwitch({ personId, name, open }: { personId: string; name: string; open: boolean }) {
+  const { run, pending } = useServerAction();
+  return (
+    <Switch
+      checked={open}
+      disabled={pending}
+      onChange={(e) => {
+        const next = e.target.checked;
+        run(() => setDocumentUploadOpen(personId, next));
+      }}
+      label={`Let ${name} upload restricted documents`}
+      description={
+        open
+          ? "On — they can upload every category from My profile (files stay restricted: only they and authorised HR can open them)."
+          : "Off — restricted categories (ID, PAN, address, bank proof…) can only be uploaded by HR."
+      }
+    />
   );
 }

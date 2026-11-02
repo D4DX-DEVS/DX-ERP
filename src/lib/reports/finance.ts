@@ -25,6 +25,7 @@ import {
   type ProjectInfo,
 } from "./shared";
 import { defineReport, type ReportFilterDef } from "./types";
+import { ASSET_KIND_LABELS, ASSET_KINDS, ASSET_STATUSES } from "@/app/(app)/assets/meta";
 
 const FIN = ["reports.view", "reports.financial"] as const;
 
@@ -708,6 +709,7 @@ const projectProfitability = defineReport<ProfitRow>({
 
 interface AssetRow {
   assetNo: string;
+  kind: string;
   name: string;
   category: string;
   brandModel: string;
@@ -728,10 +730,11 @@ const assetRegister = defineReport<AssetRow>({
   key: "asset-register",
   title: "Asset register",
   group: "CRM & Finance",
-  description: "Company assets with cost, status, condition, current holder, warranty and service dates.",
+  description: "Staff and company assets with cost, status, condition, current holder, warranty and service dates.",
   permissions: ["reports.view", "assets.view"],
   filters: [
-    { key: "status", label: "Status", type: "select", options: ["available", "assigned", "in_repair", "damaged", "lost", "retired"].map((s) => ({ value: s, label: statusLabel("asset", s) })) },
+    { key: "kind", label: "Type", type: "select", options: ASSET_KINDS.map((k) => ({ value: k, label: ASSET_KIND_LABELS[k].plural })) },
+    { key: "status", label: "Status", type: "select", options: ASSET_STATUSES.map((s) => ({ value: s, label: statusLabel("asset", s) })) },
     { key: "category", label: "Category", type: "select", optionsFrom: "assetCategories" },
     { ...PERSON_FILTER, label: "Assigned to" },
     DEPARTMENT_FILTER,
@@ -742,6 +745,7 @@ const assetRegister = defineReport<AssetRow>({
       db()
         .select({
           assetNo: Asset.assetNo,
+          kind: Asset.kind,
           name: Asset.name,
           category: Asset.category,
           brand: Asset.brand,
@@ -760,6 +764,7 @@ const assetRegister = defineReport<AssetRow>({
         .from(Asset)
         .where(
           and(
+            f.kind === "staff" || f.kind === "company" ? eq(Asset.kind, f.kind) : undefined,
             f.status ? eq(Asset.status, f.status as AssetStatus) : undefined,
             f.category ? eq(Asset.category, f.category) : undefined,
             f.person ? eq(Asset.assignedTo, f.person) : undefined,
@@ -774,6 +779,7 @@ const assetRegister = defineReport<AssetRow>({
     const deptName = new Map(departments.map((d) => [d.id, d.name]));
     const rows: AssetRow[] = assets.map((a) => ({
       assetNo: a.assetNo,
+      kind: ASSET_KIND_LABELS[a.kind]?.label ?? a.kind,
       name: a.name,
       category: a.category,
       brandModel: [a.brand, a.model].filter(Boolean).join(" "),
@@ -793,6 +799,7 @@ const assetRegister = defineReport<AssetRow>({
     return {
       columns: [
         { header: "Asset", value: (r) => r.assetNo },
+        { header: "Type", value: (r) => r.kind },
         { header: "Name", value: (r) => r.name, width: 28 },
         { header: "Category", value: (r) => r.category },
         { header: "Brand / model", value: (r) => r.brandModel, width: 22 },
@@ -812,6 +819,7 @@ const assetRegister = defineReport<AssetRow>({
         { label: "Assets", value: String(rows.length) },
         { label: "Total cost", value: inr(round2(rows.reduce((s, r) => s + r.cost, 0))) },
         { label: "Assigned", value: String(rows.filter((r) => r.statusKey === "assigned").length) },
+        { label: "Company assets", value: `${rows.filter((r) => r.kind === ASSET_KIND_LABELS.company.label).length} · ${inr(round2(rows.filter((r) => r.kind === ASSET_KIND_LABELS.company.label).reduce((s, r) => s + r.cost, 0)))}` },
         { label: "Needs attention", value: String(rows.filter((r) => ["in_repair", "damaged", "lost"].includes(r.statusKey)).length) },
         { label: "Warranty ending in 60 days", value: String(rows.filter((r) => r.warrantyUntil && r.warrantyUntil >= today && r.warrantyUntil <= soon).length) },
       ],

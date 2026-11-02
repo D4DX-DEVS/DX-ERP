@@ -23,6 +23,7 @@ export default async function EditPersonPage({ params }: { params: Promise<{ id:
       name: User.name,
       email: User.email,
       phone: User.phone,
+      whatsapp: User.whatsapp,
       personalEmail: User.personalEmail,
       dob: User.dob,
       gender: User.gender,
@@ -32,6 +33,8 @@ export default async function EditPersonPage({ params }: { params: Promise<{ id:
       employmentType: User.employmentType,
       team: User.team,
       joiningDate: User.joiningDate,
+      contractStart: User.contractStart,
+      contractEnd: User.contractEnd,
       personType: User.personType,
       reportingManager: User.reportingManager,
       internship: User.internship,
@@ -58,6 +61,7 @@ export default async function EditPersonPage({ params }: { params: Promise<{ id:
           name: target.name,
           email: target.email,
           phone: target.phone ?? undefined,
+          whatsapp: target.whatsapp ?? undefined,
           personalEmail: target.personalEmail ?? undefined,
           dob: target.dob ?? undefined,
           gender: target.gender ?? undefined,
@@ -74,6 +78,8 @@ export default async function EditPersonPage({ params }: { params: Promise<{ id:
           employmentType: target.employmentType,
           team: target.team ?? undefined,
           joiningDate: target.joiningDate ?? undefined,
+          contractStart: target.contractStart ?? undefined,
+          contractEnd: target.contractEnd ?? undefined,
           internship: i
             ? { startDate: i.startDate, endDate: i.endDate, college: i.college, course: i.course, assignedRole: i.assignedRole, mentor: i.mentor }
             : undefined,

@@ -3,6 +3,7 @@ import "server-only";
 export * from "./_tables";
 
 import { User } from "./user";
+import { Education } from "./education";
 import { Department, Designation, Role, Holiday } from "./org";
 import { Settings, Counter, AuditLog, StoredFile, Backup } from "./system";
 import { Attendance, AttendanceCorrection } from "./attendance";
@@ -15,7 +16,7 @@ import { Client, Lead, Activity } from "./crm";
 import { Proposal, Contract } from "./sales";
 import { Invoice, Payment, Expense } from "./finance";
 import { Asset, Notification, Announcement, LearningResource, Review } from "./ops";
-import { ProjectVault, VaultItem, VaultEvent } from "./vault";
+import { ProjectVault, VaultItem, VaultEvent, Credential } from "./vault";
 
 /**
  * Business tables included in backups / restores. Sessions, login attempts, job locks and
@@ -23,6 +24,7 @@ import { ProjectVault, VaultItem, VaultEvent } from "./vault";
  */
 export const BACKUP_TABLES = {
   User,
+  Education,
   Department,
   Designation,
   Role,
@@ -61,6 +63,7 @@ export const BACKUP_TABLES = {
   ProjectVault,
   VaultItem,
   VaultEvent,
+  Credential,
 } as const;
 
 export { Backup };

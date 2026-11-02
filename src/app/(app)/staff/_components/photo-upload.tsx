@@ -21,10 +21,6 @@ export function PhotoUpload({ userId, name, photo, canEdit, size = "xl" }: { use
       toast.error("Choose a PNG, JPG or WebP image.");
       return;
     }
-    if (file.size > 3 * 1024 * 1024) {
-      toast.error("The photo must be smaller than 3 MB.");
-      return;
-    }
     setUploading(true);
     try {
       const uploaded = await uploadFile(file, { entityType: "avatar", entityId: userId, isPublic: true });

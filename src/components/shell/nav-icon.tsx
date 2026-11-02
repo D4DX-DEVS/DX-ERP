@@ -11,6 +11,7 @@ import {
   FileText,
   FolderKanban,
   GraduationCap,
+  KeyRound,
   LayoutDashboard,
   LogOut,
   Monitor,
@@ -51,6 +52,7 @@ export const NAV_ICONS: Record<NavIcon, LucideIcon> = {
   settings: Settings2,
   roles: ShieldCheck,
   audit: ScrollText,
+  credentials: KeyRound,
   notifications: Bell,
   profile: User,
 };

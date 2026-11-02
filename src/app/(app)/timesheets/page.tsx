@@ -126,6 +126,14 @@ export default async function TimesheetPage({ searchParams }: { searchParams: Pr
     .filter((p) => !["cancelled"].includes(settings.projectStatuses.find((s) => s.key === p.status)?.category ?? ""))
     .map((p) => ({ id: p._id, label: projectLabel.get(p._id)! }));
   const taskOptions: TaskOption[] = taskDocs.map((t) => ({ id: t._id, label: `${t.taskNo} · ${t.title}`, project: t.project ?? "" }));
+  // Keep the week's own project / task selectable when editing an entry (e.g. a since-cancelled project or an older task),
+  // so re-saving it never silently clears them.
+  const listedProjects = new Set(projectOptions.map((p) => p.id));
+  for (const id of new Set(entries.map((e) => e.project).filter((x): x is string => Boolean(x)))) {
+    const label = projectLabel.get(id);
+    if (!listedProjects.has(id) && label) projectOptions.push({ id, label });
+  }
+  for (const t of extraTasks) taskOptions.push({ id: t._id, label: `${t.taskNo} · ${t.title}`, project: t.project ?? "" });
 
   // Time logged against the week's tasks, over all weeks, for the estimated-vs-actual card.
   const weekTaskIds = [...new Set(entries.map((e) => e.task).filter((t): t is string => Boolean(t)))];

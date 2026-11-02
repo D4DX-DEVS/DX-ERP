@@ -1,7 +1,9 @@
 import { index, sqliteTable, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { bool, createdAt, date, json, num, pk, ref, text, timestamps, type FileRef, type HistoryEntry, type Id } from "./_base";
 
-export type AssetStatus = "available" | "assigned" | "in_repair" | "damaged" | "lost" | "retired";
+export type AssetStatus = "available" | "assigned" | "in_use" | "in_repair" | "damaged" | "lost" | "retired";
+/** "staff": issued to people (laptops, phones). "company": bought for the office itself (AC, inverter, furniture) — never issued. */
+export type AssetKind = "staff" | "company";
 export type AssetCondition = "new" | "good" | "fair" | "poor" | "damaged";
 export type AssetHistoryEntry = HistoryEntry & { user?: Id; userName?: string };
 
@@ -11,6 +13,7 @@ export const Asset = sqliteTable(
   {
     _id: pk(),
     assetNo: text().notNull(),
+    kind: text().$type<AssetKind>().notNull().default("staff"),
     name: text().notNull(),
     category: text().notNull(),
     brand: text(),
@@ -44,6 +47,7 @@ export const Asset = sqliteTable(
     index("assets_next_service_date").on(t.nextServiceDate),
     index("assets_assigned_to").on(t.assignedTo),
     index("assets_status").on(t.status),
+    index("assets_kind").on(t.kind),
   ],
 );
 export type IAsset = typeof Asset.$inferSelect;

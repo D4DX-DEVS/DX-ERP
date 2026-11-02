@@ -11,6 +11,7 @@ import { PeoplePicker, type PickerOption } from "@/components/ui/people-picker";
 import { updateMyProfile } from "../../profile/actions";
 import { updatePersonSection, type ProfileSection } from "../actions";
 import { BLOOD_GROUPS, EMPLOYMENT_TYPE_OPTIONS, GENDER_OPTIONS } from "../_lib/constants";
+import { ContractPeriodFields, PhoneFields } from "./contact-fields";
 import { PersonalFields, type PersonalDefaults } from "./personal-fields";
 
 /** Pencil icon button used in card headers (`size="md"`) and next to individual values (`size="sm"`). */
@@ -42,6 +43,8 @@ export interface SectionPerson extends PersonalDefaults {
   employmentType: string;
   team?: string;
   joiningDate?: string;
+  contractStart?: string;
+  contractEnd?: string;
   internship?: { startDate?: string; endDate?: string; college?: string; course?: string; assignedRole?: string; mentor?: string };
 }
 
@@ -93,9 +96,7 @@ export function SectionEditButton({
               <Field label="Work email" name="email" hint={canEmail ? "Changing it signs the person out and re-links Google sign-in" : "Only users who manage access can change this"}>
                 <Input id="email" name="email" type="email" inputMode="email" defaultValue={person.email} readOnly={!canEmail} />
               </Field>
-              <Field label="Phone" name="phone">
-                <Input id="phone" name="phone" type="tel" inputMode="tel" maxLength={30} defaultValue={person.phone ?? ""} />
-              </Field>
+              <PhoneFields defaultPhone={person.phone ?? ""} defaultWhatsapp={person.whatsapp ?? ""} />
               <Field label="Employment type" name="employmentType">
                 <Select id="employmentType" name="employmentType" defaultValue={person.employmentType}>
                   {EMPLOYMENT_TYPE_OPTIONS.map((o) => (
@@ -111,6 +112,9 @@ export function SectionEditButton({
               <Field label="Team" name="team" className="sm:col-span-2">
                 <Input id="team" name="team" maxLength={80} defaultValue={person.team ?? ""} />
               </Field>
+              <div className="sm:col-span-2">
+                <ContractPeriodFields defaultStart={person.contractStart} defaultEnd={person.contractEnd} fallbackStart={person.joiningDate} />
+              </div>
             </FormGrid>
           )}
 
@@ -187,7 +191,7 @@ export function SelfContactEditButton({ person }: { person: PersonalDefaults }) 
     <>
       <EditIconButton size="md" label="Edit my contact details" onClick={() => setOpen(true)} />
       {open && (
-        <SectionDialog open onOpenChange={setOpen} title="Edit my contact details" description="Phone, personal email, address and emergency contact. Ask HR to change anything else." action={updateMyProfile}>
+        <SectionDialog open onOpenChange={setOpen} title="Edit my contact details" description="Phone, WhatsApp, personal email, address and emergency contact. Ask HR to change anything else." action={updateMyProfile}>
           <PersonalFields defaults={person} />
         </SectionDialog>
       )}

@@ -13,7 +13,7 @@ function bucket(isPublic: boolean): R2Bucket {
   return b;
 }
 
-export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+export { MAX_UPLOAD_BYTES } from "@/lib/upload-limit";
 
 export const ALLOWED_MIME = new Set([
   "application/pdf",

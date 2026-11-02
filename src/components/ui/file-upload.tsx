@@ -5,6 +5,8 @@ import { FileText, Loader2, Paperclip, X } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/cn";
 import { fileSize } from "@/lib/format";
+import { shrinkImage } from "@/lib/shrink-image";
+import { MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL } from "@/lib/upload-limit";
 
 export interface UploadedFile {
   id: string;
@@ -23,10 +25,12 @@ export interface UploadContext {
   isPublic?: boolean;
 }
 
-/** Uploads one file to /api/files/upload and resolves with its stored-file record. */
+/** Uploads one file to /api/files/upload (photos over the limit are shrunk first) and resolves with its stored-file record. */
 export async function uploadFile(file: File, ctx: UploadContext): Promise<UploadedFile> {
+  const toSend = await shrinkImage(file, MAX_UPLOAD_BYTES);
+  if (toSend.size > MAX_UPLOAD_BYTES) throw new Error(`File is larger than ${MAX_UPLOAD_LABEL}`);
   const body = new FormData();
-  body.set("file", file);
+  body.set("file", toSend);
   body.set("entityType", ctx.entityType);
   if (ctx.entityId) body.set("entityId", ctx.entityId);
   if (ctx.category) body.set("category", ctx.category);
@@ -49,7 +53,7 @@ export function FileUpload({
   multiple = true,
   accept,
   label = "Attach files",
-  hint = "PDF, images, Office documents · up to 10 MB each",
+  hint = `PDF, images, Office documents · up to ${MAX_UPLOAD_LABEL} each · larger photos are shrunk automatically`,
   initial = [],
   onChange,
   className,
@@ -79,11 +83,6 @@ export function FileUpload({
     setBusy((n) => n + selected.length);
     const added: UploadedFile[] = [];
     for (const f of selected) {
-      if (f.size > 10 * 1024 * 1024) {
-        toast.error(`${f.name} is larger than 10 MB`);
-        setBusy((n) => n - 1);
-        continue;
-      }
       try {
         added.push(await uploadFile(f, context));
       } catch (error) {

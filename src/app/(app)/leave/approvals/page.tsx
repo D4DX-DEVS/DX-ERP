@@ -25,6 +25,8 @@ import { leaveAccess } from "../_lib/access";
 import { bulkLeaveBalances } from "../_lib/balances";
 import { daysLabel, leaveRangeLabel } from "../_lib/format";
 import { DecisionBar } from "./decision-bar";
+import { ReasonAction } from "@/components/ui/actions";
+import { revokeLeave } from "../actions";
 
 export const metadata = { title: "Leave approvals" };
 
@@ -44,7 +46,7 @@ export default async function LeaveApprovalsPage({ searchParams }: { searchParam
   // Queue: HR / management decide at any pending stage; a manager decides the manager stage for their own reports.
   const pendingFilter = access.approve
     ? and(inList(LeaveRequest.status, PENDING), ne(LeaveRequest.user, user._id))
-    : and(eq(LeaveRequest.status, "pending_manager"), eq(LeaveRequest.manager, user._id), ne(LeaveRequest.user, user._id));
+    : and(eq(LeaveRequest.status, "pending_manager"), inList(LeaveRequest.user, access.reportIds), ne(LeaveRequest.user, user._id));
   // History: everyone with org-wide access, otherwise the manager's direct reports.
   const scope = access.viewAll || access.approve ? undefined : inList(LeaveRequest.user, access.reportIds);
   const historyFilter = and(scope, tab === "approved" ? eq(LeaveRequest.status, "approved") : tab === "rejected" ? eq(LeaveRequest.status, "rejected") : undefined);
@@ -113,7 +115,7 @@ export default async function LeaveApprovalsPage({ searchParams }: { searchParam
         {header}
         {tabs}
         <Card>
-          <TableWrap phone={[1, 3, 5]} tablet={[1, 2, 3, 5, 6]}>
+          <TableWrap phone={[1, 3, 6]} tablet={[1, 2, 3, 5, 6]}>
             <THead>
               <Th>Person</Th>
               <Th>Type</Th>
@@ -135,7 +137,7 @@ export default async function LeaveApprovalsPage({ searchParams }: { searchParam
                       <div className="text-xs text-muted">{p?.employeeId}</div>
                     </Td>
                     <Td>{r.leaveTypeName}</Td>
-                    <Td className="whitespace-nowrap">{leaveRangeLabel(r)}</Td>
+                    <Td>{leaveRangeLabel(r)}</Td>
                     <Td align="right">{r.days}</Td>
                     <Td>
                       <StatusChip domain="leave" value={r.status} />
@@ -154,9 +156,28 @@ export default async function LeaveApprovalsPage({ searchParams }: { searchParam
                       ) : (
                         <span className="text-muted">Waiting</span>
                       )}
+                      {r.status === "approved" && (access.manage || access.approve) && r.user !== user._id && (
+                        <div className="mt-1.5">
+                          <ReasonAction
+                            action={revokeLeave.bind(null, r._id)}
+                            title="Cancel approved leave"
+                            description={`${p?.name ?? "The person"}'s ${r.leaveTypeName ?? "leave"} (${leaveRangeLabel(r)}) is cancelled, the days return to their balance and attendance is restored. They are notified.`}
+                            label="Reason"
+                            confirmLabel="Cancel leave"
+                            confirmVariant="danger"
+                            successMessage="Leave cancelled"
+                            trigger={
+                              <Button variant="danger-outline" size="sm">
+                                Cancel leave
+                              </Button>
+                            }
+                          />
+                        </div>
+                      )}
                     </Td>
-                    <Td className="text-xs whitespace-nowrap text-muted">
-                      {r.requestNo} · {timeAgo(r.createdAt)}
+                    <Td className="text-xs text-muted">
+                      <div className="whitespace-nowrap">{r.requestNo}</div>
+                      <div className="whitespace-nowrap">{timeAgo(r.createdAt)}</div>
                     </Td>
                   </Tr>
                 );

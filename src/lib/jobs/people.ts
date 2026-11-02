@@ -117,6 +117,39 @@ async function noticeEnding(): Promise<string> {
   return `${people.length} notice period${people.length === 1 ? "" : "s"} ending soon`;
 }
 
+/**
+ * Contract periods (User.contractEnd) ending within 30 days, within 7 days, and just ended (up to a week ago) →
+ * people who can edit staff records + the reporting manager. One reminder per stage (deduped per end date).
+ */
+async function contractEnding(): Promise<string> {
+  const today = todayKey();
+  const people = await db()
+    .select({ id: User._id, name: User.name, employeeId: User.employeeId, reportingManager: User.reportingManager, contractEnd: User.contractEnd })
+    .from(User)
+    .where(and(activeStaff(), gte(User.contractEnd, addDays(today, -7)), lte(User.contractEnd, addDays(today, 30))));
+  if (people.length === 0) return "0 contracts ending soon";
+  const editors = await usersWithPermission("staff.edit");
+  const items: BatchedNotification[] = [];
+  for (const p of people) {
+    const end = p.contractEnd;
+    if (!end) continue;
+    const stage = end < today ? "ended" : end <= addDays(today, 7) ? "7d" : "30d";
+    const input = {
+      type: "system",
+      title: stage === "ended" ? `${p.name}'s contract ended on ${fmtDate(end)}` : `${p.name}'s contract ends ${end === today ? "today" : `on ${fmtDate(end)}`}`,
+      body: `${p.name} (${p.employeeId}) — renew the contract period on the profile, or start the exit.`,
+      link: `/staff/${p.id}`,
+      actionable: true,
+      priority: stage === "30d" ? ("normal" as const) : ("high" as const),
+      dedupeKey: `contract-end:${p.id}:${end}:${stage}`,
+    };
+    items.push({ recipients: editors, input });
+    items.push({ recipients: [p.reportingManager], exclude: editors, input });
+  }
+  await notifyBatch(items);
+  return `${people.length} contract${people.length === 1 ? "" : "s"} ending soon`;
+}
+
 /** Internships ending within 7 days (or already past their end date) → mentor + interns.manage. */
 async function internshipEnding(): Promise<string> {
   const today = todayKey();
@@ -213,6 +246,7 @@ async function activateInternships(): Promise<string> {
 export const peopleJobs: Job[] = [
   { name: "people-document-expiry", intervalMinutes: 360, run: documentExpiry },
   { name: "people-notice-ending", intervalMinutes: 720, run: noticeEnding },
+  { name: "people-contract-ending", intervalMinutes: 720, run: contractEnding },
   { name: "people-internship-ending", intervalMinutes: 720, run: internshipEnding },
   { name: "people-internship-review-due", intervalMinutes: 720, run: reviewDue },
   { name: "people-internship-activate", intervalMinutes: 360, run: activateInternships },

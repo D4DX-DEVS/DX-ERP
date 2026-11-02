@@ -7,6 +7,7 @@ import { FileUpload } from "@/components/ui/file-upload";
 import { Alert } from "@/components/ui/page";
 import { NOTIFICATION_EVENTS, type AppSettings } from "@/lib/config-defaults";
 import { formatDuration } from "@/lib/time";
+import { MAX_UPLOAD_LABEL } from "@/lib/upload-limit";
 import {
   saveAttendance,
   saveCompany,
@@ -70,7 +71,7 @@ export function CompanyForm({ company, storageConfigured }: { company: AppSettin
                 multiple={false}
                 accept="image/png,image/jpeg,image/webp"
                 label="Upload new logo"
-                hint="PNG, JPG or WebP · up to 10 MB · transparent background works best"
+                hint={`PNG, JPG or WebP · up to ${MAX_UPLOAD_LABEL} (larger images are shrunk) · transparent background works best`}
                 context={{ entityType: "company", isPublic: true }}
                 className="min-w-0 flex-1 basis-72"
               />

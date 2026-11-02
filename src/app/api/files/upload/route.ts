@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { can, getCurrentUser } from "@/lib/auth/session";
 import { storeFile } from "@/lib/files";
 import { ALLOWED_MIME, MAX_UPLOAD_BYTES } from "@/lib/storage";
+import { MAX_UPLOAD_LABEL } from "@/lib/upload-limit";
 import { env } from "@/lib/env";
 import { isObjectId } from "@/lib/validation";
 
@@ -57,7 +58,7 @@ export async function POST(request: Request) {
   }
   // Refuse oversized bodies before buffering the multipart payload (the per-file limit is checked again below).
   const declared = Number(request.headers.get("content-length") ?? 0);
-  if (declared > MAX_UPLOAD_BYTES + 64 * 1024) return NextResponse.json({ ok: false, error: `File is larger than ${MAX_UPLOAD_BYTES / 1024 / 1024} MB` }, { status: 413 });
+  if (declared > MAX_UPLOAD_BYTES + 64 * 1024) return NextResponse.json({ ok: false, error: `File is larger than ${MAX_UPLOAD_LABEL}` }, { status: 413 });
 
   let form: FormData;
   try {
@@ -75,9 +76,8 @@ export async function POST(request: Request) {
 
   const isAvatar = entityType === "avatar";
   const isCompany = entityType === "company";
-  const maxBytes = isAvatar ? 3 * 1024 * 1024 : MAX_UPLOAD_BYTES;
   if (file.size === 0) return NextResponse.json({ ok: false, error: "The file is empty" }, { status: 400 });
-  if (file.size > maxBytes) return NextResponse.json({ ok: false, error: `File is larger than ${maxBytes / 1024 / 1024} MB` }, { status: 413 });
+  if (file.size > MAX_UPLOAD_BYTES) return NextResponse.json({ ok: false, error: `File is larger than ${MAX_UPLOAD_LABEL}` }, { status: 413 });
 
   // Browser-declared type, normalised (so `image/svg+xml; charset=utf-8` cannot slip past the SVG block).
   const mime = (file.type.split(";")[0] ?? "").trim().toLowerCase() || "application/octet-stream";

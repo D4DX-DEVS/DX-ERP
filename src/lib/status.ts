@@ -128,6 +128,7 @@ export const STATUS: Record<string, Vocab> = {
   asset: {
     available: ["Available", "green"],
     assigned: ["Assigned", "blue"],
+    in_use: ["In use", "green"],
     in_repair: ["In repair", "amber"],
     damaged: ["Damaged", "orange"],
     lost: ["Lost", "red"],

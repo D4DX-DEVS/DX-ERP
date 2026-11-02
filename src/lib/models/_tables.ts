@@ -1,6 +1,7 @@
 // Every table and model type, without "server-only" — for drizzle-kit and Node scripts. App code imports "@/lib/models".
 export * from "./_base";
 export * from "./user";
+export * from "./education";
 export * from "./org";
 export * from "./system";
 export * from "./attendance";

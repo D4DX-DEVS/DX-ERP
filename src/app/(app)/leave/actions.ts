@@ -263,7 +263,7 @@ export async function cancelLeave(id: string, reason?: string): Promise<ActionRe
     const patch = { status: "cancelled", cancelledAt: new Date(), cancelReason: note } as const;
 
     if (req.status === "approved") {
-      if (req.startDate <= todayKey()) throw new ActionError("Leave that has already started can't be cancelled here. Ask HR.");
+      if (req.startDate <= todayKey()) throw new ActionError("Leave that has already started can't be cancelled here. Ask HR to cancel it from Leave approvals.");
       const [claimed] = await db()
         .update(LeaveRequest)
         .set(patch)
@@ -292,6 +292,41 @@ export async function cancelLeave(id: string, reason?: string): Promise<ActionRe
     await audit(user, { action: "cancel", entity: "leave", entityId: req._id, ref: req.requestNo, summary: `Cancelled leave ${req.requestNo} (${leaveRangeLabel(req)})${note ? `: ${note}` : ""}` });
     return null;
   }, "Request cancelled");
+}
+
+/**
+ * HR / management cancel an approved request on someone's behalf — also after it has started (the person can then
+ * re-apply for the days actually taken). Attendance for the days is restored and the balance is freed.
+ */
+export async function revokeLeave(id: string, reason: string): Promise<ActionResult<null>> {
+  return runAction(async () => {
+    const actor = await actionUser();
+    if (!can(actor, "leave.manage") && !can(actor, "leave.approve")) throw new ActionError("You don't have permission to cancel approved leave.");
+    const note = parse(zs.text("Reason", 500), reason);
+    if (!isObjectId(id)) throw new ActionError("Request not found.");
+    const [req] = await db().select().from(LeaveRequest).where(eq(LeaveRequest._id, id)).limit(1);
+    if (!req) throw new ActionError("Request not found.");
+    if (req.user === actor._id) throw new ActionError("Cancel your own leave from My leave.");
+    if (req.status !== "approved") throw new ActionError(`Only approved leave can be cancelled here; this request is ${statusLabel("leave", req.status).toLowerCase()}.`);
+    const [claimed] = await db()
+      .update(LeaveRequest)
+      .set({ status: "cancelled", cancelledAt: new Date(), cancelReason: `Cancelled by ${actor.name}: ${note}`.slice(0, 500) })
+      .where(and(eq(LeaveRequest._id, req._id), eq(LeaveRequest.status, "approved")))
+      .returning();
+    if (!claimed) throw new ActionError("This request was just changed. Reload and try again.");
+    await syncLeaveAttendance(claimed, "remove", actor);
+    const who = await applicantName(req.user);
+    await notify([req.user], { type: "leave", title: "Approved leave cancelled", body: `${req.leaveTypeName ?? "Leave"} · ${leaveRangeLabel(req)} was cancelled by ${actor.name}. Reason: ${note}`, link: "/leave", priority: "high" }, [actor._id]);
+    await audit(actor, {
+      action: "cancel",
+      entity: "leave",
+      entityId: req._id,
+      ref: req.requestNo,
+      summary: `Cancelled ${who}'s approved leave ${req.requestNo} (${leaveRangeLabel(req)}): ${note}`,
+      changes: [{ field: "status", from: "approved", to: "cancelled" }],
+    });
+    return null;
+  }, "Leave cancelled");
 }
 
 /* ------------------------------------------------------------------ */

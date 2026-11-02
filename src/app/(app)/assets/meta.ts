@@ -1,7 +1,23 @@
 import type { Tone } from "@/lib/config-defaults";
 import { diffDays } from "@/lib/time";
 
-export const ASSET_STATUSES = ["available", "assigned", "in_repair", "damaged", "lost", "retired"] as const;
+export const ASSET_STATUSES = ["available", "assigned", "in_use", "in_repair", "damaged", "lost", "retired"] as const;
+export const ASSET_KINDS = ["staff", "company"] as const;
+export type AssetKindKey = (typeof ASSET_KINDS)[number];
+
+export const ASSET_KIND_LABELS: Record<AssetKindKey, { label: string; plural: string; hint: string }> = {
+  staff: { label: "Staff asset", plural: "Staff assets", hint: "Issued to people — laptops, phones, ID cards" },
+  company: { label: "Company asset", plural: "Company assets", hint: "Bought for the office — AC, inverter, furniture" },
+};
+
+/** Status of an asset that is ready for use: staff assets wait in stock, company assets are in use in the office. */
+export function readyStatus(kind: string): "available" | "in_use" {
+  return kind === "company" ? "in_use" : "available";
+}
+
+export function readyLabel(kind: string): string {
+  return kind === "company" ? "In use" : "In stock";
+}
 export const ASSET_CONDITIONS = ["new", "good", "fair", "poor", "damaged"] as const;
 
 /** Label + timeline tone for each asset history action. */

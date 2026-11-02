@@ -7,7 +7,7 @@ import { Department, Designation, StoredFile, User } from "@/lib/models";
 import { namesFor } from "@/lib/people";
 import { assignableRoles } from "@/lib/rbac/roles";
 import { getSettings } from "@/lib/settings";
-import { PAGE_SIZE, pageParam, withParams, type SearchParams } from "@/lib/query";
+import { PAGE_SIZE, pageParam, param, withParams, type SearchParams } from "@/lib/query";
 import { addDays, fmtDate, todayKey } from "@/lib/time";
 import { Alert, EmptyState, PageBody, PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
@@ -18,9 +18,12 @@ import { PersonCell } from "@/components/ui/avatar";
 import { OptionChip, StatusChip, Tag } from "@/components/ui/chip";
 import { EmptyRow, Td, Th, THead, TableWrap, Tr } from "@/components/ui/table";
 import { statusTone } from "@/lib/status";
-import { inList } from "@/lib/sql";
+import { inList, notInList } from "@/lib/sql";
+import { EXITED_STATUSES } from "@/lib/people";
+import Link from "next/link";
 import { categoriesFor, expiryInfo, missingRequired } from "./_lib/documents";
-import { staffFilter, STAFF_TYPES } from "./_lib/directory";
+import { contractFilter, staffFilter, STAFF_TYPES } from "./_lib/directory";
+import { contractStatus } from "./_lib/constants";
 
 export const metadata: Metadata = { title: "Staff" };
 
@@ -37,7 +40,7 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
   const canEdit = can(user, "staff.edit");
   const canExport = can(user, "reports.export") || canEdit;
 
-  const [rows, total, typeCounts, departments, designations, roles] = await Promise.all([
+  const [rows, total, typeCounts, departments, designations, roles, contractsEnding] = await Promise.all([
     db()
       .select({
         _id: User._id,
@@ -49,6 +52,8 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
         designation: User.designation,
         reportingManager: User.reportingManager,
         joiningDate: User.joiningDate,
+        contractStart: User.contractStart,
+        contractEnd: User.contractEnd,
         status: User.status,
         accountActive: User.accountActive,
       })
@@ -66,6 +71,7 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
     db().select({ _id: Department._id, name: Department.name }).from(Department).orderBy(asc(Department.name)),
     db().select({ _id: Designation._id, name: Designation.name }).from(Designation),
     assignableRoles(),
+    canEdit ? db().$count(User, and(inList(User.personType, [...STAFF_TYPES]), notInList(User.status, EXITED_STATUSES), contractFilter("ending", today))) : Promise.resolve(0),
   ]);
 
   const managers = await namesFor(rows.map((r) => r.reportingManager));
@@ -168,6 +174,20 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
         </Alert>
       )}
 
+      {canEdit && contractsEnding > 0 && param(sp, "contract") !== "ending" && (
+        <Alert
+          tone="warning"
+          title={`${contractsEnding} ${contractsEnding === 1 ? "contract ends" : "contracts end"} within 30 days.`}
+          action={
+            <Link href="/staff?contract=ending" className="shrink-0 text-xs font-semibold underline underline-offset-2">
+              Show them
+            </Link>
+          }
+        >
+          Renew the contract period from the profile, or start the exit.
+        </Alert>
+      )}
+
       <Card>
         <div className="flex flex-col gap-3 border-b border-line-soft px-4 py-3.5">
           <ChipFilters param="type" options={typeOptions} />
@@ -183,6 +203,16 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
               options={[
                 { value: "on", label: "Login enabled" },
                 { value: "off", label: "No login access" },
+              ]}
+            />
+            <SelectFilter
+              param="contract"
+              label="Contract"
+              allLabel="Any contract"
+              options={[
+                { value: "ending", label: "Ending within 30 days" },
+                { value: "ended", label: "Contract ended" },
+                { value: "any", label: "Has a contract period" },
               ]}
             />
             <ClearFilters />
@@ -218,6 +248,7 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
               const docs = docState.get(id);
               const missing = canEdit ? missingRequired(settings.documentCategories, r.personType, docs?.present ?? new Set()).length : 0;
               const categories = categoriesFor(settings.documentCategories, r.personType).length;
+              const contract = contractStatus(r.contractStart, r.contractEnd, today);
               return (
                 <Tr key={id}>
                   <Td>
@@ -231,7 +262,14 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
                     <Tag tone={statusTone("personType", r.personType)}>{r.personType === "employee" ? "Employee" : r.personType === "trainee" ? "Trainee" : "Intern"}</Tag>
                   </Td>
                   <Td className="text-ink-2">{r.reportingManager ? (managers.get(r.reportingManager) ?? "—") : "—"}</Td>
-                  <Td className="whitespace-nowrap text-ink-2">{fmtDate(r.joiningDate)}</Td>
+                  <Td className="whitespace-nowrap text-ink-2">
+                    {fmtDate(r.joiningDate)}
+                    {contract && (
+                      <div className={contract.state === "ended" ? "text-xs text-danger" : contract.state === "ending" ? "text-xs text-warning" : "text-xs text-muted"}>
+                        {r.contractEnd ? `Contract to ${fmtDate(r.contractEnd)}` : "Open-ended contract"}
+                      </div>
+                    )}
+                  </Td>
                   <Td>
                     <OptionChip options={settings.employmentStatuses} value={r.status} />
                   </Td>

@@ -107,9 +107,11 @@ async function leaveReminders(): Promise<string> {
       .where(inList(User._id, [...new Set(stale.map((r) => r.user))])),
   ]);
   const names = new Map(applicants.map((a) => [a.id, a.name]));
+  // A request stuck with the manager for 3+ days also goes to HR / management, who may decide at any stage.
+  const escalateBefore = Date.now() - 72 * HOUR;
   await notifyBatch(
     stale.map((r) => ({
-      recipients: r.status === "pending_manager" && r.manager ? [r.manager] : hr,
+      recipients: r.status === "pending_manager" && r.manager ? (r.updatedAt.getTime() < escalateBefore ? [r.manager, ...hr] : [r.manager]) : hr,
       exclude: [r.user],
       input: {
         type: "leave",

@@ -16,9 +16,11 @@ import { PageBody, PageHeader } from "@/components/ui/page";
 import { DocumentsPanel } from "../staff/_components/documents-panel";
 import { PhotoUpload } from "../staff/_components/photo-upload";
 import { SessionList } from "../staff/_components/session-list";
-import { employmentTypeLabel, tenureLabel } from "../staff/_lib/constants";
+import { contractLengthLabel, employmentTypeLabel, tenureLabel } from "../staff/_lib/constants";
 import { categoriesFor } from "../staff/_lib/documents";
 import { loadDocuments } from "../staff/_lib/documents-data";
+import { loadEducation } from "../staff/_lib/education-data";
+import { EducationPanel } from "../staff/_components/education-panel";
 import { loadSessions } from "../staff/_lib/sessions";
 import { ProfileForm } from "./profile-form";
 import { revokeMySession, signOutOtherSessions } from "./actions";
@@ -35,6 +37,7 @@ export default async function ProfilePage() {
       name: User.name,
       email: User.email,
       phone: User.phone,
+      whatsapp: User.whatsapp,
       personalEmail: User.personalEmail,
       photo: User.photo,
       personType: User.personType,
@@ -49,6 +52,9 @@ export default async function ProfilePage() {
       address: User.address,
       emergencyContact: User.emergencyContact,
       internship: User.internship,
+      documentUploadOpen: User.documentUploadOpen,
+      contractStart: User.contractStart,
+      contractEnd: User.contractEnd,
       lastLoginAt: User.lastLoginAt,
     })
     .from(User)
@@ -101,7 +107,7 @@ export default async function ProfilePage() {
   const today = todayKey();
   const personRow = (userId: string) =>
     db().select({ name: User.name, photo: User.photo, employeeId: User.employeeId }).from(User).where(eq(User._id, userId)).limit(1).then((r) => r[0]);
-  const [department, designation, manager, mentor, assets, docs] = await Promise.all([
+  const [department, designation, manager, mentor, assets, docs, education] = await Promise.all([
     me.department ? db().select({ name: Department.name }).from(Department).where(eq(Department._id, me.department)).limit(1).then((r) => r[0]) : undefined,
     me.designation ? db().select({ name: Designation.name }).from(Designation).where(eq(Designation._id, me.designation)).limit(1).then((r) => r[0]) : undefined,
     me.reportingManager ? personRow(me.reportingManager) : undefined,
@@ -112,6 +118,7 @@ export default async function ProfilePage() {
       .where(and(eq(Asset.assignedTo, me._id), eq(Asset.status, "assigned")))
       .orderBy(asc(Asset.name)),
     loadDocuments({ personId: user.id, personType: me.personType, includeConfidential: true, settings, today }),
+    loadEducation(user.id, user.id),
   ]);
   const tenure = tenureLabel(me.joiningDate, today);
   const typeLabel = me.personType === "employee" ? "Employee" : me.personType === "trainee" ? "Trainee" : "Intern";
@@ -145,6 +152,7 @@ export default async function ProfilePage() {
           <ProfileForm
             defaults={{
               phone: me.phone ?? undefined,
+              whatsapp: me.whatsapp ?? undefined,
               personalEmail: me.personalEmail ?? undefined,
               addrLine1: me.address?.line1,
               addrLine2: me.address?.line2,
@@ -162,9 +170,10 @@ export default async function ProfilePage() {
               personId={user.id}
               categories={categoriesFor(settings.documentCategories, me.personType)}
               data={docs}
-              perms={{ upload: true, manage: false, self: true, seeConfidential: true }}
+              perms={{ upload: true, manage: false, self: true, seeConfidential: true, restrictedUpload: me.documentUploadOpen }}
             />
           </div>
+          <EducationPanel personId={user.id} records={education} canEdit manage={false} />
         </div>
 
         <div className="flex min-w-0 flex-col gap-4">
@@ -180,6 +189,14 @@ export default async function ProfilePage() {
                   { label: "Designation", value: designation?.name ?? "—" },
                   { label: "Employment type", value: employmentTypeLabel(me.employmentType) },
                   { label: "Joining date", value: me.joiningDate ? `${fmtDate(me.joiningDate)}${tenure ? ` · ${tenure}` : ""}` : "—" },
+                  ...(me.contractStart || me.contractEnd
+                    ? [
+                        {
+                          label: "Contract period",
+                          value: `${fmtDate(me.contractStart)} – ${me.contractEnd ? fmtDate(me.contractEnd) : "open-ended"}${contractLengthLabel(me.contractStart, me.contractEnd) ? ` · ${contractLengthLabel(me.contractStart, me.contractEnd)}` : ""}`,
+                        },
+                      ]
+                    : []),
                   { label: "Team", value: me.team || "—" },
                   { label: "Reports to", value: manager ? <PersonCell name={manager.name} sub={manager.employeeId} photo={manager.photo} /> : "—" },
                   ...(internLike

@@ -16,7 +16,7 @@ import { statusLabel } from "@/lib/status";
 import { fmtDate, todayKey, zonedDateTime } from "@/lib/time";
 import { eqIgnoreCase, inList, jsonPush, notInList } from "@/lib/sql";
 import { isObjectId, zs } from "@/lib/validation";
-import { ASSET_CONDITIONS } from "./meta";
+import { ASSET_CONDITIONS, ASSET_KINDS, readyLabel, readyStatus } from "./meta";
 
 type Lean = IAsset;
 type NewAsset = typeof Asset.$inferInsert;
@@ -32,6 +32,7 @@ const optStr = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : u
 
 const assetSchema = z.object({
   id: zs.optId(),
+  kind: z.preprocess((v) => (v === "" || v == null ? undefined : v), z.enum(ASSET_KINDS).optional()),
   name: zs.text("Name", 200),
   category: zs.text("Category", 60),
   brand: zs.optText(100),
@@ -78,8 +79,11 @@ export async function saveAsset(input: Record<string, unknown>): Promise<ActionR
     const [existing] = data.id ? await db().select().from(Asset).where(eq(Asset._id, data.id)).limit(1) : [];
     if (data.id && !existing) throw new ActionError("Asset not found");
 
+    // The kind is chosen once, when the asset is added (an issued asset's history depends on it).
+    const kind = existing?.kind ?? data.kind ?? "staff";
     const settings = await getSettings();
-    if (!settings.assetCategories.includes(data.category) && existing?.category !== data.category) fieldError("category", "Choose a category from the list");
+    const categories = kind === "company" ? settings.companyAssetCategories : settings.assetCategories;
+    if (!categories.includes(data.category) && existing?.category !== data.category) fieldError("category", "Choose a category from the list");
     if (data.department) {
       const [dept] = await db().select({ id: Department._id }).from(Department).where(eq(Department._id, data.department)).limit(1);
       if (!dept) fieldError("department", "Department not found");
@@ -115,12 +119,13 @@ export async function saveAsset(input: Record<string, unknown>): Promise<ActionR
         .values({
           ...values,
           assetNo,
-          status: "available",
+          kind,
+          status: readyStatus(kind),
           documents,
           history: [{ _id: newId(), action: "created", by: user._id, byName: user.name, at: new Date(), note: "Added to inventory" }],
         })
         .returning({ _id: Asset._id, name: Asset.name, category: Asset.category });
-      await audit(user, { action: "create", entity: "asset", entityId: doc._id, ref: assetNo, summary: `Added asset ${assetNo} · ${doc.name} (${doc.category})${dupNote}` });
+      await audit(user, { action: "create", entity: "asset", entityId: doc._id, ref: assetNo, summary: `Added ${kind === "company" ? "company asset" : "asset"} ${assetNo} · ${doc.name} (${doc.category})${dupNote}` });
       return { id: doc._id, assetNo, duplicates: duplicates.map((d) => d.assetNo) };
     }
 
@@ -242,6 +247,7 @@ export async function issueAsset(id: string, input: Record<string, unknown>): Pr
     const user = await actionPermission("assets.manage");
     const data = parse(issueSchema, input);
     const asset = await loadAsset(id);
+    if (asset.kind === "company") throw new ActionError("Company assets stay with the office and aren't issued to people.");
     const person = await staffMember(data.person);
     const at = effectiveAt(data.date);
     await mutate(user, asset, {
@@ -269,13 +275,13 @@ export async function returnAsset(id: string, input: Record<string, unknown>): P
     const asset = await loadAsset(id);
     const holder = await nameOf(asset.assignedTo);
     const at = effectiveAt(data.date);
-    const status: AssetStatus = data.condition === "damaged" ? "damaged" : "available";
+    const status: AssetStatus = data.condition === "damaged" ? "damaged" : readyStatus(asset.kind);
     await mutate(user, asset, {
       allowed: ["assigned"],
       verb: "returned",
       set: { status, condition: data.condition },
       unset: ["assignedTo"],
-      entry: { action: "returned", from: holder, to: status === "damaged" ? "Damaged" : "In stock", user: asset.assignedTo ?? undefined, userName: holder, note: [`Condition on return: ${data.condition}`, data.note].filter(Boolean).join(" · "), at },
+      entry: { action: "returned", from: holder, to: status === "damaged" ? "Damaged" : readyLabel(asset.kind), user: asset.assignedTo ?? undefined, userName: holder, note: [`Condition on return: ${data.condition}`, data.note].filter(Boolean).join(" · "), at },
     });
     await record(user, asset, "assign", `Recorded return of ${asset.assetNo} (${asset.name}) from ${holder ?? "holder"} on ${fmtDate(data.date)} · condition ${data.condition}`, [
       { field: "status", from: asset.status, to: status },
@@ -294,6 +300,7 @@ export async function transferAsset(id: string, input: Record<string, unknown>):
     const user = await actionPermission("assets.manage");
     const data = parse(transferSchema, input);
     const asset = await loadAsset(id);
+    if (asset.kind === "company" && data.toPerson) throw new ActionError("Company assets move between departments, not people.", { toPerson: "Not for company assets" });
     if (!data.toPerson && !data.toDepartment) throw new ActionError("Choose a person, a department, or both.", { toPerson: "Choose a person or a department" });
     if (data.toPerson && asset.status !== "assigned") throw new ActionError("Only an issued asset can be transferred to another person. Issue it instead.", { toPerson: "Issue the asset instead" });
     if (data.toPerson && asset.assignedTo === data.toPerson) throw new ActionError("The asset is already with this person.", { toPerson: "Already with this person" });
@@ -311,12 +318,12 @@ export async function transferAsset(id: string, input: Record<string, unknown>):
     if (person) set.assignedTo = person._id;
     if (dept) set.department = dept._id;
     await mutate(user, asset, {
-      allowed: ["assigned", "available"],
+      allowed: ["assigned", "available", "in_use"],
       verb: "transferred",
       set,
       entry: {
         action: "transferred",
-        from: [oldHolder, oldDept].filter(Boolean).join(" · ") || "In stock",
+        from: [oldHolder, oldDept].filter(Boolean).join(" · ") || readyLabel(asset.kind),
         to: [person?.name, dept?.name].filter(Boolean).join(" · "),
         user: person?._id,
         userName: person?.name,
@@ -347,7 +354,7 @@ export async function sendToRepair(id: string, input: Record<string, unknown>): 
     const holder = await nameOf(asset.assignedTo);
     const at = effectiveAt(data.date);
     await mutate(user, asset, {
-      allowed: ["available", "assigned", "damaged"],
+      allowed: ["available", "in_use", "assigned", "damaged"],
       verb: "sent for repair",
       set: { status: "in_repair", ...(data.provider ? { serviceProvider: data.provider } : {}) },
       unset: ["assignedTo"],
@@ -370,12 +377,12 @@ export async function backFromRepair(id: string, input: Record<string, unknown>)
     const data = parse(backSchema, input);
     const asset = await loadAsset(id);
     const at = effectiveAt(data.date);
-    const status: AssetStatus = data.condition === "damaged" ? "damaged" : "available";
+    const status: AssetStatus = data.condition === "damaged" ? "damaged" : readyStatus(asset.kind);
     await mutate(user, asset, {
       allowed: ["in_repair"],
       verb: "returned from repair",
       set: { status, condition: data.condition },
-      entry: { action: "back_from_repair", from: "Repair", to: status === "damaged" ? "Damaged" : "In stock", note: [`Condition: ${data.condition}`, data.note].filter(Boolean).join(" · "), at },
+      entry: { action: "back_from_repair", from: "Repair", to: status === "damaged" ? "Damaged" : readyLabel(asset.kind), note: [`Condition: ${data.condition}`, data.note].filter(Boolean).join(" · "), at },
     });
     await record(user, asset, "status", `${asset.assetNo} (${asset.name}) is back from repair · condition ${data.condition}`, [
       { field: "status", from: "in_repair", to: status },
@@ -394,7 +401,7 @@ export async function markDamaged(id: string, input: Record<string, unknown>): P
     const asset = await loadAsset(id);
     const holder = await nameOf(asset.assignedTo);
     await mutate(user, asset, {
-      allowed: ["available", "assigned", "in_repair"],
+      allowed: ["available", "in_use", "assigned", "in_repair"],
       verb: "marked damaged",
       set: { status: "damaged", condition: "damaged" },
       unset: ["assignedTo"],
@@ -419,7 +426,7 @@ export async function markLost(id: string, input: Record<string, unknown>): Prom
     const asset = await loadAsset(id);
     const holder = await nameOf(asset.assignedTo);
     await mutate(user, asset, {
-      allowed: ["available", "assigned", "in_repair", "damaged"],
+      allowed: ["available", "in_use", "assigned", "in_repair", "damaged"],
       verb: "marked lost",
       set: { status: "lost" },
       unset: ["assignedTo"],
@@ -442,7 +449,7 @@ export async function retireAsset(id: string, input: Record<string, unknown>): P
     const data = parse(retireSchema, input);
     const asset = await loadAsset(id);
     await mutate(user, asset, {
-      allowed: ["available", "in_repair", "damaged", "lost"],
+      allowed: ["available", "in_use", "in_repair", "damaged", "lost"],
       verb: "retired",
       set: { status: "retired" },
       entry: { action: "retired", from: statusLabel("asset", asset.status), to: "Retired", note: data.reason, at: new Date() },
@@ -459,18 +466,19 @@ export async function restoreAsset(id: string, input: Record<string, unknown>): 
     const user = await actionPermission("assets.manage");
     const data = parse(restoreSchema, input);
     const asset = await loadAsset(id);
+    const ready = readyStatus(asset.kind);
     await mutate(user, asset, {
       allowed: ["damaged", "lost"],
-      verb: "returned to stock",
-      set: { status: "available", condition: data.condition },
-      entry: { action: "restored", from: statusLabel("asset", asset.status), to: "In stock", note: [`Condition: ${data.condition}`, data.note].filter(Boolean).join(" · "), at: new Date() },
+      verb: asset.kind === "company" ? "put back in use" : "returned to stock",
+      set: { status: ready, condition: data.condition },
+      entry: { action: "restored", from: statusLabel("asset", asset.status), to: readyLabel(asset.kind), note: [`Condition: ${data.condition}`, data.note].filter(Boolean).join(" · "), at: new Date() },
     });
-    await record(user, asset, "status", `Returned ${asset.assetNo} (${asset.name}) to stock after being ${asset.status}`, [
-      { field: "status", from: asset.status, to: "available" },
+    await record(user, asset, "status", `${asset.kind === "company" ? "Put" : "Returned"} ${asset.assetNo} (${asset.name}) ${asset.kind === "company" ? "back in use" : "to stock"} after being ${asset.status}`, [
+      { field: "status", from: asset.status, to: ready },
       { field: "condition", from: asset.condition, to: data.condition },
     ]);
     return null;
-  }, "Returned to stock");
+  }, "Asset restored");
 }
 
 const serviceSchema = z.object({ date: zs.date("Service date"), provider: zs.optText(150), note, nextServiceDate: zs.optDate() });
@@ -484,7 +492,7 @@ export async function recordService(id: string, input: Record<string, unknown>):
     if (data.nextServiceDate && data.nextServiceDate <= data.date) fieldError("nextServiceDate", "The next service must be after this one");
     const provider = optStr(data.provider) ?? asset.serviceProvider;
     await mutate(user, asset, {
-      allowed: ["available", "assigned", "in_repair", "damaged"],
+      allowed: ["available", "in_use", "assigned", "in_repair", "damaged"],
       verb: "serviced",
       set: { ...(provider ? { serviceProvider: provider } : {}), ...(data.nextServiceDate ? { nextServiceDate: data.nextServiceDate } : {}) },
       unset: data.nextServiceDate ? [] : ["nextServiceDate"],

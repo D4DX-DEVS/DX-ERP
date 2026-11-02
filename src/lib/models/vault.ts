@@ -97,3 +97,31 @@ export const VaultEvent = sqliteTable(
   ],
 );
 export type IVaultEvent = typeof VaultEvent.$inferSelect;
+
+export const CREDENTIAL_CATEGORIES = ["social", "email", "hosting", "domain", "software", "banking", "government", "vendor", "other"] as const;
+export type CredentialCategory = (typeof CREDENTIAL_CATEGORIES)[number];
+
+/**
+ * Company credential storage (super admin only). Username, password and notes are sealed together in
+ * `ciphertext` with the company data key (ProjectVault row `project = "company"`); platform, category and URL
+ * are plain metadata for listing and search. Reveals are logged in VaultEvent under project "company".
+ * Writes must trim `platform`.
+ */
+export const Credential = sqliteTable(
+  "credentials",
+  {
+    _id: pk(),
+    platform: text().notNull(),
+    category: text().$type<CredentialCategory>().notNull().default("other"),
+    url: text(),
+    ciphertext: text().notNull(),
+    createdBy: ref(),
+    updatedBy: ref(),
+    valuesUpdatedAt: date()
+      .notNull()
+      .$defaultFn(() => new Date()),
+    ...timestamps(),
+  },
+  (t) => [index("credentials_platform").on(t.platform)],
+);
+export type ICredential = typeof Credential.$inferSelect;

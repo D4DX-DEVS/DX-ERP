@@ -7,6 +7,7 @@ import { ActionForm, Field, FormActions, FormGrid, FormSection, SubmitButton } f
 import { Input, Select } from "@/components/ui/input";
 import { PeoplePicker, type PickerOption } from "@/components/ui/people-picker";
 import { updatePerson } from "../../actions";
+import { ContractPeriodFields } from "../../_components/contact-fields";
 import { PersonalFields, type PersonalDefaults } from "../../_components/personal-fields";
 import { BLOOD_GROUPS, EMPLOYMENT_TYPE_OPTIONS, GENDER_OPTIONS } from "../../_lib/constants";
 
@@ -20,6 +21,8 @@ export interface EditablePerson extends PersonalDefaults {
   employmentType: string;
   team?: string;
   joiningDate?: string;
+  contractStart?: string;
+  contractEnd?: string;
   internship?: { startDate?: string; endDate?: string; college?: string; course?: string; assignedRole?: string; mentor?: string };
 }
 
@@ -98,6 +101,10 @@ export function EditPersonForm({
                 <Input id="team" name="team" maxLength={80} defaultValue={person.team ?? ""} />
               </Field>
             </FormGrid>
+          </FormSection>
+
+          <FormSection title="Contract period" description="Leave the end date empty for an open-ended contract. HR is reminded 30 days before it ends.">
+            <ContractPeriodFields defaultStart={person.contractStart} defaultEnd={person.contractEnd} fallbackStart={person.joiningDate} />
           </FormSection>
 
           {internLike && (

@@ -89,7 +89,8 @@ async function sourceOptions(source: OptionSource): Promise<FilterOption[]> {
     case "expenseCategories":
       return settings.expenseCategories.map((s) => ({ value: s, label: s }));
     case "assetCategories":
-      return settings.assetCategories.map((s) => ({ value: s, label: s }));
+      // Staff and company asset categories (the register covers both kinds).
+      return [...new Set([...settings.assetCategories, ...settings.companyAssetCategories])].map((s) => ({ value: s, label: s }));
     case "movementCategories":
       return settings.movement.categories.map((c) => ({ value: c.key, label: c.label }));
     case "employmentStatuses":

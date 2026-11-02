@@ -108,6 +108,8 @@ export interface AppSettings {
   documentCategories: DocumentCategory[];
   expenseCategories: string[];
   assetCategories: string[];
+  /** Categories for assets bought for the office itself (never issued to people). */
+  companyAssetCategories: string[];
   leadSources: string[];
   numbering: {
     invoicePrefix: string;
@@ -267,6 +269,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ],
   expenseCategories: ["Travel", "Client meeting", "Software & subscriptions", "Hardware", "Office supplies", "Internet & phone", "Marketing", "Training", "Utilities", "Rent", "Other"],
   assetCategories: ["Laptop", "Desktop", "Monitor", "Mobile phone", "Tablet", "Peripheral", "Furniture", "Network equipment", "Software licence", "Other"],
+  companyAssetCategories: ["Air conditioner", "Inverter / UPS", "Battery", "Generator", "Furniture", "Appliance", "Printer / copier", "Network equipment", "CCTV / security", "Electrical fitting", "Vehicle", "Other"],
   leadSources: ["Website", "Referral", "LinkedIn", "Cold outreach", "Existing client", "Event", "Partner", "Other"],
   numbering: {
     invoicePrefix: "INV-",

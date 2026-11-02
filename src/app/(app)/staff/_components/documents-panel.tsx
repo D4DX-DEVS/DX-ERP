@@ -7,7 +7,8 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { Chip, Tag } from "@/components/ui/chip";
 import { expiryText } from "../_lib/documents";
 import type { DocView, DocumentsData } from "../_lib/documents-data";
-import { DeleteDocumentButton, UploadDocumentButton, type CategoryOption } from "./document-dialogs";
+import { DeleteDocumentButton, DocumentAccessSwitch, UploadDocumentButton, type CategoryOption } from "./document-dialogs";
+import { EDUCATION_CATEGORY } from "../_lib/education";
 
 export interface DocumentPerms {
   /** May upload new documents (self, staff.edit, interns.manage for interns). */
@@ -18,6 +19,8 @@ export interface DocumentPerms {
   self: boolean;
   /** Restricted documents are listed. */
   seeConfidential: boolean;
+  /** The person may upload restricted categories themself (HR opened them: User.documentUploadOpen). */
+  restrictedUpload?: boolean;
 }
 
 const toOption = (c: DocumentCategory): CategoryOption => ({ key: c.key, label: c.label, hasExpiry: c.hasExpiry, confidential: c.confidential });
@@ -32,17 +35,23 @@ function ExpiryChip({ doc }: { doc: DocView }) {
 /** Documents grouped by category with expiry flags, version history and a missing-documents summary. */
 export function DocumentsPanel({
   personId,
-  categories,
+  categories: applicable,
   data,
   perms,
+  access,
 }: {
   personId: string;
   /** Categories applicable to the person's type. */
   categories: DocumentCategory[];
   data: DocumentsData;
   perms: DocumentPerms;
+  /** Shown to HR on someone else's record: the switch that opens restricted categories to the person. */
+  access?: { name: string; open: boolean };
 }) {
-  const uploadable = (perms.manage ? categories : categories.filter((c) => !c.confidential)).map(toOption);
+  // Educational certificates have their own structured section (EducationPanel); the old flat category only lists legacy files.
+  const hasLegacyEducation = data.docs.some((d) => d.category === EDUCATION_CATEGORY);
+  const categories = applicable.filter((c) => c.key !== EDUCATION_CATEGORY || hasLegacyEducation);
+  const uploadable = (perms.manage || perms.restrictedUpload ? categories : categories.filter((c) => !c.confidential)).filter((c) => c.key !== EDUCATION_CATEGORY).map(toOption);
   const missing = new Set(data.missing.map((m) => m.key));
   const byCategory = new Map<string, DocView[]>();
   for (const d of data.docs) byCategory.set(d.category, [...(byCategory.get(d.category) ?? []), d]);
@@ -55,13 +64,18 @@ export function DocumentsPanel({
       {data.missing.length > 0 && (
         <Alert tone="warning" title={`${data.missing.length} required ${data.missing.length === 1 ? "document is" : "documents are"} missing:`}>
           {data.missing.map((m) => m.label).join(" · ")}
-          {!perms.manage && perms.self && " — please hand restricted documents to HR."}
+          {!perms.manage && perms.self && !perms.restrictedUpload && " — please hand restricted documents to HR."}
         </Alert>
       )}
       {expiring > 0 && (
         <Alert tone="warning" title={`${expiring} ${expiring === 1 ? "document has" : "documents have"} expired or expire within 30 days.`}>
           Upload a new version to keep the record current.
         </Alert>
+      )}
+      {access && (
+        <Card className="p-4 sm:p-5">
+          <DocumentAccessSwitch personId={personId} name={access.name} open={access.open} />
+        </Card>
       )}
       <Card>
         <CardHeader
@@ -117,7 +131,7 @@ export function DocumentsPanel({
 }
 
 function DocRow({ doc, personId, perms, categories }: { doc: DocView; personId: string; perms: DocumentPerms; categories: DocumentCategory[] }) {
-  const canReplace = perms.upload && (perms.manage || (perms.self && !doc.confidential));
+  const canReplace = perms.upload && (perms.manage || (perms.self && (!doc.confidential || Boolean(perms.restrictedUpload))));
   const category = categories.find((c) => c.key === doc.category);
   return (
     <li className="flex flex-wrap items-start gap-3 px-5 py-2.5">
