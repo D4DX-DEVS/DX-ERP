@@ -51,7 +51,7 @@ function matchesSignature(mime: string, buffer: Buffer): boolean {
 }
 
 /** PDF readers accept a header anywhere in the first 1 KB, and some portals prepend junk (e.g. PHP warnings) — store from the header on. */
-function stripPdfPrefix(buffer: Buffer): Buffer {
+function stripPdfPrefix<T extends ArrayBufferLike>(buffer: Buffer<T>): Buffer<T> {
   const start = buffer.subarray(0, 1024).indexOf("%PDF-");
   return start > 0 ? buffer.subarray(start) : buffer;
 }
