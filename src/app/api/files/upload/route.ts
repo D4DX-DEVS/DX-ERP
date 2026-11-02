@@ -50,6 +50,12 @@ function matchesSignature(mime: string, buffer: Buffer): boolean {
   return options.some((sig) => sig.every((byte, i) => buffer[i] === byte));
 }
 
+/** PDF readers accept a header anywhere in the first 1 KB, and some portals prepend junk (e.g. PHP warnings) — store from the header on. */
+function stripPdfPrefix(buffer: Buffer): Buffer {
+  const start = buffer.subarray(0, 1024).indexOf("%PDF-");
+  return start > 0 ? buffer.subarray(start) : buffer;
+}
+
 export async function POST(request: Request) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ ok: false, error: "Not signed in" }, { status: 401 });
@@ -101,7 +107,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    const buffer = Buffer.from(await file.arrayBuffer());
+    let buffer = Buffer.from(await file.arrayBuffer());
+    if (mime === "application/pdf") buffer = stripPdfPrefix(buffer);
     if (!matchesSignature(mime, buffer) || buffer.subarray(0, 512).toString("latin1").toLowerCase().includes("<svg")) {
       return NextResponse.json({ ok: false, error: "The file's content does not match its type" }, { status: 415 });
     }
