@@ -8,6 +8,7 @@ import { Chip, Tag } from "@/components/ui/chip";
 import { expiryText } from "../_lib/documents";
 import type { DocView, DocumentsData } from "../_lib/documents-data";
 import { DeleteDocumentButton, DocumentAccessSwitch, UploadDocumentButton, type CategoryOption } from "./document-dialogs";
+import { BANK_CATEGORY } from "../_lib/bank";
 import { EDUCATION_CATEGORY } from "../_lib/education";
 
 export interface DocumentPerms {
@@ -48,10 +49,12 @@ export function DocumentsPanel({
   /** Shown to HR on someone else's record: the switch that opens restricted categories to the person. */
   access?: { name: string; open: boolean };
 }) {
-  // Educational certificates have their own structured section (EducationPanel); the old flat category only lists legacy files.
-  const hasLegacyEducation = data.docs.some((d) => d.category === EDUCATION_CATEGORY);
-  const categories = applicable.filter((c) => c.key !== EDUCATION_CATEGORY || hasLegacyEducation);
-  const uploadable = (perms.manage || perms.restrictedUpload ? categories : categories.filter((c) => !c.confidential)).filter((c) => c.key !== EDUCATION_CATEGORY).map(toOption);
+  // Educational certificates and bank proofs have their own structured sections (EducationPanel, BankPanel); the old flat
+  // categories only list legacy files.
+  const structured = [EDUCATION_CATEGORY, BANK_CATEGORY];
+  const legacy = new Set(data.docs.map((d) => d.category).filter((c) => structured.includes(c)));
+  const categories = applicable.filter((c) => !structured.includes(c.key) || legacy.has(c.key));
+  const uploadable = (perms.manage || perms.restrictedUpload ? categories : categories.filter((c) => !c.confidential)).filter((c) => !structured.includes(c.key)).map(toOption);
   const missing = new Set(data.missing.map((m) => m.key));
   const byCategory = new Map<string, DocView[]>();
   for (const d of data.docs) byCategory.set(d.category, [...(byCategory.get(d.category) ?? []), d]);

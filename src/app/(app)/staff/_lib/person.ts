@@ -34,6 +34,7 @@ import { eqIgnoreCase, inList } from "@/lib/sql";
 import { todayKey } from "@/lib/time";
 import { zs } from "@/lib/validation";
 import { AUTO_ONBOARDING_KEY, DEFAULT_EMPLOYMENT_TYPE, EMPLOYMENT_TYPE_KEYS, ONBOARDING_STEPS, type NewPersonType } from "./constants";
+import { BANK_CATEGORY, BANK_FILE_CATEGORY } from "./bank";
 import { missingRequired } from "./documents";
 import { EDUCATION_CATEGORY, EDUCATION_FILE_CATEGORY } from "./education";
 
@@ -165,8 +166,8 @@ export async function autoCompleteSteps(userId: Id): Promise<void> {
         ne(StoredFile.category, ""),
       ),
     );
-  // Structured education certificates satisfy a required "education" category.
-  const present = new Set(files.map((f) => (f.category === EDUCATION_FILE_CATEGORY ? EDUCATION_CATEGORY : f.category!)));
+  // Structured education certificates and bank account proofs satisfy the "education" / "bank" categories.
+  const present = new Set(files.map((f) => (f.category === EDUCATION_FILE_CATEGORY ? EDUCATION_CATEGORY : f.category === BANK_FILE_CATEGORY ? BANK_CATEGORY : f.category!)));
   if (missingRequired(settings.documentCategories, u.personType, present).length === 0) ready.push("documents");
 
   const pending = ready.filter((key) => !done.has(key));

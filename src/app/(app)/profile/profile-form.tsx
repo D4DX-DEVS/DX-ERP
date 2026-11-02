@@ -7,7 +7,7 @@ import { updateMyProfile } from "./actions";
 
 export function ProfileForm({ defaults }: { defaults: PersonalDefaults }) {
   return (
-    <Card>
+    <Card id="details" className="scroll-mt-20">
       <CardHeader title="My details" subtitle="Contact, address and emergency contact. HR maintains the rest of your record." />
       <CardBody>
         <ActionForm action={updateMyProfile} successMessage="Profile saved" className="gap-6">

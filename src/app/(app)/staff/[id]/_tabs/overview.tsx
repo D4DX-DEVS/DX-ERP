@@ -13,6 +13,7 @@ import { Progress } from "@/components/ui/page";
 import type { PickerOption } from "@/components/ui/people-picker";
 import { LifecycleEditButton } from "../../_components/lifecycle-actions";
 import { OnboardingChecklist } from "../../_components/onboarding-checklist";
+import { ProfileCompletionCard } from "../../_components/profile-completion";
 import { SectionEditButton, SelfContactEditButton, type SectionPerson } from "../../_components/section-edit";
 import {
   AUTO_ONBOARDING_KEY,
@@ -25,6 +26,7 @@ import {
   tenureLabel,
   whatsappLink,
 } from "../../_lib/constants";
+import type { ProfileCompletion } from "../../_lib/completion";
 import type { PersonRef, TabProps } from "./types";
 
 function formatAddress(a: TabProps["person"]["address"]): string {
@@ -43,7 +45,8 @@ export async function OverviewTab({
   manager,
   mentor,
   people,
-}: TabProps & { department?: string; designation?: string; manager?: PersonRef; mentor?: PersonRef; people?: PickerOption[] }) {
+  completion,
+}: TabProps & { department?: string; designation?: string; manager?: PersonRef; mentor?: PersonRef; people?: PickerOption[]; completion?: ProfileCompletion }) {
   const id = person._id;
   const showAssets = access.canSeePersonal || can(user, "assets.view");
   const loadAssets = async () =>
@@ -207,6 +210,16 @@ export async function OverviewTab({
       </div>
 
       <div className="flex min-w-0 flex-col gap-4">
+        {completion && (
+          <ProfileCompletionCard
+            completion={completion}
+            links={{
+              documents: `/staff/${id}?tab=documents`,
+              education: `/staff/${id}?tab=documents#education`,
+              ...(access.canConfidential || access.isSelf ? { bank: `/staff/${id}?tab=documents#bank` } : {}),
+            }}
+          />
+        )}
         {internship && progress && (
           <Card>
             <CardHeader

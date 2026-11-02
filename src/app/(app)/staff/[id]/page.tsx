@@ -23,6 +23,8 @@ import { LinkTabs } from "@/components/ui/tabs";
 import { DeletePersonButton } from "../_components/access-controls";
 import { LifecycleActions, LifecycleProvider, type LifecycleProps } from "../_components/lifecycle-actions";
 import { PhotoUpload } from "../_components/photo-upload";
+import { ProfileCompletionBar } from "../_components/profile-completion";
+import { loadProfileCompletion } from "../_lib/completion-data";
 import { contractStatus, tenureLabel } from "../_lib/constants";
 import { personProfileColumns } from "../_lib/columns";
 import { personAccess } from "../_lib/people-access";
@@ -55,11 +57,13 @@ export default async function StaffProfilePage({ params, searchParams }: { param
   const mentorId = person.internship?.mentor;
   const personRow = (userId: string) =>
     db().select({ _id: User._id, name: User.name, photo: User.photo, employeeId: User.employeeId }).from(User).where(eq(User._id, userId)).limit(1).then((r) => r[0]);
-  const [department, designation, managerDoc, mentorDoc] = await Promise.all([
+  const [department, designation, managerDoc, mentorDoc, completion] = await Promise.all([
     person.department ? db().select({ name: Department.name }).from(Department).where(eq(Department._id, person.department)).limit(1).then((r) => r[0]) : undefined,
     person.designation ? db().select({ name: Designation.name }).from(Designation).where(eq(Designation._id, person.designation)).limit(1).then((r) => r[0]) : undefined,
     person.reportingManager ? personRow(person.reportingManager) : undefined,
     mentorId ? personRow(mentorId) : undefined,
+    // Completion reflects personal details, so it is shown to the people who may see them.
+    access.canSeePersonal ? loadProfileCompletion(person, settings) : undefined,
   ]);
   const toRef = (u: { _id: string; name: string; photo: string | null; employeeId: string } | undefined): PersonRef | undefined =>
     u ? { id: u._id, name: u.name, photo: u.photo ?? undefined, sub: u.employeeId } : undefined;
@@ -190,6 +194,11 @@ export default async function StaffProfilePage({ params, searchParams }: { param
             {can(user, "staff.delete") && !access.isSelf && <DeletePersonButton userId={id} name={person.name} />}
           </div>
         </div>
+        {completion && (
+          <div className="mt-4 border-t border-line-soft pt-3">
+            <ProfileCompletionBar completion={completion} href={`/staff/${id}#completion`} />
+          </div>
+        )}
       </Card>
 
       {person.exit?.stage === "notice" && (
@@ -206,7 +215,9 @@ export default async function StaffProfilePage({ params, searchParams }: { param
 
       <LinkTabs items={tabItems} />
 
-      {tab === "overview" && <OverviewTab {...tabProps} department={department?.name} designation={designation?.name} manager={manager} mentor={mentor} people={lifecycle?.people} />}
+      {tab === "overview" && (
+        <OverviewTab {...tabProps} department={department?.name} designation={designation?.name} manager={manager} mentor={mentor} people={lifecycle?.people} completion={completion} />
+      )}
       {tab === "attendance" && <AttendanceTab {...tabProps} month={month} thisMonth={thisMonth} />}
       {tab === "documents" && <DocumentsTab {...tabProps} />}
       {tab === "salary" && <SalaryTab {...tabProps} />}

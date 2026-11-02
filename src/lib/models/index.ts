@@ -4,6 +4,7 @@ export * from "./_tables";
 
 import { User } from "./user";
 import { Education } from "./education";
+import { BankAccount } from "./bank";
 import { Department, Designation, Role, Holiday } from "./org";
 import { Settings, Counter, AuditLog, StoredFile, Backup } from "./system";
 import { Attendance, AttendanceCorrection } from "./attendance";
@@ -25,6 +26,7 @@ import { ProjectVault, VaultItem, VaultEvent, Credential } from "./vault";
 export const BACKUP_TABLES = {
   User,
   Education,
+  BankAccount,
   Department,
   Designation,
   Role,

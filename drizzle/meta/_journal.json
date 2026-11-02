@@ -15,6 +15,13 @@
       "when": 1793607085614,
       "tag": "0001_staff_education_assets_credentials",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793622749171,
+      "tag": "0002_bank_accounts",
+      "breakpoints": true
     }
   ]
 }

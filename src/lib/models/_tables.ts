@@ -2,6 +2,7 @@
 export * from "./_base";
 export * from "./user";
 export * from "./education";
+export * from "./bank";
 export * from "./org";
 export * from "./system";
 export * from "./attendance";

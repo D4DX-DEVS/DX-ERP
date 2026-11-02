@@ -21,6 +21,11 @@ import { categoriesFor } from "../staff/_lib/documents";
 import { loadDocuments } from "../staff/_lib/documents-data";
 import { loadEducation } from "../staff/_lib/education-data";
 import { EducationPanel } from "../staff/_components/education-panel";
+import { BankPanel } from "../staff/_components/bank-panel";
+import { selfBankEditable } from "../staff/_lib/bank";
+import { loadBankAccounts } from "../staff/_lib/bank-data";
+import { ProfileCompletionBar, ProfileCompletionCard } from "../staff/_components/profile-completion";
+import { loadProfileCompletion } from "../staff/_lib/completion-data";
 import { loadSessions } from "../staff/_lib/sessions";
 import { ProfileForm } from "./profile-form";
 import { revokeMySession, signOutOtherSessions } from "./actions";
@@ -49,6 +54,9 @@ export default async function ProfilePage() {
       accountActive: User.accountActive,
       reportingManager: User.reportingManager,
       team: User.team,
+      dob: User.dob,
+      gender: User.gender,
+      bloodGroup: User.bloodGroup,
       address: User.address,
       emergencyContact: User.emergencyContact,
       internship: User.internship,
@@ -107,7 +115,7 @@ export default async function ProfilePage() {
   const today = todayKey();
   const personRow = (userId: string) =>
     db().select({ name: User.name, photo: User.photo, employeeId: User.employeeId }).from(User).where(eq(User._id, userId)).limit(1).then((r) => r[0]);
-  const [department, designation, manager, mentor, assets, docs, education] = await Promise.all([
+  const [department, designation, manager, mentor, assets, docs, education, bank, completion] = await Promise.all([
     me.department ? db().select({ name: Department.name }).from(Department).where(eq(Department._id, me.department)).limit(1).then((r) => r[0]) : undefined,
     me.designation ? db().select({ name: Designation.name }).from(Designation).where(eq(Designation._id, me.designation)).limit(1).then((r) => r[0]) : undefined,
     me.reportingManager ? personRow(me.reportingManager) : undefined,
@@ -119,6 +127,8 @@ export default async function ProfilePage() {
       .orderBy(asc(Asset.name)),
     loadDocuments({ personId: user.id, personType: me.personType, includeConfidential: true, settings, today }),
     loadEducation(user.id, user.id),
+    loadBankAccounts(user.id, user.id),
+    loadProfileCompletion(me, settings),
   ]);
   const tenure = tenureLabel(me.joiningDate, today);
   const typeLabel = me.personType === "employee" ? "Employee" : me.personType === "trainee" ? "Trainee" : "Intern";
@@ -144,6 +154,9 @@ export default async function ProfilePage() {
               My internship →
             </Link>
           )}
+        </div>
+        <div className="mt-4 border-t border-line-soft pt-3">
+          <ProfileCompletionBar completion={completion} href="#completion" />
         </div>
       </Card>
 
@@ -174,9 +187,22 @@ export default async function ProfilePage() {
             />
           </div>
           <EducationPanel personId={user.id} records={education} canEdit manage={false} />
+          <BankPanel
+            personId={user.id}
+            holderName={me.name}
+            accounts={bank}
+            canEdit={selfBankEditable(settings.documentCategories, me.documentUploadOpen)}
+            manage={false}
+            lockedNote="Bank details are restricted — HR adds them, or opens document upload so you can add them yourself."
+          />
         </div>
 
         <div className="flex min-w-0 flex-col gap-4">
+          <ProfileCompletionCard
+            completion={completion}
+            subtitle={`${completion.done} of ${completion.total} items on file. HR fills in the employment details.`}
+            links={{ personal: "#details", documents: "#documents", education: "#education", bank: "#bank" }}
+          />
           <Card>
             <CardHeader title="Employment" subtitle="Maintained by HR" />
             <CardBody>

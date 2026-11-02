@@ -5,6 +5,7 @@ import { StoredFile } from "@/lib/models";
 import type { AppSettings } from "@/lib/config-defaults";
 import { titleCase } from "@/lib/format";
 import { expiryInfo, missingRequired, type ExpiryInfo } from "./documents";
+import { BANK_CATEGORY, BANK_FILE_CATEGORY } from "./bank";
 import { EDUCATION_CATEGORY, EDUCATION_FILE_CATEGORY } from "./education";
 
 export interface DocVersion {
@@ -61,15 +62,17 @@ export async function loadDocuments(opts: {
       ),
     )
     .orderBy(desc(StoredFile.createdAt));
-  // Certificates of structured education records are listed by the education section, not as documents.
-  const files = all.filter((f) => f.category !== EDUCATION_FILE_CATEGORY);
-  const hasEducationCertificates = all.length !== files.length;
+  // Certificates of structured education records and bank account proofs are listed by their own sections, not as documents.
+  const files = all.filter((f) => f.category !== EDUCATION_FILE_CATEGORY && f.category !== BANK_FILE_CATEGORY);
+  const hasEducationCertificates = all.some((f) => f.category === EDUCATION_FILE_CATEGORY);
+  const hasBankProofs = all.some((f) => f.category === BANK_FILE_CATEGORY);
 
   const byId = new Map(files.map((f) => [f._id, f]));
   const heads = files.filter((f) => !f.replacedBy);
   const categories = opts.settings.documentCategories;
   const present = new Set(heads.map((f) => f.category!));
   if (hasEducationCertificates) present.add(EDUCATION_CATEGORY);
+  if (hasBankProofs) present.add(BANK_CATEGORY);
   const missing = missingRequired(categories, opts.personType, present).map((c) => ({ key: c.key, label: c.label }));
 
   const order = new Map(categories.map((c, i) => [c.key, i]));

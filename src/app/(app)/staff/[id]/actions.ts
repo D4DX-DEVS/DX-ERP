@@ -10,6 +10,7 @@ import { inr } from "@/lib/format";
 import {
   Asset,
   Attendance,
+  BankAccount,
   Department,
   Designation,
   Education,
@@ -495,7 +496,7 @@ export async function setDocumentUploadOpen(personId: string, open: boolean): Pr
       changes: [{ field: "documentUploadOpen", from: String(target.documentUploadOpen), to: String(next) }],
     });
     if (next) {
-      await notify([target._id], { type: "document", title: "Please upload your documents", body: "HR has opened all document categories for you, including ID, PAN and bank proof. Upload them from My profile → Documents.", link: "/profile#documents", actionable: true }, [user._id]);
+      await notify([target._id], { type: "document", title: "Please upload your documents", body: "HR has opened all document categories for you, including ID, PAN and bank details. Upload them from My profile → Documents.", link: "/profile#documents", actionable: true }, [user._id]);
     }
     return null;
   }, open ? "Staff can now upload restricted documents" : "Restricted documents are HR-only again");
@@ -750,6 +751,7 @@ export async function deletePerson(userId: string): Promise<ActionResult<null>> 
         .where(and(inList(StoredFile.entityType, ["user", "avatar"]), eq(StoredFile.entityId, id), isNull(StoredFile.deletedAt))),
       db().delete(Review).where(eq(Review.user, id)),
       db().delete(Education).where(eq(Education.user, id)),
+      db().delete(BankAccount).where(eq(BankAccount.user, id)),
       db().delete(Session).where(eq(Session.user, id)),
       db().delete(Notification).where(eq(Notification.user, id)),
       // `$pull` the person from every learning resource's assignees and completions.
