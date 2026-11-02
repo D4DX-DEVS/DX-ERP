@@ -125,7 +125,15 @@ export function TaskForm({
           <Field label="Title" name="title" required className="sm:col-span-2">
             <Input id="title" name="title" defaultValue={initial.title} maxLength={300} autoComplete="off" />
           </Field>
-          <Field label="Project" name="project" required={!canPickNoProject} hint={initial.parentLabel ? `Subtask of ${initial.parentLabel}` : lockProject ? "The project can't be changed" : undefined}>
+          <Field label="Project" name="project" required={!canPickNoProject} hint={
+              initial.parentLabel
+                ? `Subtask of ${initial.parentLabel}`
+                : lockProject
+                  ? "The project can't be changed"
+                  : projects.length === 0
+                    ? "You're not on any active project yet — ask the super admin to add you as manager or team member."
+                    : undefined
+            }>
             {lockProject ? (
               <Input id="project" value={project?.label ?? "No project"} disabled readOnly />
             ) : (

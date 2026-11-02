@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, FileText, Landmark, Lock, Pencil, Plus, Star, Trash2, Upload } from "lucide-react";
+import { Landmark, Lock, Pencil, Plus, Star, Trash2, Upload } from "lucide-react";
 import { ActionButton } from "@/components/ui/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
@@ -11,11 +11,10 @@ import { FileUpload } from "@/components/ui/file-upload";
 import { ActionForm, Field, FormActions, FormGrid, SubmitButton } from "@/components/ui/form";
 import { Checkbox, Input, Select } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/page";
-import { fileSize } from "@/lib/format";
-import { fmtDate } from "@/lib/time";
 import { addBankDocument, deleteBankAccount, removeBankDocument, saveBankAccount, setSalaryAccount } from "../[id]/bank-actions";
 import { BANK_ACCOUNT_TYPES, BANK_DOCUMENT_TYPES, BANK_PROOF_TYPES, bankAccountTypeLabel, bankDocumentTypeLabel, maskAccount } from "../_lib/bank";
 import type { BankAccountView } from "../_lib/bank-data";
+import { FileTile, MissingTile } from "./file-tile";
 
 /** "123456789012" → "1234 5678 9012" (easier to read back against a passbook). */
 const grouped = (n: string) => n.replace(/(\d{4})(?=\d)/g, "$1 ");
@@ -43,7 +42,7 @@ export function BankPanel({
 }) {
   const documentCount = accounts.reduce((n, a) => n + a.documents.length, 0);
   return (
-    <Card id="bank" className="scroll-mt-20">
+    <Card id="bank" className="@container scroll-mt-20">
       <CardHeader
         title={
           <span className="inline-flex flex-wrap items-center gap-2">
@@ -103,7 +102,7 @@ function AccountRow({
     { label: "Branch", value: a.branch || "—" },
   ];
   return (
-    <li className="border-t border-line-soft px-5 py-3.5 first:border-t-0">
+    <li className="border-t border-line-soft px-4 py-3.5 first:border-t-0 sm:px-5">
       <div className="flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1 basis-60">
           <div className="flex flex-wrap items-center gap-2">
@@ -159,21 +158,19 @@ function AccountRow({
         )}
       </div>
 
-      {a.documents.length > 0 && (
-        <ul className="mt-2.5 flex flex-col gap-1.5">
-          {a.documents.map((d) => (
-            <li key={d.id} className="flex items-start gap-2.5 rounded-[10px] bg-field px-3 py-2">
-              <FileText className="mt-0.5 size-4 shrink-0 text-muted" aria-hidden />
-              <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-semibold text-ink">{bankDocumentTypeLabel(d.type)}</div>
-                <a href={`/api/files/${d.file}`} target="_blank" rel="noopener noreferrer" className="block text-xs break-words text-brand-600 hover:underline">
-                  {d.name}
-                </a>
-                <div className="text-[11px] text-muted">
-                  {[d.size ? fileSize(d.size) : null, `uploaded ${fmtDate(d.uploadedAt)}`, d.uploadedByName ? `by ${d.uploadedByName}` : null, d.note].filter(Boolean).join(" · ")}
-                </div>
-              </div>
-              {canEdit && (manage || d.mine) && (
+      <div className="mt-3 grid gap-2 @2xl:grid-cols-2">
+        {a.documents.map((d) => (
+          <FileTile
+            key={d.id}
+            title={bankDocumentTypeLabel(d.type)}
+            file={d.file}
+            name={d.name}
+            size={d.size}
+            uploadedAt={d.uploadedAt}
+            uploadedByName={d.uploadedByName}
+            note={d.note}
+            actions={
+              canEdit && (manage || d.mine) ? (
                 <ActionButton
                   variant="ghost"
                   size="icon-sm"
@@ -186,23 +183,19 @@ function AccountRow({
                   confirm={`Remove “${d.name}” (${bankDocumentTypeLabel(d.type)})?`}
                   successMessage="Document removed"
                 >
-                  <Trash2 className="size-3.5 text-subtle" />
+                  <Trash2 className="size-4 text-subtle" />
                 </ActionButton>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-        <span className="text-muted">Proof:</span>
-        {proof ? (
-          <span className="inline-flex items-center gap-1 text-success">
-            <Check className="size-3.5" aria-hidden />
-            {bankDocumentTypeLabel(proof.type)}
-          </span>
-        ) : (
-          <span className="font-medium text-warning">Passbook front page or cancelled cheque — not uploaded</span>
+              ) : undefined
+            }
+          />
+        ))}
+        {!proof && (
+          <MissingTile
+            title="Passbook front page or cancelled cheque"
+            hint="Proof not uploaded"
+            tone="warning"
+            action={canEdit ? <DocumentDialog personId={personId} account={a} slot /> : undefined}
+          />
         )}
       </div>
     </li>
@@ -297,8 +290,11 @@ function AccountDialog({ personId, holderName, hasSalaryAccount, account }: { pe
   );
 }
 
-/** Upload a passbook page, cancelled cheque or other proof to an account. The missing proof type is preselected. */
-function DocumentDialog({ personId, account }: { personId: string; account: BankAccountView }) {
+/**
+ * Upload a passbook page, cancelled cheque or other proof to an account. The missing proof type is preselected; `slot`
+ * renders the compact "Upload" trigger of the empty proof slot.
+ */
+function DocumentDialog({ personId, account, slot }: { personId: string; account: BankAccountView; slot?: boolean }) {
   const [open, setOpen] = useState(false);
   const hasProof = account.documents.some((d) => BANK_PROOF_TYPES.includes(d.type));
   return (
@@ -309,7 +305,7 @@ function DocumentDialog({ personId, account }: { personId: string; account: Bank
       description={`${account.bankName} ${maskAccount(account.accountNumber)} · only you and authorised HR can open it`}
       trigger={
         <Button variant="secondary" size="sm" icon={<Upload className="size-3.5" />}>
-          <span className="max-sm:sr-only">{hasProof ? "Document" : "Passbook"}</span>
+          <span className="max-sm:sr-only">{slot ? "Upload" : hasProof ? "Document" : "Passbook"}</span>
         </Button>
       }
     >

@@ -1,6 +1,6 @@
-import { FileText, Lock } from "lucide-react";
+import type { ReactNode } from "react";
+import { Lock } from "lucide-react";
 import type { DocumentCategory } from "@/lib/config-defaults";
-import { fileSize } from "@/lib/format";
 import { fmtDate } from "@/lib/time";
 import { Alert } from "@/components/ui/page";
 import { Card, CardHeader } from "@/components/ui/card";
@@ -10,6 +10,7 @@ import type { DocView, DocumentsData } from "../_lib/documents-data";
 import { DeleteDocumentButton, DocumentAccessSwitch, UploadDocumentButton, type CategoryOption } from "./document-dialogs";
 import { BANK_CATEGORY } from "../_lib/bank";
 import { EDUCATION_CATEGORY } from "../_lib/education";
+import { FileTile, MissingTile } from "./file-tile";
 
 export interface DocumentPerms {
   /** May upload new documents (self, staff.edit, interns.manage for interns). */
@@ -80,104 +81,151 @@ export function DocumentsPanel({
           <DocumentAccessSwitch personId={personId} name={access.name} open={access.open} />
         </Card>
       )}
-      <Card>
+      <Card className="@container">
         <CardHeader
           title="Documents"
           subtitle={perms.seeConfidential ? "Restricted documents are marked and only listed for authorised people." : "Restricted documents are visible only to authorised people."}
           action={perms.upload && uploadable.length > 0 ? <UploadDocumentButton personId={personId} categories={uploadable} /> : undefined}
         />
-        <div className="pb-2">
-          {categories.length === 0 && <p className="px-5 pb-4 text-[13px] text-muted">No document categories apply to this person type. Configure them under Configuration.</p>}
-          {categories.map((cat) => {
-            const docs = byCategory.get(cat.key) ?? [];
-            const hidden = cat.confidential && !perms.seeConfidential;
-            return (
-              <section key={cat.key} className="border-t border-line-soft first:border-t-0">
-                <div className="flex flex-wrap items-center gap-2 px-5 pt-3 pb-1.5">
-                  <h3 className="font-display text-sm font-semibold text-ink">{cat.label}</h3>
-                  {cat.required && <Tag tone="gray">Required</Tag>}
-                  {cat.confidential && (
-                    <Tag tone="gray" className="gap-1 bg-navy text-white">
-                      <Lock className="size-3" /> Restricted
-                    </Tag>
+        {categories.length === 0 ? (
+          <p className="px-5 pb-4 text-[13px] text-muted">No document categories apply to this person type. Configure them under Configuration.</p>
+        ) : (
+          <div className="grid gap-3 px-4 pb-4 sm:px-5 sm:pb-5 @3xl:grid-cols-2">
+            {categories.map((cat) => {
+              const docs = byCategory.get(cat.key) ?? [];
+              const hidden = cat.confidential && !perms.seeConfidential;
+              const option = uploadable.find((o) => o.key === cat.key);
+              return (
+                <CategoryBox key={cat.key} category={cat} docs={hidden ? [] : docs} missing={missing.has(cat.key)}>
+                  {hidden ? (
+                    <p className="flex items-center gap-2 rounded-xl bg-field px-3 py-3 text-[13px] text-muted">
+                      <Lock className="size-4 shrink-0 text-subtle" aria-hidden />
+                      {missing.has(cat.key) ? "Not on file." : "On file — visible to authorised HR staff only."}
+                    </p>
+                  ) : docs.length === 0 ? (
+                    <MissingTile
+                      title={cat.required ? "Not uploaded yet" : "Nothing uploaded"}
+                      hint={cat.required ? "Required for the record" : "Optional"}
+                      tone={cat.required ? "warning" : "muted"}
+                      action={perms.upload && option ? <UploadDocumentButton personId={personId} categories={[option]} label="Upload" size="sm" /> : undefined}
+                    />
+                  ) : (
+                    docs.map((d) => <DocTile key={d.id} doc={d} personId={personId} perms={perms} categories={categories} />)
                   )}
-                  {missing.has(cat.key) && <Chip tone="amber" size="sm">Missing</Chip>}
-                </div>
-                {hidden ? (
-                  <p className="px-5 pb-3 text-[13px] text-muted">{missing.has(cat.key) ? "Not on file." : "On file — visible to authorised HR staff only."}</p>
-                ) : docs.length === 0 ? (
-                  <p className="px-5 pb-3 text-[13px] text-muted">{cat.required ? "Not uploaded yet." : "Nothing uploaded."}</p>
-                ) : (
-                  <ul>
-                    {docs.map((d) => (
-                      <DocRow key={d.id} doc={d} personId={personId} perms={perms} categories={categories} />
-                    ))}
-                  </ul>
-                )}
-              </section>
-            );
-          })}
-          {orphanDocs.length > 0 && (
-            <section className="border-t border-line-soft">
-              <h3 className="px-5 pt-3 pb-1.5 font-display text-sm font-semibold text-ink">Other categories</h3>
-              <ul>
+                </CategoryBox>
+              );
+            })}
+            {orphanDocs.length > 0 && (
+              <CategoryBox category={{ label: "Other categories" }} docs={orphanDocs}>
                 {orphanDocs.map((d) => (
-                  <DocRow key={d.id} doc={d} personId={personId} perms={perms} categories={categories} />
+                  <DocTile key={d.id} doc={d} personId={personId} perms={perms} categories={categories} showCategory />
                 ))}
-              </ul>
-            </section>
-          )}
-        </div>
+              </CategoryBox>
+            )}
+          </div>
+        )}
       </Card>
     </div>
   );
 }
 
-function DocRow({ doc, personId, perms, categories }: { doc: DocView; personId: string; perms: DocumentPerms; categories: DocumentCategory[] }) {
+/** One document category: its name, flags and a status chip over its files (or the slot to upload one). */
+function CategoryBox({
+  category: cat,
+  docs,
+  missing,
+  children,
+}: {
+  category: Pick<DocumentCategory, "label"> & Partial<Pick<DocumentCategory, "required" | "confidential">>;
+  docs: DocView[];
+  missing?: boolean;
+  children: ReactNode;
+}) {
+  const expired = docs.some((d) => d.expiry.state === "expired");
+  const expiring = docs.some((d) => d.expiry.state === "expiring");
+  const status = missing ? (
+    <Chip tone="amber" size="sm">
+      Missing
+    </Chip>
+  ) : expired ? (
+    <Chip tone="red" size="sm">
+      Expired
+    </Chip>
+  ) : expiring ? (
+    <Chip tone="amber" size="sm">
+      Expiring
+    </Chip>
+  ) : docs.length > 0 ? (
+    <Chip tone="green" size="sm">
+      {docs.length === 1 ? "Uploaded" : `${docs.length} files`}
+    </Chip>
+  ) : null;
+  return (
+    <section className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-line">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-3.5 py-2.5">
+        <h3 className="min-w-0 font-display text-[13px] font-semibold break-words text-ink">{cat.label}</h3>
+        {cat.required && <Tag tone="gray">Required</Tag>}
+        {cat.confidential && (
+          <Tag tone="gray" className="gap-1 bg-navy text-white">
+            <Lock className="size-3" /> Restricted
+          </Tag>
+        )}
+        {status && <span className="ml-auto">{status}</span>}
+      </div>
+      <div className="flex flex-1 flex-col gap-2 bg-field/60 p-2.5">{children}</div>
+    </section>
+  );
+}
+
+function DocTile({ doc, personId, perms, categories, showCategory }: { doc: DocView; personId: string; perms: DocumentPerms; categories: DocumentCategory[]; showCategory?: boolean }) {
   const canReplace = perms.upload && (perms.manage || (perms.self && (!doc.confidential || Boolean(perms.restrictedUpload))));
   const category = categories.find((c) => c.key === doc.category);
   return (
-    <li className="flex flex-wrap items-start gap-3 px-5 py-2.5">
-      <FileText className="mt-0.5 size-[18px] shrink-0 text-muted" aria-hidden />
-      <div className="min-w-0 flex-1">
-        <a href={`/api/files/${doc.id}`} target="_blank" rel="noopener noreferrer" className="block text-sm font-semibold break-words text-ink hover:text-brand-600">
-          {doc.name}
-        </a>
-        <div className="text-xs text-muted">
-          {fileSize(doc.size)} · v{doc.version} · uploaded {fmtDate(doc.uploadedAt)}
-          {doc.uploadedByName ? ` by ${doc.uploadedByName}` : ""}
+    <FileTile
+      title={showCategory ? doc.categoryLabel : undefined}
+      file={doc.id}
+      name={doc.name}
+      size={doc.size}
+      meta={`v${doc.version}`}
+      uploadedAt={doc.uploadedAt}
+      uploadedByName={doc.uploadedByName}
+      note={doc.notes}
+      actions={
+        <>
+          {canReplace && category && (
+            <UploadDocumentButton
+              personId={personId}
+              categories={[toOption(category)]}
+              replace={{ id: doc.id, category: doc.category, name: doc.name }}
+              label="Upload new version"
+              iconOnly
+            />
+          )}
+          {perms.manage && <DeleteDocumentButton personId={personId} fileId={doc.id} name={doc.name} />}
+        </>
+      }
+    >
+      {doc.expiry.state !== "none" && (
+        <div className="mt-1.5">
+          <ExpiryChip doc={doc} />
         </div>
-        {doc.notes && <div className="mt-0.5 text-xs text-ink-2">{doc.notes}</div>}
-        {doc.versions.length > 0 && (
-          <details className="mt-1 text-xs text-muted">
-            <summary className="cursor-pointer font-medium text-brand-600">Version history ({doc.versions.length} earlier)</summary>
-            <ul className="mt-1 flex flex-col gap-0.5 pl-3">
-              {doc.versions.map((v) => (
-                <li key={v.id}>
-                  <a href={`/api/files/${v.id}`} target="_blank" rel="noopener noreferrer" className="hover:text-brand-600">
-                    v{v.version} · {v.name}
-                  </a>{" "}
-                  · {fmtDate(v.uploadedAt)}
-                  {v.uploadedByName ? ` · ${v.uploadedByName}` : ""}
-                </li>
-              ))}
-            </ul>
-          </details>
-        )}
-      </div>
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-        <ExpiryChip doc={doc} />
-        {canReplace && category && (
-          <UploadDocumentButton
-            personId={personId}
-            categories={[{ key: category.key, label: category.label, hasExpiry: category.hasExpiry, confidential: category.confidential }]}
-            replace={{ id: doc.id, category: doc.category, name: doc.name }}
-            label="New version"
-            size="sm"
-          />
-        )}
-        {perms.manage && <DeleteDocumentButton personId={personId} fileId={doc.id} name={doc.name} />}
-      </div>
-    </li>
+      )}
+      {doc.versions.length > 0 && (
+        <details className="mt-1.5 text-xs text-muted">
+          <summary className="cursor-pointer font-medium text-brand-600">Version history ({doc.versions.length} earlier)</summary>
+          <ul className="mt-1 flex flex-col gap-0.5 border-l-2 border-line pl-3">
+            {doc.versions.map((v) => (
+              <li key={v.id} className="break-words">
+                <a href={`/api/files/${v.id}`} target="_blank" rel="noopener noreferrer" className="hover:text-brand-600">
+                  v{v.version} · {v.name}
+                </a>{" "}
+                · {fmtDate(v.uploadedAt)}
+                {v.uploadedByName ? ` · ${v.uploadedByName}` : ""}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </FileTile>
   );
 }

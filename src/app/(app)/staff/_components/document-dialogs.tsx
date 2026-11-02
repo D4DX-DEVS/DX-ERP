@@ -25,6 +25,7 @@ export function UploadDocumentButton({
   label = "Upload document",
   variant = "secondary",
   size = "md",
+  iconOnly = false,
 }: {
   personId: string;
   categories: CategoryOption[];
@@ -32,6 +33,8 @@ export function UploadDocumentButton({
   label?: string;
   variant?: ButtonProps["variant"];
   size?: ButtonProps["size"];
+  /** Small ghost icon button (row action); `label` becomes its tooltip and accessible name. */
+  iconOnly?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [category, setCategory] = useState(replace?.category ?? "");
@@ -44,9 +47,15 @@ export function UploadDocumentButton({
       title={replace ? "Upload new version" : "Upload document"}
       description={replace ? `Replaces “${replace.name}”. The previous version stays in the history.` : "Choose the category first, then attach the file."}
       trigger={
-        <Button variant={variant} size={size} icon={<Upload className="size-4" />}>
-          {label}
-        </Button>
+        iconOnly ? (
+          <Button variant="ghost" size="icon-sm" aria-label={replace ? `${label}: ${replace.name}` : label} title={label}>
+            <Upload className="size-4 text-subtle" />
+          </Button>
+        ) : (
+          <Button variant={variant} size={size} icon={<Upload className="size-4" />}>
+            {label}
+          </Button>
+        )
       }
     >
       <ActionForm
