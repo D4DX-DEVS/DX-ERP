@@ -10,19 +10,19 @@ import { ID_PREFIX, nextNumber } from "@/lib/counters";
 import { db } from "@/lib/db";
 import { recalcAttendanceDays } from "@/lib/domain/attendance-calc";
 import { runBatch } from "@/lib/domain/batch";
-import { leaveBalances, leaveYearOf, leaveYearRange } from "@/lib/domain/leave-balance";
+import { leaveBalances, leaveYearOf } from "@/lib/domain/leave-balance";
+import { carryForwardBalances } from "@/lib/domain/leave-carry";
 import { resolveFileRefs } from "@/lib/files";
-import { Attendance, LeaveBalance, LeaveRequest, LeaveType, StoredFile, User, newId, type ILeaveRequest, type LeaveStatus } from "@/lib/models";
+import { Attendance, Holiday, LeaveBalance, LeaveRequest, LeaveType, StoredFile, User, newId, type ILeaveRequest, type LeaveStatus } from "@/lib/models";
 import { notify, notifyPermission } from "@/lib/notify";
 import { getSettings } from "@/lib/settings";
-import { increment, inList, jsonPush, notInList } from "@/lib/sql";
+import { increment, inList, jsonPush } from "@/lib/sql";
 import { statusLabel } from "@/lib/status";
 import { fmtDate, todayKey } from "@/lib/time";
 import { isObjectId, zs } from "@/lib/validation";
-import { EXITED_STATUSES, STAFF_TYPES } from "../attendance/_lib/access";
+import { STAFF_TYPES } from "../attendance/_lib/access";
 import { leaveDayList } from "./_lib/days";
 import { daysLabel, leaveRangeLabel } from "./_lib/format";
-import { bulkLeaveBalances } from "./_lib/balances";
 
 const ACTIVE_STATUSES: LeaveStatus[] = ["pending_manager", "pending_hr", "approved"];
 const PENDING_STATUSES: LeaveStatus[] = ["pending_manager", "pending_hr"];
@@ -152,6 +152,18 @@ export async function applyLeave(input: Record<string, unknown>): Promise<Action
     const days = data.halfDay ? (list.length ? 0.5 : 0) : list.length;
     if (days === 0) throw new ActionError("The selected dates have no working days. Weekends and holidays aren't counted.", { startDate: "No working days in this range" });
 
+    if (type.kind === "optional_holiday") {
+      const optional = await db()
+        .select({ date: Holiday.date })
+        .from(Holiday)
+        .where(and(inList(Holiday.date, list), eq(Holiday.optional, true)));
+      const allowed = new Set(optional.map((h) => h.date));
+      const other = list.find((d) => !allowed.has(d));
+      if (other) {
+        throw new ActionError(`${type.name} can only be taken on the company's optional holidays, and ${fmtDate(other)} isn't one. Pick a date from Upcoming holidays.`, { startDate: "Not an optional holiday" });
+      }
+    }
+
     // Overlap detection against the person's pending / approved requests.
     const overlapping = await db()
       .select({
@@ -188,7 +200,8 @@ export async function applyLeave(input: Record<string, unknown>): Promise<Action
       throw new ActionError(`${type.name} longer than ${daysLabel(type.requiresAttachmentAfterDays)} needs a supporting document.`, { attachments: "Attach a document" });
     }
 
-    if (!settings.leave.allowNegativeBalance) {
+    // Comp-off and optional holidays can never go below zero: there is nothing to borrow against.
+    if (!settings.leave.allowNegativeBalance || type.kind !== "standard") {
       const balances = await leaveBalances(user._id, user.personType, year, settings, today);
       const balance = balances.find((b) => b.leaveTypeId === type._id);
       if (balance && !balance.unlimited && days > balance.available) {
@@ -524,56 +537,9 @@ export async function carryForward(year: number): Promise<ActionResult<{ updated
   return runAction(async () => {
     const actor = await actionPermission("leave.manage");
     const y = parse(zs.num("Year", { min: 2000, max: 2100 }), year);
-    const settings = await getSettings();
-    const asOf = leaveYearRange(y, settings).to;
-    const carryTypes = await db()
-      .select()
-      .from(LeaveType)
-      .where(and(eq(LeaveType.active, true), eq(LeaveType.carryForward, true)));
-    if (carryTypes.length === 0) throw new ActionError("No leave type has carry-forward turned on.");
-
-    const people = await db()
-      .select({ _id: User._id, personType: User.personType })
-      .from(User)
-      .where(and(inList(User.personType, STAFF_TYPES), notInList(User.status, EXITED_STATUSES)));
-    const { rows } = await bulkLeaveBalances(people.map((p) => ({ id: p._id, personType: p.personType })), y, settings, asOf);
-    const existing = await db()
-      .select({ user: LeaveBalance.user, leaveType: LeaveBalance.leaveType, carriedForward: LeaveBalance.carriedForward })
-      .from(LeaveBalance)
-      .where(
-        and(
-          eq(LeaveBalance.year, y + 1),
-          inList(
-            LeaveBalance.leaveType,
-            carryTypes.map((t) => t._id),
-          ),
-        ),
-      );
-    const current = new Map(existing.map((b) => [`${b.user}:${b.leaveType}`, b.carriedForward]));
-
-    const at = new Date();
-    const ops: BatchItem<"sqlite">[] = [];
-    for (const person of people) {
-      for (const t of carryTypes) {
-        const row = rows.get(person._id)?.get(t._id);
-        if (!row) continue;
-        const carry = Math.min(Math.max(0, row.available), t.maxCarryForward);
-        const previous = current.get(`${person._id}:${t._id}`) ?? 0;
-        if (carry === previous) continue;
-        const note = { _id: newId(), amount: carry, reason: `Carried forward from ${y}`, by: actor._id, byName: actor.name, at };
-        ops.push(
-          db()
-            .insert(LeaveBalance)
-            .values({ user: person._id, leaveType: t._id, year: y + 1, carriedForward: carry, notes: [note] })
-            .onConflictDoUpdate({
-              target: [LeaveBalance.user, LeaveBalance.leaveType, LeaveBalance.year],
-              set: { carriedForward: carry, notes: jsonPush(LeaveBalance.notes, note) },
-            }),
-        );
-      }
-    }
-    await runBatch(ops);
-    await audit(actor, { action: "update", entity: "leave_balance", ref: `${y} → ${y + 1}`, summary: `Carried leave forward from ${y} to ${y + 1}: ${ops.length} balances updated` });
-    return { updated: ops.length };
+    const { updated, carryTypes } = await carryForwardBalances(y, actor);
+    if (carryTypes === 0) throw new ActionError("No leave type has carry-forward turned on.");
+    await audit(actor, { action: "update", entity: "leave_balance", ref: `${y} → ${y + 1}`, summary: `Carried leave forward from ${y} to ${y + 1}: ${updated} balances updated` });
+    return { updated };
   });
 }

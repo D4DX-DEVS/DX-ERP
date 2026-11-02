@@ -7,6 +7,7 @@ import { Dialog as D } from "radix-ui";
 import { Bell, CheckSquare, Clock, Home, LayoutGrid, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { NavSection } from "@/lib/nav";
+import { useLiveUnread } from "@/lib/unread";
 import { Avatar } from "@/components/ui/avatar";
 import { NAV_ICONS } from "./nav-icon";
 import { isActive, SignOutButton } from "./sidebar";
@@ -16,11 +17,12 @@ import type { ShellUser } from "./types";
 export function TabBar({ sections, user, unread }: { sections: NavSection[]; user: ShellUser; unread: number }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const inbox = useLiveUnread(unread);
   const tabs = [
     { key: "home", label: "Home", href: "/dashboard", icon: Home },
     { key: "time", label: "Time", href: "/attendance", icon: Clock },
     { key: "tasks", label: "Tasks", href: "/tasks", icon: CheckSquare },
-    { key: "inbox", label: "Inbox", href: "/notifications", icon: Bell, badge: unread },
+    { key: "inbox", label: "Inbox", href: "/notifications", icon: Bell, badge: inbox },
   ];
   const tabClass = (active: boolean) =>
     cn("flex flex-1 flex-col items-center justify-center gap-1 rounded-[10px] text-[11px] font-semibold", active ? "text-brand-600" : "text-muted");

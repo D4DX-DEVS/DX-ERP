@@ -166,6 +166,7 @@ async function SectionBody({ section, sp, user }: { section: string; sp: SearchP
         color: t.color ?? undefined,
         annualQuota: t.annualQuota,
         accrual: t.accrual,
+        kind: t.kind,
         carryForward: t.carryForward,
         maxCarryForward: t.maxCarryForward,
         paid: t.paid,

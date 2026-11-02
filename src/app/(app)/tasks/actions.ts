@@ -58,9 +58,9 @@ async function loadTask(user: CurrentUser, id: string) {
   const [task] = await db().select().from(Task).where(and(eq(Task._id, id), filter)).limit(1);
   if (!task) throw new ActionError("Task not found, or you don't have access to it.");
   const [project] = task.project
-    ? await db().select({ manager: Project.manager, title: Project.title, projectNo: Project.projectNo, milestones: Project.milestones }).from(Project).where(eq(Project._id, task.project)).limit(1)
+    ? await db().select({ manager: Project.manager, team: Project.team, title: Project.title, projectNo: Project.projectNo, milestones: Project.milestones }).from(Project).where(eq(Project._id, task.project)).limit(1)
     : [];
-  return { task, project, caps: taskCaps(user, task, project?.manager) };
+  return { task, project, caps: taskCaps(user, task, project) };
 }
 
 async function assertStaff(ids: string[], field: string) {
@@ -148,7 +148,7 @@ export async function createTask(input: Record<string, unknown>): Promise<Action
       milestone = milestone ?? parentTask.milestone ?? undefined;
     }
     const [project] = projectId
-      ? await db().select({ _id: Project._id, manager: Project.manager, title: Project.title }).from(Project).where(and(eq(Project._id, projectId), projectFilter(user))).limit(1)
+      ? await db().select({ _id: Project._id, manager: Project.manager, team: Project.team, title: Project.title }).from(Project).where(and(eq(Project._id, projectId), projectFilter(user))).limit(1)
       : [];
     if (projectId && !project) throw new ActionError("The project no longer exists, or you don't have access to it.", { project: "Not found" });
     if (!projectId && !can(user, "tasks.manage")) throw new ActionError("Choose a project.", { project: "Choose a project" });

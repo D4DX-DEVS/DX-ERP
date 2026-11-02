@@ -24,8 +24,8 @@ export default async function EditTaskPage({ params }: { params: Promise<{ id: s
     .where(and(eq(Task._id, id), await taskFilter(user)))
     .limit(1);
   if (!task) notFound();
-  const [project] = task.project ? await db().select({ _id: Project._id, manager: Project.manager }).from(Project).where(eq(Project._id, task.project)).limit(1) : [];
-  if (!taskCaps(user, task, project?.manager).manage) forbidden();
+  const [project] = task.project ? await db().select({ _id: Project._id, manager: Project.manager, team: Project.team }).from(Project).where(eq(Project._id, task.project)).limit(1) : [];
+  if (!taskCaps(user, task, project).manage) forbidden();
 
   const settings = await getSettings();
   const options = await loadTaskFormOptions(user, settings, project ? [project._id] : []);

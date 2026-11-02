@@ -29,7 +29,8 @@ export default async function NewProjectPage() {
               description: "",
               scope: "",
               deliverables: "",
-              manager: "",
+              // Leads who create a project lead it unless they pick someone else (only the super admin sees every project).
+              manager: can(user, "projects.view_all") ? "" : user.id,
               team: [],
               startDate: "",
               targetDate: "",

@@ -9,6 +9,7 @@ import {
   ROLE_KEYS,
   ROLE_LABELS,
   isPermission,
+  SUPER_ADMIN_ONLY,
   type Permission,
 } from "@/lib/rbac/permissions";
 
@@ -31,8 +32,9 @@ export async function ensureRoles(): Promise<void> {
  */
 export function effectivePermissions(roleKey: string, stored: string[] | null | undefined): Permission[] {
   if (roleKey === "super_admin") return ALL_PERMISSIONS;
-  if (!stored) return DEFAULT_ROLE_PERMISSIONS[roleKey as keyof typeof DEFAULT_ROLE_PERMISSIONS] ?? [];
-  return stored.filter(isPermission);
+  const granted = stored ? stored.filter(isPermission) : (DEFAULT_ROLE_PERMISSIONS[roleKey as keyof typeof DEFAULT_ROLE_PERMISSIONS] ?? []);
+  // Roles saved before these became super-admin-only may still list them; they never take effect.
+  return granted.filter((p) => !SUPER_ADMIN_ONLY.includes(p));
 }
 
 /** Effective permissions for a role key. Super admin always has everything. */

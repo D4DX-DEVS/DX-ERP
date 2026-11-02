@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { CalendarPlus, FileBarChart, LogOut } from "lucide-react";
 import { can, canAny, isInternLike, isStaff, requireUser, type CurrentUser } from "@/lib/auth/session";
 import { param, withParams, type SearchParams } from "@/lib/query";
@@ -16,7 +17,9 @@ import { OperationalSummaryCard, summaryAccess } from "./_components/org-summary
 import { OverdueTasksCard, PipelineCard, ProjectsCard } from "./_components/org-work";
 import { AnnouncementsCard, LatestNotificationsCard, LeaveCard, MyMovementsCard, MyTasksCard, TimesheetWeekCard } from "./_components/personal";
 import { FeedbackCard, InternAttendanceCard, InternshipCard, InternTasksCard, LearningCard, MentorCard } from "./_components/intern";
+import { ProfileCompletionNudge } from "./_components/profile-nudge";
 import { Widget } from "./_components/widget";
+import { WidgetBoundary } from "./_components/widget-boundary";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
@@ -262,6 +265,14 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </>
         }
       />
+
+      {staff && (
+        <WidgetBoundary title="Profile completion">
+          <Suspense fallback={null}>
+            <ProfileCompletionNudge userId={user.id} />
+          </Suspense>
+        </WidgetBoundary>
+      )}
 
       {tabs && (
         <Segmented

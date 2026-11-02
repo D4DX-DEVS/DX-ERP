@@ -10,7 +10,8 @@ import { Tag } from "@/components/ui/chip";
 import { Field, FormGrid, useServerAction } from "@/components/ui/form";
 import { Checkbox, Input, Select, Textarea } from "@/components/ui/input";
 import { Alert } from "@/components/ui/page";
-import { PERMISSION_GROUPS } from "@/lib/rbac/permissions";
+import { cn } from "@/lib/cn";
+import { PERMISSION_GROUPS, SUPER_ADMIN_ONLY } from "@/lib/rbac/permissions";
 import { plural } from "@/lib/format";
 import { FormDialog } from "../settings/ui";
 import { createRole, deleteRole, resetRolePermissions, saveRolePermissions, updateRoleDetails } from "./actions";
@@ -71,14 +72,18 @@ export function RoleEditor({ role }: { role: RoleView }) {
   const router = useRouter();
   const readOnly = role.key === "super_admin";
   const valid = PERMISSION_GROUPS.flatMap((g) => g.items.map((i) => i[0] as string));
-  const initial = valid.filter((p) => role.permissions.includes(p));
+  const reserved = new Set<string>(readOnly ? [] : SUPER_ADMIN_ONLY);
+  const initial = valid.filter((p) => role.permissions.includes(p) && !reserved.has(p));
   const [selected, setSelected] = useState<string[]>(readOnly ? valid : initial);
   const { pending, run } = useServerAction();
 
   const on = new Set(selected);
   const dirty = !readOnly && (selected.length !== initial.length || selected.some((p) => !initial.includes(p)));
   const toggle = (p: string) => setSelected((cur) => (cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p]));
-  const setGroup = (items: string[], value: boolean) => setSelected((cur) => (value ? [...new Set([...cur, ...items])] : cur.filter((p) => !items.includes(p))));
+  const setGroup = (items: string[], value: boolean) => {
+    const grantable = items.filter((p) => !reserved.has(p));
+    setSelected((cur) => (value ? [...new Set([...cur, ...grantable])] : cur.filter((p) => !grantable.includes(p))));
+  };
 
   return (
     <Card className="@container">
@@ -143,7 +148,7 @@ export function RoleEditor({ role }: { role: RoleView }) {
       <div className="flex flex-col gap-6 px-5 py-5">
         {PERMISSION_GROUPS.map((group) => {
           const keys = group.items.map((i) => i[0] as string);
-          const allOn = keys.every((k) => on.has(k));
+          const allOn = keys.filter((k) => !reserved.has(k)).every((k) => on.has(k));
           return (
             <fieldset key={group.module} className="flex flex-col gap-2">
               <div className="flex items-center justify-between gap-3">
@@ -157,15 +162,26 @@ export function RoleEditor({ role }: { role: RoleView }) {
                 )}
               </div>
               <div className="grid gap-x-6 @xl:grid-cols-2">
-                {group.items.map(([key, label]) => (
-                  <label key={key} className="flex cursor-pointer items-start gap-3 rounded-lg px-2 py-2 hover:bg-field">
-                    <Checkbox className="mt-0.5" checked={on.has(key)} disabled={readOnly} onChange={() => toggle(key)} />
-                    <span className="min-w-0">
-                      <span className="block text-sm text-ink">{label}</span>
-                      <span className="block font-mono text-[11px] text-subtle">{key}</span>
-                    </span>
-                  </label>
-                ))}
+                {group.items.map(([key, label]) => {
+                  const locked = reserved.has(key);
+                  return (
+                    <label key={key} className={cn("flex items-start gap-3 rounded-lg px-2 py-2", locked ? "cursor-not-allowed opacity-70" : "cursor-pointer hover:bg-field")}>
+                      <Checkbox className="mt-0.5" checked={on.has(key)} disabled={readOnly || locked} onChange={() => toggle(key)} />
+                      <span className="min-w-0">
+                        <span className="block text-sm text-ink">
+                          {label}
+                          {locked && (
+                            <Tag tone="gray" className="ml-2 align-middle">
+                              <Lock className="mr-1 inline size-3" aria-hidden />
+                              Super admin only
+                            </Tag>
+                          )}
+                        </span>
+                        <span className="block font-mono text-[11px] text-subtle">{key}</span>
+                      </span>
+                    </label>
+                  );
+                })}
               </div>
             </fieldset>
           );

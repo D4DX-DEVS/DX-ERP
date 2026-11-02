@@ -2,7 +2,7 @@ import { and, eq, ne, sql, type SQL } from "drizzle-orm";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import { can, isStaff, requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { Expense, LeaveRequest, Movement, Notification, Task, User } from "@/lib/models";
+import { CompOffClaim, Expense, LeaveRequest, Movement, Notification, Task, User } from "@/lib/models";
 import { buildNav } from "@/lib/nav";
 import { presenceFor } from "@/lib/presence";
 import { getSettings } from "@/lib/settings";
@@ -32,13 +32,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       movementPending: countOf(Movement, can(user, "movement.approve") ? and(awaitingApproval, ne(Movement.user, me)) : and(awaitingApproval, eq(Movement.approver, me))),
       leavePendingMgr: countOf(LeaveRequest, and(eq(LeaveRequest.status, "pending_manager"), eq(LeaveRequest.manager, me))),
       leavePendingHr: can(user, "leave.approve") ? countOf(LeaveRequest, and(eq(LeaveRequest.status, "pending_hr"), ne(LeaveRequest.user, me))) : zero,
+      compOffPending: countOf(CompOffClaim, and(eq(CompOffClaim.status, "pending"), can(user, "leave.approve") ? ne(CompOffClaim.user, me) : eq(CompOffClaim.manager, me))),
       myOpenTasks: countOf(Task, and(jsonHas(Task.assignees, me), notInList(Task.status, doneTaskStatuses))),
       expensesPending: can(user, "expenses.approve") ? countOf(Expense, and(eq(Expense.status, "submitted"), ne(Expense.user, me))) : zero,
     })
     .from(User)
     .where(eq(User._id, me))
     .limit(1);
-  const { reports = 0, mentees = 0, unread = 0, movementPending = 0, leavePendingMgr = 0, leavePendingHr = 0, myOpenTasks = 0, expensesPending = 0 } = counts ?? {};
+  const { reports = 0, mentees = 0, unread = 0, movementPending = 0, leavePendingMgr = 0, leavePendingHr = 0, compOffPending = 0, myOpenTasks = 0, expensesPending = 0 } = counts ?? {};
 
   const sections = buildNav({
     user,
@@ -46,7 +47,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     isMentor: mentees > 0,
     badges: {
       movement: { count: movementPending, tone: "alert" },
-      leave: { count: leavePendingMgr + leavePendingHr },
+      leave: { count: leavePendingMgr + leavePendingHr + compOffPending },
       tasks: { count: myOpenTasks },
       expenses: { count: expensesPending },
     },

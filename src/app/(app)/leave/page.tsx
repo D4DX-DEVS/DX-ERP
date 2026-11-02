@@ -1,6 +1,7 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { and, asc, desc, eq, gte, lte, ne } from "drizzle-orm";
-import { ReasonAction } from "@/components/ui/actions";
+import { ActionButton, ReasonAction } from "@/components/ui/actions";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { StatusChip, Tag } from "@/components/ui/chip";
@@ -10,22 +11,26 @@ import { AttachmentList } from "@/components/ui/file-upload";
 import { isStaff, requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { leaveBalances, leaveYearOf, leaveYearRange } from "@/lib/domain/leave-balance";
-import { Holiday, LeaveRequest, LeaveType } from "@/lib/models";
+import { CompOffClaim, Holiday, LeaveRequest, LeaveType } from "@/lib/models";
 import { namesFor } from "@/lib/people";
 import { plain } from "@/lib/serialize";
 import { getSettings } from "@/lib/settings";
 import { inList, jsonHas } from "@/lib/sql";
-import { addDays, fmtDate, timeAgo, todayKey } from "@/lib/time";
+import { param, type SearchParams } from "@/lib/query";
+import { addDays, fmtDate, formatDuration, timeAgo, todayKey, weekday } from "@/lib/time";
 import { cancelLeave } from "./actions";
 import { ApplyLeaveForm } from "./apply-form";
+import { withdrawCompOff } from "./comp-off-actions";
+import { CompOffClaimDialog } from "./_components/comp-off-claim";
 import { LeaveTabs } from "./_components/tabs";
 import { leaveAccess } from "./_lib/access";
 import { daysLabel, leaveRangeLabel } from "./_lib/format";
 
 export const metadata = { title: "My leave" };
 
-export default async function MyLeavePage() {
+export default async function MyLeavePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
+  const sp = await searchParams;
   if (!isStaff(user)) redirect("/leave/approvals");
   const settings = await getSettings();
   const access = await leaveAccess(user);
@@ -33,7 +38,7 @@ export default async function MyLeavePage() {
   const year = leaveYearOf(today, settings);
   const range = leaveYearRange(year, settings);
 
-  const [balances, types, requests, holidays, pendingForMe] = await Promise.all([
+  const [balances, types, requests, holidays, pendingForMe, claims] = await Promise.all([
     leaveBalances(user._id, user.personType, year, settings, today),
     db()
       .select()
@@ -53,6 +58,7 @@ export default async function MyLeavePage() {
             : and(eq(LeaveRequest.status, "pending_manager"), eq(LeaveRequest.manager, user._id)),
         )
       : Promise.resolve(0),
+    db().select().from(CompOffClaim).where(eq(CompOffClaim.user, user._id)).orderBy(desc(CompOffClaim.createdAt)).limit(8),
   ]);
   const typeById = new Map(types.map((t) => [t._id, t]));
   const names = await namesFor([user.reportingManagerId, ...requests.map((r) => r.manager)]);
@@ -61,9 +67,17 @@ export default async function MyLeavePage() {
   const busy = requests.filter((r) => r.status === "pending_manager" || r.status === "pending_hr" || r.status === "approved").map((r) => ({ start: r.startDate, end: r.endDate, status: r.status }));
   const options = balances.map((b) => {
     const t = typeById.get(b.leaveTypeId);
-    return { id: b.leaveTypeId, name: b.name, allowHalfDay: t?.allowHalfDay ?? false, unlimited: b.unlimited, available: b.available, requiresAttachmentAfterDays: t?.requiresAttachmentAfterDays ?? undefined };
+    return { id: b.leaveTypeId, name: b.name, kind: b.kind, allowHalfDay: t?.allowHalfDay ?? false, unlimited: b.unlimited, available: b.available, requiresAttachmentAfterDays: t?.requiresAttachmentAfterDays ?? undefined };
   });
   const upcoming = holidays.filter((h) => h.date >= today).slice(0, 6);
+  // Optional holidays that can still be taken: today or later, on a working day, not already requested.
+  const optionalDates = holidays
+    .filter((h) => h.optional && h.date >= today && settings.attendance.workingDays.includes(weekday(h.date)) && !busy.some((b) => b.start <= h.date && b.end >= h.date))
+    .map((h) => ({ date: h.date, name: h.name }));
+  const optionalType = balances.find((b) => b.kind === "optional_holiday" && b.available > 0);
+  const takeDate = param(sp, "oh");
+  const initial = optionalType && optionalDates.some((h) => h.date === takeDate) ? { typeId: optionalType.leaveTypeId, date: takeDate } : undefined;
+  const compOff = balances.find((b) => b.kind === "comp_off");
   const approvalNote = managerName ? `Approval: ${managerName} → HR only when the leave type requires it` : "Your request goes to HR for approval.";
 
   return (
@@ -90,8 +104,11 @@ export default async function MyLeavePage() {
             const notes = [
               b.pending > 0 && `${b.pending} pending`,
               b.carriedForward > 0 && `${b.carriedForward} carried forward`,
-              t?.accrual === "monthly" && `Accrues monthly · ${b.accrued} of ${b.quota} so far`,
-              t?.carryForward && t.maxCarryForward > 0 && `Carry forward up to ${t.maxCarryForward}`,
+              b.kind === "standard" && t?.accrual === "monthly" && `Accrues monthly · ${b.accrued} of ${b.quota} so far`,
+              b.prorated && `Pro-rated from ${b.annualQuota}/year for the months you're employed`,
+              b.kind === "comp_off" && `${b.accrued} earned from comp-off claims`,
+              b.kind === "optional_holiday" && "Only on optional holidays",
+              t?.carryForward && t.maxCarryForward > 0 ? `Carry forward up to ${t.maxCarryForward}` : !b.unlimited && `Resets ${fmtDate(addDays(range.to, 1), "d MMM yyyy")}`,
               b.unlimited && "Not balance-limited",
               t?.requiresAttachmentAfterDays != null && `Document needed after ${t.requiresAttachmentAfterDays} days`,
             ].filter(Boolean) as string[];
@@ -125,6 +142,8 @@ export default async function MyLeavePage() {
                 allowNegative={settings.leave.allowNegativeBalance}
                 busy={busy}
                 approvalNote={approvalNote}
+                optionalHolidays={optionalType ? optionalDates : []}
+                initial={initial}
               />
             )}
           </CardBody>
@@ -140,9 +159,14 @@ export default async function MyLeavePage() {
                 <ul>
                   {upcoming.map((h) => (
                     <li key={h.date} className="flex items-center justify-between gap-3 border-t border-line-soft py-2 text-[13px] first:border-t-0 first:pt-0">
-                      <span className="flex items-center gap-2">
+                      <span className="flex flex-wrap items-center gap-2">
                         {h.name}
                         {h.optional && <Tag>Optional</Tag>}
+                        {h.optional && optionalType && optionalDates.some((o) => o.date === h.date) && (
+                          <Link href={`/leave?oh=${h.date}#apply`} className="text-xs font-semibold text-brand-600 hover:underline">
+                            Take it
+                          </Link>
+                        )}
                       </span>
                       <span className="shrink-0 text-muted">{fmtDate(h.date, "EEE d MMM")}</span>
                     </li>
@@ -151,6 +175,53 @@ export default async function MyLeavePage() {
               )}
             </CardBody>
           </Card>
+
+          {compOff && (
+            <Card id="comp-off" className="scroll-mt-20">
+              <CardHeader
+                title="Comp-off"
+                subtitle={`${compOff.available} day${compOff.available === 1 ? "" : "s"} available · lapses ${fmtDate(range.to, "d MMM yyyy")}`}
+                action={
+                  <CompOffClaimDialog
+                    min={addDays(today, -settings.leave.compOffClaimDays)}
+                    max={today}
+                    windowDays={settings.leave.compOffClaimDays}
+                    fullDay={formatDuration(settings.attendance.fullDayMinutes)}
+                    halfDay={formatDuration(settings.attendance.halfDayMinutes)}
+                  />
+                }
+              />
+              <CardBody className="pb-3">
+                {claims.length === 0 ? (
+                  <p className="text-[13px] text-muted">Worked on a weekend or company holiday? Claim a comp-off within {settings.leave.compOffClaimDays} days and take it as leave once approved.</p>
+                ) : (
+                  <ul>
+                    {claims.map((c) => (
+                      <li key={c._id} className="flex flex-wrap items-center justify-between gap-2 border-t border-line-soft py-2 text-[13px] first:border-t-0 first:pt-0">
+                        <span className="min-w-0">
+                          <span className="block font-semibold text-ink">
+                            {fmtDate(c.workDate, "EEE d MMM")} · {daysLabel(c.days)}
+                          </span>
+                          <span className="block text-xs text-muted">
+                            {c.claimNo}
+                            {c.decisionNote && c.status !== "pending" ? ` · ${c.decisionNote}` : ""}
+                          </span>
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <StatusChip domain="correction" value={c.status} size="sm" />
+                          {c.status === "pending" && (
+                            <ActionButton action={withdrawCompOff.bind(null, c._id)} variant="ghost" size="sm" confirm="Withdraw this comp-off claim?" confirmTone="danger" successMessage="Claim withdrawn">
+                              Withdraw
+                            </ActionButton>
+                          )}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </CardBody>
+            </Card>
+          )}
         </div>
       </div>
 

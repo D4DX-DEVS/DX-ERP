@@ -4,9 +4,7 @@ import { db } from "@/lib/db";
 import {
   Attendance,
   AttendanceCorrection,
-  LeaveBalance,
   LeaveRequest,
-  LeaveType,
   PayrollRun,
   Payslip,
   PERSON_TYPES,
@@ -19,7 +17,7 @@ import {
 } from "@/lib/models";
 import { inList, jsonHasAny, jsonPath } from "@/lib/sql";
 import type { ExportColumn } from "@/lib/export";
-import { accruedFor, leaveYearOf, leaveYearRange } from "@/lib/domain/leave-balance";
+import { bulkLeaveBalances, leaveYearOf, leaveYearRange } from "@/lib/domain/leave-balance";
 import { getSettings } from "@/lib/settings";
 import { statusLabel } from "@/lib/status";
 import { addDays, diffDays, eachDay, fmtDate, fmtDateTime, fmtTime, monthRange, todayKey } from "@/lib/time";
@@ -708,55 +706,27 @@ const leaveUsage = defineReport<LeaveBalanceReportRow>({
     const year = Number(f.year) || leaveYearOf(today, settings);
     const { from, to } = leaveYearRange(year, settings);
     const staff = await loadStaff(f);
-    const ids = staff.map((p) => p.id);
-    const [types, balances, requests] = await Promise.all([
-      db().select().from(LeaveType).where(eq(LeaveType.active, true)).orderBy(asc(LeaveType.order), asc(LeaveType.name)),
-      db()
-        .select({ user: LeaveBalance.user, leaveType: LeaveBalance.leaveType, carriedForward: LeaveBalance.carriedForward, adjustment: LeaveBalance.adjustment, quotaOverride: LeaveBalance.quotaOverride })
-        .from(LeaveBalance)
-        .where(and(inList(LeaveBalance.user, ids), eq(LeaveBalance.year, year))),
-      db()
-        .select({ user: LeaveRequest.user, leaveType: LeaveRequest.leaveType, days: LeaveRequest.days, status: LeaveRequest.status })
-        .from(LeaveRequest)
-        .where(
-          and(
-            inList(LeaveRequest.user, ids),
-            inList(LeaveRequest.status, ["approved", "pending_manager", "pending_hr"]),
-            lte(LeaveRequest.startDate, to),
-            gte(LeaveRequest.endDate, from),
-          ),
-        ),
-    ]);
-    const balanceOf = new Map(balances.map((b) => [`${b.user}|${b.leaveType}`, b]));
-    const usage = new Map<string, { used: number; pending: number }>();
-    for (const r of requests) {
-      const key = `${r.user}|${r.leaveType}`;
-      const cur = usage.get(key) ?? { used: 0, pending: 0 };
-      if (r.status === "approved") cur.used += r.days;
-      else cur.pending += r.days;
-      usage.set(key, cur);
-    }
+    const { types, rows: balances } = await bulkLeaveBalances(
+      staff.map((p) => ({ id: p.id, personType: p.personType })),
+      year,
+      settings,
+      today,
+    );
     const rows: LeaveBalanceReportRow[] = [];
     for (const person of staff) {
       for (const t of types) {
-        if (!t.applicableTo.includes(person.personType)) continue;
-        const key = `${person.id}|${t._id}`;
-        const b = balanceOf.get(key);
-        const u = usage.get(key) ?? { used: 0, pending: 0 };
-        const quota = b?.quotaOverride ?? t.annualQuota;
-        const accrued = accruedFor(t, quota, year, today, settings);
-        const carried = b?.carriedForward ?? 0;
-        const adjustment = b?.adjustment ?? 0;
+        const b = balances.get(person.id)?.get(t._id);
+        if (!b) continue;
         rows.push({
           person,
           leaveType: t.name,
-          quota,
-          accrued,
-          carried,
-          adjustment,
-          used: u.used,
-          pending: u.pending,
-          available: t.paid ? Math.round((accrued + carried + adjustment - u.used - u.pending) * 2) / 2 : null,
+          quota: b.quota,
+          accrued: b.accrued,
+          carried: b.carriedForward,
+          adjustment: b.adjustment,
+          used: b.used,
+          pending: b.pending,
+          available: b.unlimited ? null : b.available,
         });
       }
     }
@@ -764,7 +734,7 @@ const leaveUsage = defineReport<LeaveBalanceReportRow>({
       columns: [
         ...personCols<LeaveBalanceReportRow>(),
         { header: "Leave type", value: (r) => r.leaveType },
-        { header: "Annual quota", value: (r) => r.quota, type: "number" },
+        { header: "Entitlement", value: (r) => r.quota, type: "number" },
         { header: "Accrued to date", value: (r) => r.accrued, type: "number" },
         { header: "Carried forward", value: (r) => r.carried, type: "number" },
         { header: "Adjustment", value: (r) => r.adjustment, type: "number" },
@@ -778,7 +748,7 @@ const leaveUsage = defineReport<LeaveBalanceReportRow>({
         { label: "Days used", value: String(rows.reduce((s, r) => s + r.used, 0)) },
         { label: "Days pending", value: String(rows.reduce((s, r) => s + r.pending, 0)) },
       ],
-      note: "Unpaid leave types have no balance limit, so “Available” is left blank for them.",
+      note: "Entitlement is the annual quota pro-rated for people who join or leave during the year (comp-off: credits earned). Unpaid leave types have no balance limit, so “Available” is left blank for them.",
     };
   },
 });

@@ -13,25 +13,25 @@ import { EmptyRow, TableWrap, THead, Td, Th, Tr } from "@/components/ui/table";
 import { LinkTabs } from "@/components/ui/tabs";
 import { requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { leaveYearOf } from "@/lib/domain/leave-balance";
-import { Department, Designation, LeaveRequest, LeaveType, User, type LeaveStatus } from "@/lib/models";
+import { bulkLeaveBalances, leaveYearOf } from "@/lib/domain/leave-balance";
+import { CompOffClaim, Department, Designation, Holiday, LeaveRequest, LeaveType, User, type LeaveStatus } from "@/lib/models";
 import { PAGE_SIZE, pageParam, param, type SearchParams } from "@/lib/query";
 import { plain } from "@/lib/serialize";
 import { getSettings } from "@/lib/settings";
 import { inList } from "@/lib/sql";
-import { fmtDate, timeAgo, todayKey } from "@/lib/time";
+import { fmtDate, formatDuration, timeAgo, todayKey } from "@/lib/time";
 import { LeaveTabs } from "../_components/tabs";
 import { leaveAccess } from "../_lib/access";
-import { bulkLeaveBalances } from "../_lib/balances";
 import { daysLabel, leaveRangeLabel } from "../_lib/format";
 import { DecisionBar } from "./decision-bar";
 import { ReasonAction } from "@/components/ui/actions";
 import { revokeLeave } from "../actions";
+import { revokeCompOff } from "../comp-off-actions";
 
 export const metadata = { title: "Leave approvals" };
 
 const PENDING: LeaveStatus[] = ["pending_manager", "pending_hr"];
-const TABS = ["pending", "approved", "rejected", "all"] as const;
+const TABS = ["pending", "approved", "rejected", "all", "compoff"] as const;
 
 export default async function LeaveApprovalsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
@@ -51,7 +51,12 @@ export default async function LeaveApprovalsPage({ searchParams }: { searchParam
   const scope = access.viewAll || access.approve ? undefined : inList(LeaveRequest.user, access.reportIds);
   const historyFilter = and(scope, tab === "approved" ? eq(LeaveRequest.status, "approved") : tab === "rejected" ? eq(LeaveRequest.status, "rejected") : undefined);
 
-  const pendingCount = await db().$count(LeaveRequest, pendingFilter);
+  // Comp-off claims: HR decides any; a reporting manager decides their reports' claims.
+  const claimScope = access.viewAll || access.approve ? undefined : inList(CompOffClaim.user, access.reportIds);
+  const claimPendingFilter = and(eq(CompOffClaim.status, "pending"), ne(CompOffClaim.user, user._id), access.approve ? undefined : inList(CompOffClaim.user, access.reportIds));
+
+  const [leavePending, claimPending] = await Promise.all([db().$count(LeaveRequest, pendingFilter), db().$count(CompOffClaim, claimPendingFilter)]);
+  const pendingCount = leavePending + claimPending;
   const canExport = access.viewAll || access.manage;
   const header = (
     <PageHeader
@@ -84,10 +89,99 @@ export default async function LeaveApprovalsPage({ searchParams }: { searchParam
           { href: "/leave/approvals?tab=approved", label: "Approved", active: tab === "approved" },
           { href: "/leave/approvals?tab=rejected", label: "Rejected", active: tab === "rejected" },
           { href: "/leave/approvals?tab=all", label: "All requests", active: tab === "all" },
+          { href: "/leave/approvals?tab=compoff", label: "Comp-off claims", active: tab === "compoff" },
         ]}
       />
     </>
   );
+
+  if (tab === "compoff") {
+    const [claims, total] = await Promise.all([
+      db().select().from(CompOffClaim).where(claimScope).orderBy(desc(CompOffClaim.createdAt)).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
+      db().$count(CompOffClaim, claimScope),
+    ]);
+    const people = await db()
+      .select({ _id: User._id, name: User.name, employeeId: User.employeeId })
+      .from(User)
+      .where(
+        inList(
+          User._id,
+          claims.map((c) => c.user),
+        ),
+      );
+    const byId = new Map(people.map((p) => [p._id, p]));
+    return (
+      <PageBody>
+        {header}
+        {tabs}
+        <Card>
+          <TableWrap phone={[1, 2, 5]} tablet={[1, 2, 3, 5, 6]}>
+            <THead>
+              <Th>Person</Th>
+              <Th>Day worked</Th>
+              <Th align="right">Credit</Th>
+              <Th>Reason</Th>
+              <Th>Status</Th>
+              <Th>Decision</Th>
+            </THead>
+            <tbody>
+              {claims.length === 0 && <EmptyRow colSpan={6}>No comp-off claims yet.</EmptyRow>}
+              {claims.map((c) => {
+                const p = byId.get(c.user);
+                return (
+                  <Tr key={c._id} className="align-top">
+                    <Td>
+                      <div className="font-semibold">{p?.name ?? "Unknown person"}</div>
+                      <div className="text-xs text-muted">{c.claimNo}</div>
+                    </Td>
+                    <Td>
+                      <div>{fmtDate(c.workDate, "EEE d MMM yyyy")}</div>
+                      <div className="text-xs text-muted">{formatDuration(c.workMinutes)} worked</div>
+                    </Td>
+                    <Td align="right">{daysLabel(c.days)}</Td>
+                    <Td className="text-[13px] text-ink-2">{c.reason}</Td>
+                    <Td>
+                      <StatusChip domain="correction" value={c.status} />
+                    </Td>
+                    <Td className="text-[13px]">
+                      {c.decidedByName ? (
+                        <>
+                          <div>{c.decidedByName}</div>
+                          {c.decidedAt && <div className="text-xs text-muted">{fmtDate(c.decidedAt)}</div>}
+                          {c.decisionNote && <div className="mt-0.5 text-xs text-ink-2">{c.decisionNote}</div>}
+                        </>
+                      ) : (
+                        <span className="text-muted">Waiting</span>
+                      )}
+                      {c.status === "approved" && (access.manage || access.approve) && c.user !== user._id && (
+                        <div className="mt-1.5">
+                          <ReasonAction
+                            action={revokeCompOff.bind(null, c._id)}
+                            title="Revoke comp-off"
+                            description={`${p?.name ?? "The person"} loses ${daysLabel(c.days)} of comp-off for ${fmtDate(c.workDate)}. If it was already taken, their balance shows as negative. They are notified.`}
+                            label="Reason"
+                            confirmLabel="Revoke"
+                            confirmVariant="danger"
+                            successMessage="Comp-off revoked"
+                            trigger={
+                              <Button variant="danger-outline" size="sm">
+                                Revoke
+                              </Button>
+                            }
+                          />
+                        </div>
+                      )}
+                    </Td>
+                  </Tr>
+                );
+              })}
+            </tbody>
+          </TableWrap>
+          <Pagination page={page} pageSize={PAGE_SIZE} total={total} />
+        </Card>
+      </PageBody>
+    );
+  }
 
   if (tab !== "pending") {
     const [rows, total] = await Promise.all([
@@ -190,7 +284,78 @@ export default async function LeaveApprovalsPage({ searchParams }: { searchParam
     );
   }
 
-  const requests = await db().select().from(LeaveRequest).where(pendingFilter).orderBy(asc(LeaveRequest.createdAt)).limit(60);
+  const [requests, claims] = await Promise.all([
+    db().select().from(LeaveRequest).where(pendingFilter).orderBy(asc(LeaveRequest.createdAt)).limit(60),
+    claimPending ? db().select().from(CompOffClaim).where(claimPendingFilter).orderBy(asc(CompOffClaim.createdAt)).limit(40) : [],
+  ]);
+  const [claimPeople, claimHolidays] = claims.length
+    ? await Promise.all([
+        db()
+          .select({ _id: User._id, name: User.name, photo: User.photo, employeeId: User.employeeId })
+          .from(User)
+          .where(
+            inList(
+              User._id,
+              claims.map((c) => c.user),
+            ),
+          ),
+        db()
+          .select({ date: Holiday.date, name: Holiday.name })
+          .from(Holiday)
+          .where(
+            inList(
+              Holiday.date,
+              claims.map((c) => c.workDate),
+            ),
+          ),
+      ])
+    : [[], []];
+  const claimPerson = new Map(claimPeople.map((p) => [p._id, p]));
+  const holidayName = new Map(claimHolidays.map((h) => [h.date, h.name]));
+  const claimsSection = claims.length > 0 && (
+    <section id="comp-off" className="flex scroll-mt-20 flex-col gap-3" aria-label="Comp-off claims">
+      <h2 className="font-display text-[15px] font-semibold text-ink">Comp-off claims</h2>
+      <div className="grid gap-4 md:grid-cols-2">
+        {claims.map((c) => {
+          const p = claimPerson.get(c.user);
+          return (
+            <article key={c._id} className="flex min-w-0 flex-col gap-3 rounded-[14px] border border-line bg-white p-4 sm:p-[18px]">
+              <div className="flex items-center gap-3">
+                <Avatar name={p?.name ?? "?"} src={p?.photo ?? undefined} size="md" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[15px] font-semibold text-ink">{p?.name ?? "Unknown person"}</div>
+                  <div className="truncate text-xs text-muted">{p?.employeeId}</div>
+                </div>
+                <Tag tone="orange">Comp-off · {daysLabel(c.days)}</Tag>
+              </div>
+              <div className="flex flex-wrap gap-x-[18px] gap-y-2 text-[13px]">
+                <span>
+                  <span className="text-muted">Worked on</span>
+                  <br />
+                  <strong>{fmtDate(c.workDate, "EEE d MMM yyyy")}</strong>
+                </span>
+                <span>
+                  <span className="text-muted">Day type</span>
+                  <br />
+                  <strong>{holidayName.get(c.workDate) ?? "Weekend"}</strong>
+                </span>
+                <span>
+                  <span className="text-muted">Hours worked</span>
+                  <br />
+                  <strong>{formatDuration(c.workMinutes)}</strong>
+                </span>
+              </div>
+              <p className="text-[13px] leading-relaxed text-ink-2">&ldquo;{c.reason}&rdquo;</p>
+              <div className="text-xs text-muted">
+                {c.claimNo} · submitted {timeAgo(c.createdAt)}
+              </div>
+              <DecisionBar id={c._id} name={p?.name ?? "the applicant"} subject="compOff" />
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
   const [people, types] = await Promise.all([
     db()
       .select({
@@ -267,11 +432,16 @@ export default async function LeaveApprovalsPage({ searchParams }: { searchParam
     <PageBody>
       {header}
       {tabs}
+      {claimsSection}
       {requests.length === 0 ? (
-        <Card>
-          <EmptyState icon={<CheckCircle2 className="size-5" />} title="No pending approvals" description="Leave requests waiting for your decision appear here." />
-        </Card>
+        !claimsSection && (
+          <Card>
+            <EmptyState icon={<CheckCircle2 className="size-5" />} title="No pending approvals" description="Leave requests and comp-off claims waiting for your decision appear here." />
+          </Card>
+        )
       ) : (
+        <>
+        {claimsSection && <h2 className="font-display text-[15px] font-semibold text-ink">Leave requests</h2>}
         <div className="grid gap-4 md:grid-cols-2">
           {requests.map((r) => {
             const id = r._id;
@@ -335,6 +505,7 @@ export default async function LeaveApprovalsPage({ searchParams }: { searchParam
             );
           })}
         </div>
+        </>
       )}
       {requests.length > 0 && !access.approve && <p className="text-xs text-muted">You decide the manager stage for your reports. HR completes leave types that need a second approval.</p>}
     </PageBody>

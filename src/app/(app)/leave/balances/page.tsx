@@ -11,7 +11,7 @@ import { PageBody, PageHeader } from "@/components/ui/page";
 import { EmptyRow, TableWrap, THead, Td, Th, Tr } from "@/components/ui/table";
 import { requirePagePermission } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { leaveYearOf, leaveYearRange } from "@/lib/domain/leave-balance";
+import { bulkLeaveBalances, leaveYearOf, leaveYearRange } from "@/lib/domain/leave-balance";
 import { Department, User } from "@/lib/models";
 import { peopleOptions } from "@/lib/people";
 import { PAGE_SIZE, idParam, pageParam, param, type SearchParams } from "@/lib/query";
@@ -22,7 +22,6 @@ import { fmtDate, todayKey } from "@/lib/time";
 import { carryForward } from "../actions";
 import { LeaveTabs } from "../_components/tabs";
 import { leaveAccess } from "../_lib/access";
-import { bulkLeaveBalances } from "../_lib/balances";
 import { EXITED_STATUSES, STAFF_TYPES } from "../../attendance/_lib/access";
 import { AdjustBalanceDialog } from "./adjust-dialog";
 
@@ -60,8 +59,7 @@ export default async function LeaveBalancesPage({ searchParams }: { searchParams
     db().select({ _id: Department._id, name: Department.name }).from(Department).orderBy(asc(Department.name)),
     peopleOptions(),
   ]);
-  const asOf = today >= range.from && today <= range.to ? today : today < range.from ? range.from : range.to;
-  const { types, rows, stored } = await bulkLeaveBalances(people.map((p) => ({ id: p._id, personType: p.personType })), year, settings, asOf);
+  const { types, rows, stored } = await bulkLeaveBalances(people.map((p) => ({ id: p._id, personType: p.personType })), year, settings, today);
   const deptName = new Map(departments.map((d) => [d._id, d.name]));
 
   const yearLink = (y: number) => {
@@ -142,7 +140,7 @@ export default async function LeaveBalancesPage({ searchParams }: { searchParams
                           leaveTypeId={t._id}
                           leaveTypeName={t.name}
                           year={year}
-                          summary={{ ...row, quotaOverride: s?.quotaOverride ?? undefined, defaultQuota: t.annualQuota }}
+                          summary={{ ...row, quotaOverride: s?.quotaOverride ?? undefined, defaultQuota: row.annualQuota }}
                           notes={(s?.notes ?? []).slice(-5).reverse().map((n) => ({ amount: n.amount, reason: n.reason, byName: n.byName, at: n.at.toISOString() }))}
                           trigger={
                             <button type="button" className="group -mx-2 flex min-w-24 flex-col rounded-lg px-2 py-1 text-left hover:bg-brand-50" aria-label={`Adjust ${t.name} balance for ${p.name}`}>
@@ -150,7 +148,7 @@ export default async function LeaveBalancesPage({ searchParams }: { searchParams
                               <span className="text-xs text-muted tabular">
                                 {row.unlimited ? "no limit" : `${row.used} used of ${total}`}
                                 {row.pending > 0 ? ` · ${row.pending} pending` : ""}
-                                {s?.quotaOverride != null ? " · custom quota" : ""}
+                                {s?.quotaOverride != null ? " · custom quota" : row.prorated ? " · pro-rated" : ""}
                               </span>
                             </button>
                           }

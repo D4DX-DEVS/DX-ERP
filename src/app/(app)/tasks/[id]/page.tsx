@@ -73,7 +73,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
         .where(eq(Project._id, task.project))
         .limit(1)
     : [];
-  const caps = taskCaps(user, task, project?.manager);
+  const caps = taskCaps(user, task, project);
   const canOpenProject = project ? projectCaps(user, project).view : false;
   const category = categoryOf(statuses, task.status);
   const closed = closedKeys.includes(task.status);

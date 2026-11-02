@@ -67,7 +67,7 @@ export async function toTaskRows(user: CurrentUser, tasks: TaskLean[], settings:
   const taskIds = tasks.map((t) => t._id);
 
   const [projects, people, deps, subCounts] = await Promise.all([
-    projectIds.length ? db().select({ _id: Project._id, projectNo: Project.projectNo, title: Project.title, manager: Project.manager }).from(Project).where(inList(Project._id, projectIds)) : [],
+    projectIds.length ? db().select({ _id: Project._id, projectNo: Project.projectNo, title: Project.title, manager: Project.manager, team: Project.team }).from(Project).where(inList(Project._id, projectIds)) : [],
     peopleMap(tasks.flatMap((t) => t.assignees)),
     depIds.length ? db().select({ _id: Task._id, status: Task.status }).from(Task).where(inList(Task._id, depIds)) : [],
     db()
@@ -83,7 +83,7 @@ export async function toTaskRows(user: CurrentUser, tasks: TaskLean[], settings:
 
   return tasks.map((t) => {
     const project = t.project ? projectMap.get(t.project) : undefined;
-    const caps = taskCaps(user, t, project?.manager);
+    const caps = taskCaps(user, t, project);
     const open = !closedKeys.includes(t.status);
     const unmetDeps = t.dependencies.some((d) => {
       const s = depStatus.get(d);

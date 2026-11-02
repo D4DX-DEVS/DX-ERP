@@ -17,6 +17,7 @@ import { Chip, OptionChip, StatusChip } from "@/components/ui/chip";
 import { EmptyState, Progress } from "@/components/ui/page";
 import { safeLink } from "@/app/(app)/notifications/meta";
 import { loadAnnouncements } from "@/app/(app)/notifications/data";
+import { NotificationRow } from "@/app/(app)/notifications/notification-row";
 import { classifyOpenMovement, getPeriods, loadOpenTasks } from "../_lib/queries";
 import { DUE_TONE_CLASS, dueLabel, ListRow } from "./shared";
 
@@ -294,13 +295,7 @@ export async function LatestNotificationsCard({ userId }: { userId: string }) {
       ) : (
         <div>
           {items.map((n) => (
-            <ListRow
-              key={n._id}
-              href={safeLink(n.link) ?? "/notifications"}
-              icon={<span className={cn("size-2 shrink-0 rounded-full", n.read ? "bg-transparent" : "bg-brand-600")} role="img" aria-label={n.read ? "Read" : "Unread"} />}
-              title={n.title}
-              meta={timeAgo(n.createdAt)}
-            />
+            <NotificationRow key={n._id} id={n._id} href={safeLink(n.link) ?? "/notifications"} title={n.title} meta={timeAgo(n.createdAt)} read={n.read} />
           ))}
         </div>
       )}

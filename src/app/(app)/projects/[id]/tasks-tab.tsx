@@ -18,7 +18,7 @@ import { TaskBoard, TaskTable } from "../../tasks/_components/task-ui";
 const BOARD_COLUMN_LIMIT = 30;
 
 /** Tasks tab of the project dashboard: list or board of the tasks the viewer may see, plus "New task". */
-export async function TasksTab({ user, project, settings, sp }: { user: CurrentUser; project: Pick<IProject, "_id" | "manager">; settings: AppSettings; sp: SearchParams }) {
+export async function TasksTab({ user, project, settings, sp }: { user: CurrentUser; project: Pick<IProject, "_id" | "manager" | "team">; settings: AppSettings; sp: SearchParams }) {
   const statuses = settings.taskStatuses;
   const closedKeys = keysInCategories(statuses, TASK_CLOSED_CATEGORIES);
   const view = param(sp, "view") === "board" ? "board" : "list";

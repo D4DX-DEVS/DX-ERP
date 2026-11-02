@@ -132,6 +132,12 @@ export async function createProject(input: Record<string, unknown>): Promise<Act
     const user = await actionUser();
     if (!can(user, "projects.manage")) throw new ActionError("You don't have permission to create projects.");
     const data = parse(projectSchema, input);
+    // Only the super admin sees every project: a lead who creates one leads it (or joins its team when they named
+    // another manager), so it doesn't vanish from their list.
+    if (!can(user, "projects.view_all") && data.manager !== user.id && !data.team.some((m) => m.user === user.id)) {
+      if (!data.manager) data.manager = user.id;
+      else data.team = [...data.team, { user: user.id, role: "Team lead", allocation: 0 }];
+    }
     const { settings, clientId } = await validateProjectInput(user, data);
 
     const projectNo = await nextNumber("project", ID_PREFIX.project, 4);

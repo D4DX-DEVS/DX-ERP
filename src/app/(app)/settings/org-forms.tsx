@@ -290,6 +290,7 @@ export interface LeaveTypeView {
   color?: string;
   annualQuota: number;
   accrual: "upfront" | "monthly";
+  kind: "standard" | "comp_off" | "optional_holiday";
   carryForward: boolean;
   maxCarryForward: number;
   paid: boolean;
@@ -303,8 +304,15 @@ export interface LeaveTypeView {
   inUse: boolean;
 }
 
+const KIND_HINT: Record<LeaveTypeView["kind"], string> = {
+  standard: "Quota accrues each year, pro-rated for people who join or leave mid-year (a month counts when joined by the 15th).",
+  comp_off: "No quota: staff claim a comp-off for a weekend or holiday they worked, and each approved claim adds 1 (or ½) day.",
+  optional_holiday: "A fixed number of the optional holidays (Settings → Holidays) per year, taken only on those dates, full days.",
+};
+
 function LeaveTypeFields({ type }: { type?: LeaveTypeView }) {
   const [carry, setCarry] = useState(type?.carryForward ?? false);
+  const [kind, setKind] = useState<LeaveTypeView["kind"]>(type?.kind ?? "standard");
   const applies = type?.applicableTo ?? ["employee", "trainee", "intern"];
   return (
     <div className="flex flex-col gap-4">
@@ -315,15 +323,28 @@ function LeaveTypeFields({ type }: { type?: LeaveTypeView }) {
         <Field label="Code" name="code" required hint="Short unique code, e.g. CL">
           <Input id="code" name="code" defaultValue={type?.code} maxLength={8} className="uppercase" />
         </Field>
-        <Field label="Annual quota (days)" name="annualQuota" required>
-          <Input id="annualQuota" name="annualQuota" type="number" min={0} max={366} step="0.5" defaultValue={type?.annualQuota ?? 0} />
-        </Field>
-        <Field label="Accrual" name="accrual" required hint="Monthly releases one-twelfth of the quota each month.">
-          <Select id="accrual" name="accrual" defaultValue={type?.accrual ?? "upfront"}>
-            <option value="upfront">Full quota at the start of the year</option>
-            <option value="monthly">Accrues monthly</option>
+        <Field label="Earned by" name="kind" required hint={KIND_HINT[kind]} className="sm:col-span-2">
+          <Select id="kind" name="kind" value={kind} onChange={(e) => setKind(e.target.value as LeaveTypeView["kind"])}>
+            <option value="standard">Annual quota</option>
+            <option value="comp_off">Comp-off claims (work on a weekend or holiday)</option>
+            <option value="optional_holiday">Optional holidays</option>
           </Select>
         </Field>
+        {kind !== "comp_off" && (
+          <Field label={kind === "optional_holiday" ? "Optional holidays per year" : "Annual quota (days)"} name="annualQuota" required>
+            <Input id="annualQuota" name="annualQuota" type="number" min={0} max={366} step={kind === "optional_holiday" ? "1" : "0.5"} defaultValue={type?.annualQuota ?? (kind === "optional_holiday" ? 2 : 0)} />
+          </Field>
+        )}
+        {kind === "standard" && (
+          <Field label="Accrual" name="accrual" required hint="Monthly releases one-twelfth of the quota on the 1st of each month.">
+            <Select id="accrual" name="accrual" defaultValue={type?.accrual ?? "upfront"}>
+              <option value="upfront">Full quota at the start of the year</option>
+              <option value="monthly">Accrues monthly</option>
+            </Select>
+          </Field>
+        )}
+        {kind === "comp_off" && <input type="hidden" name="annualQuota" value="0" />}
+        {kind !== "standard" && <input type="hidden" name="accrual" value="upfront" />}
         <Field label="Colour" name="color">
           <Input id="color" name="color" type="color" defaultValue={type?.color ?? "#284CC7"} className="p-1" />
         </Field>
@@ -343,8 +364,8 @@ function LeaveTypeFields({ type }: { type?: LeaveTypeView }) {
         </div>
       </fieldset>
       <div className="grid gap-4 border-t border-line-soft pt-4 sm:grid-cols-2">
-        <Switch name="paid" defaultChecked={type?.paid ?? true} label="Paid leave" />
-        <Switch name="allowHalfDay" defaultChecked={type?.allowHalfDay ?? true} label="Allow half days" />
+        {kind === "standard" ? <Switch name="paid" defaultChecked={type?.paid ?? true} label="Paid leave" /> : <input type="hidden" name="paid" value="on" />}
+        {kind !== "optional_holiday" && <Switch name="allowHalfDay" defaultChecked={type?.allowHalfDay ?? true} label="Allow half days" />}
         <Switch name="requiresHrApproval" defaultChecked={type?.requiresHrApproval ?? false} label="Needs HR approval" description="In addition to the reporting manager." />
         <Switch name="active" defaultChecked={type?.active ?? true} label="Active" description="Inactive types can't be requested." />
         <Switch name="carryForward" checked={carry} onChange={(e) => setCarry(e.target.checked)} label="Carry forward unused leave" />
@@ -393,8 +414,8 @@ export function LeaveTypesCard({ types }: { types: LeaveTypeView[] }) {
                 </div>
                 <div className="font-mono text-xs text-muted">{t.code}</div>
               </Td>
-              <Td align="right">{t.annualQuota} d</Td>
-              <Td>{t.accrual === "monthly" ? "Monthly" : "Upfront"}</Td>
+              <Td align="right">{t.kind === "comp_off" ? "Earned" : `${t.annualQuota} d`}</Td>
+              <Td>{t.kind === "comp_off" ? "Comp-off claims" : t.kind === "optional_holiday" ? "Optional holidays" : t.accrual === "monthly" ? "Monthly" : "Upfront"}</Td>
               <Td>{t.carryForward ? `Up to ${t.maxCarryForward} d` : "No"}</Td>
               <Td className="text-xs text-ink-2">
                 {[t.paid ? "Paid" : "Unpaid", t.allowHalfDay ? "half days" : null, t.requiresHrApproval ? "HR approval" : null, t.requiresAttachmentAfterDays !== undefined ? `attachment > ${t.requiresAttachmentAfterDays} d` : null].filter(Boolean).join(" · ")}

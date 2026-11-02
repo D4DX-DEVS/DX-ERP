@@ -13,6 +13,7 @@ import {
   DEFAULT_ROLE_PERMISSIONS,
   PERMISSION_LABELS,
   ROLE_KEYS,
+  SUPER_ADMIN_ONLY,
   isPermission,
   type Permission,
   type RoleKey,
@@ -31,10 +32,10 @@ function clip(text: string, max = 300): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
-/** Catalogue-ordered, de-duplicated list of valid permissions. */
+/** Catalogue-ordered, de-duplicated list of valid permissions (never the super-admin-only ones). */
 function cleanPermissions(input: unknown): Permission[] {
   const wanted = new Set(Array.isArray(input) ? input.map(String) : []);
-  return ALL_PERMISSIONS.filter((p) => wanted.has(p));
+  return ALL_PERMISSIONS.filter((p) => wanted.has(p) && !SUPER_ADMIN_ONLY.includes(p));
 }
 
 function permissionChanges(before: string[], after: Permission[]) {

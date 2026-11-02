@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { and, eq, or, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { actionPermission, actionUser, ActionError, parse, runAction, type ActionResult } from "@/lib/actions";
@@ -12,6 +13,14 @@ import { inList, notInList } from "@/lib/sql";
 import { isObjectId, zs } from "@/lib/validation";
 import { todayKey } from "@/lib/time";
 
+/**
+ * Read-state changes re-render the inbox in the same round trip and drop stale copies of visited pages from the
+ * browser's router cache, so going back to the inbox (or the dashboard) never shows an old unread dot.
+ */
+function refreshInbox() {
+  revalidatePath("/notifications");
+}
+
 export async function markNotificationRead(id: string): Promise<ActionResult<null>> {
   return runAction(async () => {
     const user = await actionUser();
@@ -20,6 +29,20 @@ export async function markNotificationRead(id: string): Promise<ActionResult<nul
       .update(Notification)
       .set({ read: true, readAt: new Date() })
       .where(and(eq(Notification._id, id), eq(Notification.user, user._id), eq(Notification.read, false)));
+    refreshInbox();
+    return null;
+  });
+}
+
+export async function markNotificationUnread(id: string): Promise<ActionResult<null>> {
+  return runAction(async () => {
+    const user = await actionUser();
+    if (!isObjectId(id)) throw new ActionError("Notification not found.");
+    await db()
+      .update(Notification)
+      .set({ read: false, readAt: null })
+      .where(and(eq(Notification._id, id), eq(Notification.user, user._id), eq(Notification.read, true)));
+    refreshInbox();
     return null;
   });
 }
@@ -33,6 +56,7 @@ export async function markAllNotificationsRead(): Promise<ActionResult<{ count: 
         .set({ read: true, readAt: new Date() })
         .where(and(eq(Notification.user, user._id), eq(Notification.read, false)))
         .returning({ id: Notification._id });
+      refreshInbox();
       return { count: done.length };
     },
     "All notifications marked as read",
@@ -44,6 +68,7 @@ export async function deleteNotification(id: string): Promise<ActionResult<null>
     const user = await actionUser();
     if (!isObjectId(id)) throw new ActionError("Notification not found.");
     await db().delete(Notification).where(and(eq(Notification._id, id), eq(Notification.user, user._id)));
+    refreshInbox();
     return null;
   }, "Notification removed");
 }

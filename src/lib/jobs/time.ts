@@ -1,6 +1,8 @@
 import { and, eq, gte, isNotNull, isNull, lt, lte } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { recalcAttendanceDays } from "@/lib/domain/attendance-calc";
+import { leaveYearOf, leaveYearRange } from "@/lib/domain/leave-balance";
+import { carryForwardBalances } from "@/lib/domain/leave-carry";
 import { Attendance, AttendanceCorrection, LeaveRequest, User, type LeaveStatus } from "@/lib/models";
 import { usersWithPermission } from "@/lib/notify";
 import { getSettings } from "@/lib/settings";
@@ -164,8 +166,23 @@ async function correctionReminders(): Promise<string> {
   return `${stale.length} correction reminders`;
 }
 
+/**
+ * New leave year: carry unused balance (types with carry-forward) over from the year just ended, so nobody depends on
+ * HR pressing the button. Everything else resets by itself — balances are computed per leave year. Re-runs during the
+ * first month pick up late approvals for the old year; HR's button on Leave → Balances does the same at any time.
+ */
+async function leaveYearRollover(): Promise<string> {
+  const settings = await getSettings();
+  const today = todayKey();
+  const year = leaveYearOf(today, settings);
+  if (today > addDays(leaveYearRange(year, settings).from, 30)) return "not the start of a leave year";
+  const { updated, carryTypes } = await carryForwardBalances(year - 1, null);
+  return carryTypes ? `${updated} balances carried from ${year - 1}` : "no carry-forward leave types";
+}
+
 export const timeJobs: Job[] = [
   { name: "attendance-missing-checkout", intervalMinutes: 30, run: missingCheckout },
   { name: "leave-pending-reminder", intervalMinutes: 60, run: leaveReminders },
   { name: "attendance-correction-reminder", intervalMinutes: 60, run: correctionReminders },
+  { name: "leave-year-rollover", intervalMinutes: 720, run: leaveYearRollover },
 ];

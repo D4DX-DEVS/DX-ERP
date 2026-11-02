@@ -5,10 +5,12 @@ import { z } from "zod";
 import { actionPermission, ActionError, parse, runAction, type ActionResult } from "@/lib/actions";
 import { audit, diff } from "@/lib/audit";
 import { db } from "@/lib/db";
-import { Asset, Department, Designation, Holiday, LeaveBalance, LeaveRequest, LeaveType, User } from "@/lib/models";
+import { Asset, Department, Designation, Holiday, LEAVE_KINDS, LeaveBalance, LeaveRequest, LeaveType, User } from "@/lib/models";
+import { getSettings } from "@/lib/settings";
 import { eqIgnoreCase, inList, insertChunked, jsonLength } from "@/lib/sql";
 import { fmtDate } from "@/lib/time";
 import { isObjectId, zs } from "@/lib/validation";
+import { recountLeaveDays } from "../leave/_lib/recount";
 
 const PERSON_TYPES = ["employee", "trainee", "intern"] as const;
 
@@ -164,6 +166,8 @@ export async function deleteDesignation(id: string): Promise<ActionResult<null>>
 
 /* ───────────────────────────── Holidays ───────────────────────────── */
 
+const recountNote = (n: number) => (n ? ` · ${n} leave request(s) re-counted` : "");
+
 function isRealDate(day: string): boolean {
   const d = new Date(`${day}T00:00:00Z`);
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === day;
@@ -185,12 +189,14 @@ export async function saveHoliday(input: Record<string, unknown>): Promise<Actio
 
     if (!data.id) {
       const [doc] = await db().insert(Holiday).values({ date: data.date, name: data.name, optional: data.optional }).returning({ _id: Holiday._id });
-      await audit(user, { action: "config", entity: "holiday", entityId: doc._id, ref: data.date, summary: `Added ${data.optional ? "optional " : ""}holiday ${data.name} on ${fmtDate(data.date)}` });
+      const recounted = await recountLeaveDays(await getSettings(), [data.date]);
+      await audit(user, { action: "config", entity: "holiday", entityId: doc._id, ref: data.date, summary: `Added ${data.optional ? "optional " : ""}holiday ${data.name} on ${fmtDate(data.date)}${recountNote(recounted)}` });
       return { id: doc._id };
     }
     const [before] = await db().select().from(Holiday).where(eq(Holiday._id, data.id)).limit(1);
     if (!before) throw new ActionError("Holiday not found");
     await db().update(Holiday).set({ date: data.date, name: data.name, optional: data.optional }).where(eq(Holiday._id, data.id));
+    if (before.date !== data.date || before.optional !== data.optional) await recountLeaveDays(await getSettings(), [...new Set([before.date, data.date])]);
     const changes = diff({ date: before.date, name: before.name, optional: before.optional }, { date: data.date, name: data.name, optional: data.optional }, ["date", "name", "optional"]);
     if (changes.length) await audit(user, { action: "config", entity: "holiday", entityId: data.id, ref: data.date, summary: `Updated holiday ${data.name} · ${changes.map((c) => c.field).join(", ")}`, changes });
     return { id: data.id };
@@ -203,7 +209,8 @@ export async function deleteHoliday(id: string): Promise<ActionResult<null>> {
     if (!isObjectId(id)) throw new ActionError("Holiday not found");
     const [doc] = await db().delete(Holiday).where(eq(Holiday._id, id)).returning({ date: Holiday.date, name: Holiday.name });
     if (!doc) throw new ActionError("Holiday not found");
-    await audit(user, { action: "config", entity: "holiday", entityId: id, ref: doc.date, summary: `Removed holiday ${doc.name} (${fmtDate(doc.date)})` });
+    const recounted = await recountLeaveDays(await getSettings(), [doc.date]);
+    await audit(user, { action: "config", entity: "holiday", entityId: id, ref: doc.date, summary: `Removed holiday ${doc.name} (${fmtDate(doc.date)})${recountNote(recounted)}` });
     return null;
   }, "Holiday removed");
 }
@@ -231,11 +238,15 @@ export async function bulkAddHolidays(input: Record<string, unknown>): Promise<A
     if (fresh.length > 0) await insertChunked(db(), Holiday, fresh);
     const skipped = unique.filter((p) => existing.has(p.date)).map((p) => p.date);
     if (fresh.length > 0) {
+      const recounted = await recountLeaveDays(
+        await getSettings(),
+        fresh.map((p) => p.date),
+      );
       await audit(user, {
         action: "config",
         entity: "holiday",
         ref: `${fresh.length} added`,
-        summary: `Bulk-added ${fresh.length} holiday(s): ${fresh.slice(0, 4).map((p) => `${p.name} (${fmtDate(p.date)})`).join(", ")}${fresh.length > 4 ? ", …" : ""}`,
+        summary: `Bulk-added ${fresh.length} holiday(s): ${fresh.slice(0, 4).map((p) => `${p.name} (${fmtDate(p.date)})`).join(", ")}${fresh.length > 4 ? ", …" : ""}${recountNote(recounted)}`,
       });
     }
     return { added: fresh.length, skipped };
@@ -251,6 +262,7 @@ const leaveTypeSchema = z.object({
   color: z.preprocess((v) => (typeof v === "string" && v.trim() ? v.trim() : "#284CC7"), z.string().regex(/^#[0-9a-fA-F]{6}$/, "Choose a colour")),
   annualQuota: zs.num("Annual quota", { min: 0, max: 366 }),
   accrual: z.enum(["upfront", "monthly"], { error: "Choose how leave accrues" }),
+  kind: z.enum(LEAVE_KINDS, { error: "Choose how this leave is earned" }),
   carryForward: zs.bool(),
   maxCarryForward: zs.optNum({ min: 0, max: 366 }),
   paid: zs.bool(),
@@ -262,7 +274,7 @@ const leaveTypeSchema = z.object({
   order: zs.optNum({ min: 0, max: 999 }),
 });
 
-const LEAVE_FIELDS = ["name", "code", "annualQuota", "accrual", "carryForward", "maxCarryForward", "paid", "allowHalfDay", "requiresHrApproval", "requiresAttachmentAfterDays", "applicableTo", "active", "order", "color"] as const;
+const LEAVE_FIELDS = ["name", "code", "kind", "annualQuota", "accrual", "carryForward", "maxCarryForward", "paid", "allowHalfDay", "requiresHrApproval", "requiresAttachmentAfterDays", "applicableTo", "active", "order", "color"] as const;
 
 export async function saveLeaveType(input: Record<string, unknown>): Promise<ActionResult<{ id: string }>> {
   return runAction(async () => {
@@ -274,17 +286,20 @@ export async function saveLeaveType(input: Record<string, unknown>): Promise<Act
       .where(and(eq(LeaveType.code, data.code), data.id ? ne(LeaveType._id, data.id) : undefined))
       .limit(1);
     if (codeClash) fieldError("code", "Another leave type already uses this code");
+    // Comp-off has no quota (claims earn it); optional holidays are whole days given upfront.
+    if (data.kind === "optional_holiday" && data.annualQuota === 0) fieldError("annualQuota", "Set how many optional holidays a person may take each year");
     const carry = data.carryForward;
     const values = {
       name: data.name,
       code: data.code,
       color: data.color.toUpperCase(),
-      annualQuota: data.annualQuota,
-      accrual: data.accrual,
+      kind: data.kind,
+      annualQuota: data.kind === "comp_off" ? 0 : data.kind === "optional_holiday" ? Math.floor(data.annualQuota) : data.annualQuota,
+      accrual: data.kind === "standard" ? data.accrual : "upfront",
       carryForward: carry,
       maxCarryForward: carry ? (data.maxCarryForward ?? 0) : 0,
-      paid: data.paid,
-      allowHalfDay: data.allowHalfDay,
+      paid: data.kind === "standard" ? data.paid : true,
+      allowHalfDay: data.kind === "optional_holiday" ? false : data.allowHalfDay,
       requiresHrApproval: data.requiresHrApproval,
       requiresAttachmentAfterDays: data.requiresAttachmentAfterDays,
       applicableTo: data.applicableTo,

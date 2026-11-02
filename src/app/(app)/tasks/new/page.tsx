@@ -33,7 +33,7 @@ export default async function NewTaskPage({ searchParams }: { searchParams: Prom
   const projectId = parent ? (parent.project ?? undefined) : idParam(sp, "project");
   const [project] = projectId
     ? await db()
-        .select({ _id: Project._id, manager: Project.manager, milestones: Project.milestones })
+        .select({ _id: Project._id, manager: Project.manager, team: Project.team, milestones: Project.milestones })
         .from(Project)
         .where(and(eq(Project._id, projectId), projectFilter(user)))
         .limit(1)

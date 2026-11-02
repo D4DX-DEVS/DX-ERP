@@ -30,6 +30,9 @@ export function safeLink(link: string | undefined | null): string | undefined {
   return link && link.startsWith("/") && !link.startsWith("//") ? link : undefined;
 }
 
+export const INBOX_TABS = ["all", "unread", "approvals"] as const;
+export type InboxTab = (typeof INBOX_TABS)[number];
+
 export interface NotificationView {
   id: string;
   type: string;

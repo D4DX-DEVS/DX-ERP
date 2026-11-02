@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, LogOut, Search } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { onUnreadEvents, reportUnreadCount } from "@/lib/unread";
 import { Avatar } from "@/components/ui/avatar";
 import type { Presence, ShellUser } from "./types";
 
@@ -34,7 +35,10 @@ function useUnreadCount(initial: number) {
         const res = await fetch("/api/notifications/unread", { cache: "no-store" });
         if (res.ok) {
           const json = (await res.json()) as { count: number };
-          if (alive) setCount(json.count);
+          if (alive) {
+            setCount(json.count);
+            reportUnreadCount(json.count);
+          }
         }
       } catch {
         // offline — keep the last known count
@@ -42,10 +46,13 @@ function useUnreadCount(initial: number) {
     };
     const id = setInterval(tick, 60_000);
     document.addEventListener("visibilitychange", tick);
+    // Reading / un-reading a notification moves the badge at once; the inbox can also ask for a fresh count.
+    const off = onUnreadEvents({ changed: (delta) => setCount((c) => Math.max(0, c + delta)), poll: tick });
     return () => {
       alive = false;
       clearInterval(id);
       document.removeEventListener("visibilitychange", tick);
+      off();
     };
   }, []);
   return count;

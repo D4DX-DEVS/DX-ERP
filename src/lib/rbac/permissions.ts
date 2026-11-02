@@ -107,6 +107,12 @@ export type Permission = (typeof PERMISSION_GROUPS)[number]["items"][number][0];
 
 export const ALL_PERMISSIONS: Permission[] = PERMISSION_GROUPS.flatMap((g) => g.items.map((i) => i[0]));
 
+/**
+ * Held only by the super admin, whatever a role says: everyone else sees just the projects (and their tasks) they lead or
+ * are on, and nobody else deletes or cancels projects. `effectivePermissions` strips these from every other role.
+ */
+export const SUPER_ADMIN_ONLY: Permission[] = ["projects.view_all", "projects.delete", "tasks.view_all"];
+
 export const PERMISSION_LABELS: Record<Permission, string> = Object.fromEntries(
   PERMISSION_GROUPS.flatMap((g) => g.items.map((i) => [i[0], i[1]])),
 ) as Record<Permission, string>;
@@ -157,7 +163,7 @@ const without = (list: Permission[], remove: Permission[]) => list.filter((p) =>
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<RoleKey, Permission[]> = {
   super_admin: ALL_PERMISSIONS,
-  management: without(ALL_PERMISSIONS, ["settings.manage", "roles.manage", "backup.manage", "users.manage"]),
+  management: without(ALL_PERMISSIONS, ["settings.manage", "roles.manage", "backup.manage", "users.manage", ...SUPER_ADMIN_ONLY]),
   hr: [
     "staff.view",
     "staff.create",
@@ -176,8 +182,6 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<RoleKey, Permission[]> = {
     "leave.approve",
     "leave.manage",
     "timesheets.view_all",
-    "projects.view_all",
-    "tasks.view_all",
     "payroll.view",
     "payroll.prepare",
     "expenses.view_all",
@@ -192,7 +196,6 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<RoleKey, Permission[]> = {
   finance: [
     "staff.view",
     "staff.confidential",
-    "projects.view_all",
     "projects.financials",
     "crm.view",
     "proposals.view",
@@ -218,17 +221,14 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<RoleKey, Permission[]> = {
     "proposals.manage",
     "contracts.view",
     "contracts.manage",
-    "projects.view_all",
     "reports.view",
     "reports.export",
   ],
   pm: [
     "staff.view",
     "interns.review",
-    "projects.view_all",
     "projects.manage",
     "projects.financials",
-    "tasks.view_all",
     "tasks.manage",
     "tasks.review",
     "timesheets.view_all",
@@ -245,6 +245,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<RoleKey, Permission[]> = {
   team_lead: [
     "staff.view",
     "interns.review",
+    "projects.manage",
     "tasks.manage",
     "tasks.review",
     "timesheets.approve",

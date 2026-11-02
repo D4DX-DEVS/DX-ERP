@@ -5,9 +5,16 @@ import { Button } from "@/components/ui/button";
 import { useServerAction } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { approveLeave, rejectLeave } from "../actions";
+import { approveCompOff, rejectCompOff } from "../comp-off-actions";
 
-/** Comment box with Reject / Approve (a comment is required to reject). */
-export function DecisionBar({ id, name }: { id: string; name: string }) {
+const DECISIONS = {
+  leave: { approve: approveLeave, reject: rejectLeave, approved: "Leave approved", rejected: "Leave rejected" },
+  compOff: { approve: approveCompOff, reject: rejectCompOff, approved: "Comp-off approved", rejected: "Comp-off rejected" },
+};
+
+/** Comment box with Reject / Approve (a comment is required to reject) for a leave request or a comp-off claim. */
+export function DecisionBar({ id, name, subject = "leave" }: { id: string; name: string; subject?: keyof typeof DECISIONS }) {
+  const d = DECISIONS[subject];
   const [note, setNote] = useState("");
   const [missing, setMissing] = useState(false);
   const { pending, run } = useServerAction();
@@ -35,12 +42,12 @@ export function DecisionBar({ id, name }: { id: string; name: string }) {
               setMissing(true);
               return;
             }
-            run(() => rejectLeave(id, note), { successMessage: "Leave rejected" });
+            run(() => d.reject(id, note), { successMessage: d.rejected });
           }}
         >
           Reject
         </Button>
-        <Button variant="success" loading={pending} onClick={() => run(() => approveLeave(id, note), { successMessage: "Leave approved" })}>
+        <Button variant="success" loading={pending} onClick={() => run(() => d.approve(id, note), { successMessage: d.approved })}>
           Approve
         </Button>
       </div>

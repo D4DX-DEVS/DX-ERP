@@ -95,6 +95,8 @@ export interface AppSettings {
     yearStartMonth: number;
     allowNegativeBalance: boolean;
     countWeekendsInLeave: boolean;
+    /** Days after working on a weekend / holiday within which a comp-off may be claimed. */
+    compOffClaimDays: number;
   };
   payroll: {
     components: PayrollComponent[];
@@ -209,6 +211,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     yearStartMonth: 1,
     allowNegativeBalance: false,
     countWeekendsInLeave: false,
+    compOffClaimDays: 30,
   },
   payroll: {
     components: [

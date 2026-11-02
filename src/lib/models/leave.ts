@@ -1,6 +1,14 @@
 import { index, sqliteTable, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { bool, date, int, json, num, pk, ref, text, timestamps, type FileRef, type Id } from "./_base";
 
+/**
+ * How a leave type is earned and taken. `standard`: quota accrues (pro-rated for mid-year joiners / leavers).
+ * `comp_off`: no quota — credits come from approved comp-off claims (work on a weekend or holiday). `optional_holiday`:
+ * a fixed number of the admin's optional holidays per year, taken only on those dates.
+ */
+export const LEAVE_KINDS = ["standard", "comp_off", "optional_holiday"] as const;
+export type LeaveKind = (typeof LEAVE_KINDS)[number];
+
 /** Writes must trim `name` and store `code` trimmed + uppercased. */
 export const LeaveType = sqliteTable(
   "leavetypes",
@@ -11,6 +19,7 @@ export const LeaveType = sqliteTable(
     color: text(),
     annualQuota: num().notNull().default(0),
     accrual: text().$type<"upfront" | "monthly">().notNull().default("upfront"),
+    kind: text().$type<LeaveKind>().notNull().default("standard"),
     carryForward: bool().notNull().default(false),
     maxCarryForward: num().notNull().default(0),
     paid: bool().notNull().default(true),
@@ -50,7 +59,10 @@ export const LeaveBalance = sqliteTable(
     year: int().notNull(),
     carriedForward: num().notNull().default(0),
     adjustment: num().notNull().default(0),
-    /** Optional per-person override of the annual quota (e.g. pro-rated for mid-year joiners). */
+    /**
+     * Optional per-person entitlement for the leave year, replacing the computed (pro-rated) quota. Monthly types spread
+     * it over the months the person is employed in that year.
+     */
     quotaOverride: num(),
     notes: json<LeaveBalanceNote[]>()
       .notNull()
@@ -109,3 +121,41 @@ export const LeaveRequest = sqliteTable(
   ],
 );
 export type ILeaveRequest = typeof LeaveRequest.$inferSelect;
+
+export type CompOffStatus = "pending" | "approved" | "rejected" | "cancelled";
+
+/**
+ * A claim for compensatory leave after working on a weekend or holiday. Approved claims are the comp-off type's credits
+ * for `creditYear` (computed into balances, never copied), so cancelling or correcting a claim can't leave a stale balance.
+ */
+export const CompOffClaim = sqliteTable(
+  "compoffclaims",
+  {
+    _id: pk(),
+    claimNo: text().notNull(),
+    user: ref().notNull(),
+    /** The comp-off leave type credited. */
+    leaveType: ref().notNull(),
+    workDate: text().notNull(),
+    /** 1 or 0.5, from the hours worked that day. */
+    days: num().notNull(),
+    workMinutes: int().notNull().default(0),
+    reason: text().notNull(),
+    status: text().$type<CompOffStatus>().notNull().default("pending"),
+    manager: ref(),
+    /** Leave year the credit belongs to (the work date's year, or the current one when that year has ended). */
+    creditYear: int().notNull(),
+    decidedBy: ref(),
+    decidedByName: text(),
+    decidedAt: date(),
+    decisionNote: text(),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("compoffclaims_claim_no").on(t.claimNo),
+    index("compoffclaims_user").on(t.user),
+    index("compoffclaims_status").on(t.status),
+    index("compoffclaims_manager").on(t.manager),
+  ],
+);
+export type ICompOffClaim = typeof CompOffClaim.$inferSelect;

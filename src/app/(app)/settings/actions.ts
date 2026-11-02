@@ -112,13 +112,14 @@ const leaveSettingsSchema = z.object({
   yearStartMonth: zs.num("Leave year start", { min: 1, max: 12 }),
   allowNegativeBalance: zs.bool(),
   countWeekendsInLeave: zs.bool(),
+  compOffClaimDays: zs.num("Comp-off claim window", { min: 1, max: 365 }),
 });
 
 export async function saveLeaveSettings(input: Record<string, unknown>): Promise<Saved> {
   return runAction(async () => {
     const user = await actionPermission("settings.manage");
     const data = parse(leaveSettingsSchema, input);
-    return saveConfig(user, "leave", "Leave policy", { ...data, yearStartMonth: Math.round(data.yearStartMonth) });
+    return saveConfig(user, "leave", "Leave policy", { ...data, yearStartMonth: Math.round(data.yearStartMonth), compOffClaimDays: Math.round(data.compOffClaimDays) });
   }, "Leave policy saved");
 }
 

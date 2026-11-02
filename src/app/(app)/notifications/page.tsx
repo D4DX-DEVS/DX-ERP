@@ -10,21 +10,17 @@ import { addDays, dateKey, fmtDate, fmtTime, todayKey } from "@/lib/time";
 import { Card } from "@/components/ui/card";
 import { SelectFilter, Pagination } from "@/components/ui/filters";
 import { EmptyState, PageBody, PageHeader } from "@/components/ui/page";
-import { LinkTabs } from "@/components/ui/tabs";
 import { AnnouncementPanel } from "./announcement-panel";
 import { loadAnnouncements } from "./data";
-import { NOTIFICATION_TYPES, safeLink, type NotificationGroup, type NotificationView } from "./meta";
-import { MarkAllReadButton, NotificationList } from "./notification-list";
+import { INBOX_TABS, NOTIFICATION_TYPES, safeLink, type InboxTab, type NotificationGroup, type NotificationView } from "./meta";
+import { InboxProvider, InboxTabs, MarkAllReadButton, NotificationList } from "./notification-list";
 
 export const metadata: Metadata = { title: "Notifications" };
-
-const TABS = ["all", "unread", "approvals"] as const;
-type Tab = (typeof TABS)[number];
 
 export default async function NotificationsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
   const sp = await searchParams;
-  const tab: Tab = (TABS as readonly string[]).includes(param(sp, "tab")) ? (param(sp, "tab") as Tab) : "all";
+  const tab: InboxTab = (INBOX_TABS as readonly string[]).includes(param(sp, "tab")) ? (param(sp, "tab") as InboxTab) : "all";
   const type = param(sp, "type");
   const page = pageParam(sp);
   const today = todayKey();
@@ -82,43 +78,38 @@ export default async function NotificationsPage({ searchParams }: { searchParams
     else groups.push({ label, items: [view] });
   }
 
-  const tabHref = (t: Tab) => withParams("/notifications", sp, { tab: t === "all" ? null : t });
+  const tabHref = (t: InboxTab) => withParams("/notifications", sp, { tab: t === "all" ? null : t });
 
   return (
     <PageBody>
-      <PageHeader overline="Inbox" title="Notifications & announcements" actions={<MarkAllReadButton disabled={unread === 0} />} />
+      <InboxProvider unread={unread} approvals={pendingApprovals}>
+        <PageHeader overline="Inbox" title="Notifications & announcements" actions={<MarkAllReadButton />} />
 
-      <div className="grid items-start gap-5 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <div className="flex flex-wrap items-end justify-between gap-2 px-3 pt-2 sm:px-4">
-            <LinkTabs
-              className="flex-1 border-b-0"
-              items={[
-                { href: tabHref("all"), label: "All", active: tab === "all" },
-                { href: tabHref("unread"), label: "Unread", active: tab === "unread", count: unread },
-                { href: tabHref("approvals"), label: "Approvals", active: tab === "approvals", count: pendingApprovals },
-              ]}
-            />
-            <div className="pb-2">
-              <SelectFilter param="type" label="Filter by category" allLabel="All categories" options={NOTIFICATION_EVENTS.map((e) => ({ value: e.key, label: NOTIFICATION_TYPES[e.key]?.label ?? e.label }))} className="h-9 text-[13px]" />
+        <div className="grid items-start gap-5 lg:grid-cols-3">
+          <Card className="lg:col-span-2">
+            <div className="flex flex-wrap items-end justify-between gap-2 px-3 pt-2 sm:px-4">
+              <InboxTabs tab={tab} hrefs={{ all: tabHref("all"), unread: tabHref("unread"), approvals: tabHref("approvals") }} />
+              <div className="pb-2">
+                <SelectFilter param="type" label="Filter by category" allLabel="All categories" options={NOTIFICATION_EVENTS.map((e) => ({ value: e.key, label: NOTIFICATION_TYPES[e.key]?.label ?? e.label }))} className="h-9 text-[13px]" />
+              </div>
             </div>
-          </div>
-          <div className="border-t border-line">
-            {groups.length === 0 ? (
-              <EmptyState
-                icon={<Bell className="size-5" />}
-                title={tab === "unread" ? "You're all caught up" : tab === "approvals" ? "Nothing is waiting for your approval" : "No notifications yet"}
-                description={tab === "all" && !type ? "Alerts about your tasks, leave, movements and approvals will appear here." : "Try another tab or category."}
-              />
-            ) : (
-              <NotificationList groups={groups} />
-            )}
-          </div>
-          {total > PAGE_SIZE && <Pagination page={page} pageSize={PAGE_SIZE} total={total} />}
-        </Card>
+            <div className="border-t border-line">
+              {groups.length === 0 ? (
+                <EmptyState
+                  icon={<Bell className="size-5" />}
+                  title={tab === "unread" ? "You're all caught up" : tab === "approvals" ? "Nothing is waiting for your approval" : "No notifications yet"}
+                  description={tab === "all" && !type ? "Alerts about your tasks, leave, movements and approvals will appear here." : "Try another tab or category."}
+                />
+              ) : (
+                <NotificationList groups={groups} />
+              )}
+            </div>
+            {total > PAGE_SIZE && <Pagination page={page} pageSize={PAGE_SIZE} total={total} />}
+          </Card>
 
-        <AnnouncementPanel items={announcements} canManage={canManage} />
-      </div>
+          <AnnouncementPanel items={announcements} canManage={canManage} />
+        </div>
+      </InboxProvider>
     </PageBody>
   );
 }

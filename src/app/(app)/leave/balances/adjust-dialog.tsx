@@ -8,7 +8,9 @@ import { fmtDate } from "@/lib/time";
 import { adjustLeaveBalance, setQuotaOverride } from "../actions";
 
 export interface BalanceSummary {
+  kind: string;
   quota: number;
+  prorated: boolean;
   accrued: number;
   carriedForward: number;
   adjustment: number;
@@ -48,13 +50,15 @@ export function AdjustBalanceDialog({
 }) {
   const [open, setOpen] = useState(false);
   const values = { userId, leaveType: leaveTypeId, year };
+  const compOff = summary.kind === "comp_off";
+  const calculated = summary.quotaOverride == null ? summary.quota : undefined;
   return (
     <Dialog open={open} onOpenChange={setOpen} trigger={trigger} size="lg" title={`${leaveTypeName} · ${userName}`} description={`Leave year ${year}. Every change is recorded with your name and reason.`}>
       <div className="flex flex-col gap-5">
         <dl className="grid grid-cols-3 gap-2 text-center sm:grid-cols-6">
           {(
             [
-              ["Quota", summary.quota],
+              [compOff ? "Earned" : "Entitled", summary.quota],
               ["Accrued", summary.accrued],
               ["Carried fwd", summary.carriedForward],
               ["Adjusted", summary.adjustment],
@@ -68,6 +72,12 @@ export function AdjustBalanceDialog({
             </div>
           ))}
         </dl>
+        {summary.prorated && (
+          <p className="-mt-2 text-[13px] text-muted">
+            Pro-rated: {summary.quota} of the {summary.defaultQuota}-day annual quota for the months {userName} is employed this year (a month counts when joined by the 15th).
+          </p>
+        )}
+        {compOff && <p className="-mt-2 text-[13px] text-muted">Comp-off is earned through approved comp-off claims; use an adjustment only for corrections.</p>}
 
         <ActionForm action={adjustLeaveBalance} values={values} successMessage="Balance adjusted" resetOnSuccess>
           <h3 className="font-display text-[15px] font-semibold text-ink">Adjust balance</h3>
@@ -76,7 +86,7 @@ export function AdjustBalanceDialog({
               <Input id="amount" name="amount" type="number" step="0.5" inputMode="decimal" placeholder="+2" />
             </Field>
             <Field label="Reason" name="reason" required>
-              <Input id="reason" name="reason" placeholder="e.g. Comp-off for weekend release" />
+              <Input id="reason" name="reason" placeholder="e.g. Correction after attendance review" />
             </Field>
           </FormGrid>
           <FormActions className="pt-0">
@@ -84,20 +94,26 @@ export function AdjustBalanceDialog({
           </FormActions>
         </ActionForm>
 
-        <ActionForm action={setQuotaOverride} values={values} successMessage="Quota saved">
-          <h3 className="font-display text-[15px] font-semibold text-ink">Quota override</h3>
-          <FormGrid cols={2}>
-            <Field label="Annual quota for this person" name="quota" hint={`Type default is ${summary.defaultQuota}. Leave blank to remove the override.`}>
-              <Input id="quota" name="quota" type="number" step="0.5" min="0" inputMode="decimal" defaultValue={summary.quotaOverride ?? ""} placeholder={String(summary.defaultQuota)} />
-            </Field>
-            <Field label="Reason" name="reason" required>
-              <Input id="quotaReason" name="reason" placeholder="e.g. Pro-rated for mid-year joiner" />
-            </Field>
-          </FormGrid>
-          <FormActions className="pt-0">
-            <SubmitButton variant="secondary">Save quota</SubmitButton>
-          </FormActions>
-        </ActionForm>
+        {!compOff && (
+          <ActionForm action={setQuotaOverride} values={values} successMessage="Quota saved">
+            <h3 className="font-display text-[15px] font-semibold text-ink">Entitlement override</h3>
+            <FormGrid cols={2}>
+              <Field
+                label={`Days for ${year}`}
+                name="quota"
+                hint={`${calculated !== undefined ? `Calculated: ${calculated} (annual ${summary.defaultQuota}${summary.prorated ? ", pro-rated" : ""}).` : `Annual quota is ${summary.defaultQuota}.`} Monthly types spread it over the months employed. Leave blank to use the calculation.`}
+              >
+                <Input id="quota" name="quota" type="number" step="0.5" min="0" inputMode="decimal" defaultValue={summary.quotaOverride ?? ""} placeholder={String(calculated ?? summary.defaultQuota)} />
+              </Field>
+              <Field label="Reason" name="reason" required>
+                <Input id="quotaReason" name="reason" placeholder="e.g. Agreed in the offer letter" />
+              </Field>
+            </FormGrid>
+            <FormActions className="pt-0">
+              <SubmitButton variant="secondary">Save quota</SubmitButton>
+            </FormActions>
+          </ActionForm>
+        )}
 
         {notes.length > 0 && (
           <div>

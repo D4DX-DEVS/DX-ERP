@@ -158,6 +158,9 @@ export function LeaveSettingsForm({ leave }: { leave: AppSettings["leave"] }) {
               ))}
             </Select>
           </Field>
+          <Field label="Comp-off claim window (days)" name="compOffClaimDays" required hint="How long after working on a weekend or holiday staff may claim the comp-off.">
+            <Input id="compOffClaimDays" name="compOffClaimDays" type="number" min={1} max={365} defaultValue={leave.compOffClaimDays} />
+          </Field>
         </CGrid>
         <div className="flex flex-col gap-4">
           <Switch name="allowNegativeBalance" defaultChecked={leave.allowNegativeBalance} label="Allow negative leave balance" description="Let people request more leave than they have accrued." />

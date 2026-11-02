@@ -35,6 +35,7 @@ export const ID_PREFIX = {
   admin: "ADM-",
   movement: "MOV-",
   leave: "LV-",
+  compOff: "CO-",
   project: "PRJ-",
   task: "TSK-",
   issue: "BUG-",

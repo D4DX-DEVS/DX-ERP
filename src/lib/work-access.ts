@@ -75,7 +75,7 @@ function memberOfProject(userId: Id): SQL {
   return or(eq(Project.manager, userId), jsonHasField(Project.team, "user", userId))!;
 }
 
-/** Condition for the projects a user may see. */
+/** Condition for the projects a user may see: all for the super admin (`projects.view_all`), otherwise the ones they lead or are on. */
 export function projectFilter(user: CurrentUser): Filter {
   if (can(user, "projects.view_all")) return undefined;
   return memberOfProject(user._id);
@@ -85,7 +85,7 @@ export interface ProjectCaps {
   isManager: boolean;
   isMember: boolean;
   view: boolean;
-  /** Edit the project, milestones and team: `projects.manage` or the project manager. */
+  /** Edit the project, milestones and team: the project manager, or `projects.manage` on a project the user can see. */
   manage: boolean;
   /** Budget, billing and cost data. Never granted to interns / trainees. */
   financials: boolean;
@@ -97,11 +97,12 @@ export function projectCaps(user: CurrentUser, project: { manager?: Id | null; t
   const isManager = sid(project.manager) === user.id;
   const isMember = (project.team ?? []).some((m) => m.user === user.id);
   const restricted = isInternLike(user);
+  const view = can(user, "projects.view_all") || isManager || isMember;
   return {
     isManager,
     isMember,
-    view: can(user, "projects.view_all") || isManager || isMember,
-    manage: can(user, "projects.manage") || isManager,
+    view,
+    manage: isManager || (view && can(user, "projects.manage")),
     financials: can(user, "projects.financials") && !restricted,
     restricted,
   };
@@ -151,7 +152,7 @@ export interface TaskCaps {
   isReporter: boolean;
   isProjectManager: boolean;
   intern: boolean;
-  /** Edit, reassign and set any status: `tasks.manage` or the project's manager. */
+  /** Edit, reassign and set any status: the project's manager, or `tasks.manage` on a task outside projects / in a project the user is on. */
   manage: boolean;
   /** Approve or request changes on submitted work. */
   review: boolean;
@@ -162,13 +163,14 @@ export interface TaskCaps {
 export function taskCaps(
   user: CurrentUser,
   task: { assignees: Id[]; reporter?: Id | null; reviewer?: Id | null },
-  projectManager?: Id | null,
+  project?: { manager?: Id | null; team?: { user: Id }[] } | null,
 ): TaskCaps {
   const isAssignee = task.assignees.some((a) => a === user.id);
   const isReviewer = sid(task.reviewer) === user.id;
   const isReporter = sid(task.reporter) === user.id;
-  const isProjectManager = Boolean(projectManager) && sid(projectManager) === user.id;
-  const manage = can(user, "tasks.manage") || isProjectManager;
+  const isProjectManager = Boolean(project?.manager) && sid(project?.manager) === user.id;
+  // A lead's `tasks.manage` stops at the projects they are on; other projects' tasks stay with those projects' leads.
+  const manage = isProjectManager || (can(user, "tasks.manage") && (!project || projectCaps(user, project).view));
   return {
     isAssignee,
     isReviewer,
@@ -198,10 +200,10 @@ export function allowedTaskStatuses(settings: { taskStatuses: StatusOption[] }, 
   return all.filter((s) => cats.has(s.category)).map((s) => s.key);
 }
 
-/** True when the user may create tasks in this project (or any task, with `tasks.manage`). */
-export function canCreateTask(user: CurrentUser, project?: { manager?: Id | null } | null): boolean {
-  if (can(user, "tasks.manage")) return true;
-  return Boolean(project) && sid(project!.manager) === user.id;
+/** True when the user may create tasks in this project (its manager, or `tasks.manage` on a project they can see), or outside projects (`tasks.manage`). */
+export function canCreateTask(user: CurrentUser, project?: { manager?: Id | null; team?: { user: Id }[] } | null): boolean {
+  if (!project) return can(user, "tasks.manage");
+  return sid(project.manager) === user.id || (can(user, "tasks.manage") && projectCaps(user, project).view);
 }
 
 /* ------------------------------------------------------------------ */

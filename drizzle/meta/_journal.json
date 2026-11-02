@@ -22,6 +22,13 @@
       "when": 1793622749171,
       "tag": "0002_bank_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1793628410740,
+      "tag": "0003_leave_policy",
+      "breakpoints": true
     }
   ]
 }

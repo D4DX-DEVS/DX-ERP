@@ -25,8 +25,9 @@ export async function ensureSeeded(): Promise<void> {
       { name: "Casual leave", code: "CL", color: "#284CC7", annualQuota: 12, accrual: "monthly", carryForward: false, paid: true, allowHalfDay: true, requiresHrApproval: false, applicableTo: ["employee", "trainee", "intern"], order: 1 },
       { name: "Sick leave", code: "SL", color: "#0E9F75", annualQuota: 8, accrual: "upfront", carryForward: false, paid: true, allowHalfDay: true, requiresHrApproval: false, requiresAttachmentAfterDays: 2, applicableTo: ["employee", "trainee", "intern"], order: 2 },
       { name: "Annual leave", code: "AL", color: "#6D28D9", annualQuota: 15, accrual: "monthly", carryForward: true, maxCarryForward: 10, paid: true, allowHalfDay: false, requiresHrApproval: true, applicableTo: ["employee"], order: 3 },
-      { name: "Compensatory leave", code: "CO", color: "#D0691F", annualQuota: 0, accrual: "upfront", carryForward: false, paid: true, allowHalfDay: true, requiresHrApproval: false, applicableTo: ["employee", "trainee"], order: 4 },
+      { name: "Compensatory leave", code: "CO", color: "#D0691F", annualQuota: 0, accrual: "upfront", kind: "comp_off", carryForward: false, paid: true, allowHalfDay: true, requiresHrApproval: false, applicableTo: ["employee", "trainee"], order: 4 },
       { name: "Unpaid leave", code: "LOP", color: "#8A93B2", annualQuota: 0, accrual: "upfront", carryForward: false, paid: false, allowHalfDay: true, requiresHrApproval: true, applicableTo: ["employee", "trainee", "intern"], order: 5 },
+      { name: "Optional holiday", code: "OH", color: "#0E7490", annualQuota: 2, accrual: "upfront", kind: "optional_holiday", carryForward: false, paid: true, allowHalfDay: false, requiresHrApproval: false, applicableTo: ["employee", "trainee", "intern"], order: 6 },
     ]);
   }
 
