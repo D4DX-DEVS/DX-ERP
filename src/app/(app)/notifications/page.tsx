@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
 import { Bell } from "lucide-react";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, type SQL } from "drizzle-orm";
 import { can, requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { Notification } from "@/lib/models";
 import { NOTIFICATION_EVENTS } from "@/lib/config-defaults";
-import { pageParam, PAGE_SIZE, param, withParams, type SearchParams } from "@/lib/query";
+import { pageParam, PAGE_SIZE, param, sortParam, withParams, type SearchParams, type SortChoices } from "@/lib/query";
 import { addDays, dateKey, fmtDate, fmtTime, todayKey } from "@/lib/time";
 import { Card } from "@/components/ui/card";
-import { SelectFilter, Pagination } from "@/components/ui/filters";
+import { SelectFilter, Pagination, SortSelect } from "@/components/ui/filters";
 import { EmptyState, PageBody, PageHeader } from "@/components/ui/page";
 import { AnnouncementPanel } from "./announcement-panel";
 import { loadAnnouncements } from "./data";
@@ -17,12 +17,18 @@ import { InboxProvider, InboxTabs, MarkAllReadButton, NotificationList } from ".
 
 export const metadata: Metadata = { title: "Notifications" };
 
+const SORTS = {
+  newest: { label: "Newest first", order: [desc(Notification.createdAt)] },
+  oldest: { label: "Oldest first", order: [asc(Notification.createdAt)] },
+} satisfies SortChoices<SQL[]>;
+
 export default async function NotificationsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
   const sp = await searchParams;
   const tab: InboxTab = (INBOX_TABS as readonly string[]).includes(param(sp, "tab")) ? (param(sp, "tab") as InboxTab) : "all";
   const type = param(sp, "type");
   const page = pageParam(sp);
+  const sort = sortParam(sp, SORTS);
   const today = todayKey();
   const canManage = can(user, "announcements.manage");
 
@@ -48,7 +54,7 @@ export default async function NotificationsPage({ searchParams }: { searchParams
       })
       .from(Notification)
       .where(filter)
-      .orderBy(desc(Notification.createdAt))
+      .orderBy(...sort.order)
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
     db().$count(Notification, filter),
@@ -89,8 +95,9 @@ export default async function NotificationsPage({ searchParams }: { searchParams
           <Card className="lg:col-span-2">
             <div className="flex flex-wrap items-end justify-between gap-2 px-3 pt-2 sm:px-4">
               <InboxTabs tab={tab} hrefs={{ all: tabHref("all"), unread: tabHref("unread"), approvals: tabHref("approvals") }} />
-              <div className="pb-2">
+              <div className="flex flex-wrap items-center gap-2 pb-2">
                 <SelectFilter param="type" label="Filter by category" allLabel="All categories" options={NOTIFICATION_EVENTS.map((e) => ({ value: e.key, label: NOTIFICATION_TYPES[e.key]?.label ?? e.label }))} className="h-9 text-[13px]" />
+                <SortSelect options={sort.options} className="h-9" />
               </div>
             </div>
             <div className="border-t border-line">

@@ -1,19 +1,19 @@
 import { forbidden } from "next/navigation";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, type SQL } from "drizzle-orm";
 import { CheckCircle2 } from "lucide-react";
 import { ActionButton, ReasonAction } from "@/components/ui/actions";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Chip, StatusChip } from "@/components/ui/chip";
-import { Pagination } from "@/components/ui/filters";
+import { Pagination, SortSelect } from "@/components/ui/filters";
 import { EmptyState, PageBody, PageHeader } from "@/components/ui/page";
 import { EmptyRow, TableWrap, THead, Td, Th, Tr } from "@/components/ui/table";
 import { LinkTabs } from "@/components/ui/tabs";
 import { requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { AttendanceCorrection, Department, User, type IAttendanceCorrection } from "@/lib/models";
-import { PAGE_SIZE, pageParam, param, type SearchParams } from "@/lib/query";
+import { PAGE_SIZE, pageParam, param, sortParam, type SearchParams, type SortChoices } from "@/lib/query";
 import { inList } from "@/lib/sql";
 import { fmtDate, fmtDateTime, fmtTime, timeAgo } from "@/lib/time";
 import { approveCorrection, rejectCorrection } from "../actions";
@@ -25,6 +25,15 @@ import { decidableFilter, historyFilter } from "../_lib/corrections";
 export const metadata = { title: "Attendance corrections" };
 
 type Correction = Pick<IAttendanceCorrection, "date" | "requestedCheckIn" | "requestedCheckOut" | "original">;
+
+const SORTS = {
+  decided: { label: "Recently decided", order: [desc(AttendanceCorrection.reviewedAt)] },
+  decidedOldest: { label: "Decided (oldest)", order: [asc(AttendanceCorrection.reviewedAt)] },
+  requested: { label: "Requested (newest)", order: [desc(AttendanceCorrection.createdAt)] },
+  requestedOldest: { label: "Requested (oldest)", order: [asc(AttendanceCorrection.createdAt)] },
+  day: { label: "Day (newest)", order: [desc(AttendanceCorrection.date), desc(AttendanceCorrection.createdAt)] },
+  dayOldest: { label: "Day (oldest)", order: [asc(AttendanceCorrection.date), asc(AttendanceCorrection.createdAt)] },
+} satisfies SortChoices<SQL[]>;
 
 function Change({ c }: { c: Correction }) {
   return (
@@ -50,6 +59,7 @@ export default async function CorrectionsPage({ searchParams }: { searchParams: 
   const sp = await searchParams;
   const tab = param(sp, "tab") === "history" ? "history" : "pending";
   const page = pageParam(sp);
+  const sort = sortParam(sp, SORTS);
   const now = currentTime();
 
   const pendingFilter = and(eq(AttendanceCorrection.status, "pending"), decidableFilter(user, access));
@@ -62,7 +72,7 @@ export default async function CorrectionsPage({ searchParams }: { searchParams: 
           .select()
           .from(AttendanceCorrection)
           .where(historyQuery)
-          .orderBy(desc(AttendanceCorrection.reviewedAt))
+          .orderBy(...sort.order)
           .limit(PAGE_SIZE)
           .offset((page - 1) * PAGE_SIZE),
     tab === "history" ? db().$count(AttendanceCorrection, historyQuery) : Promise.resolve(0),
@@ -140,6 +150,9 @@ export default async function CorrectionsPage({ searchParams }: { searchParams: 
         )
       ) : (
         <Card>
+          <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-4 py-3">
+            <SortSelect options={sort.options} />
+          </div>
           <TableWrap phone={[1, 2, 5]} tablet={[1, 2, 3, 5]}>
             <THead>
               <Th>Person</Th>

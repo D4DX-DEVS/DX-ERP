@@ -1,15 +1,15 @@
 import { Plus } from "lucide-react";
-import { and, asc, count, desc, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq, sql, type SQL } from "drizzle-orm";
 import { can, requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { Project } from "@/lib/models";
-import { pageParam, PAGE_SIZE, param, withParams, type SearchParams } from "@/lib/query";
+import { pageParam, PAGE_SIZE, param, sortParam, withParams, type SearchParams, type SortChoices } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
-import { notInList, searchAny } from "@/lib/sql";
+import { nocase, notInList, searchAny } from "@/lib/sql";
 import { keysInCategories, PROJECT_CLOSED_CATEGORIES, projectFilter, type Filter } from "@/lib/work-access";
 import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ChipFilters, FilterBar, Pagination, SearchInput } from "@/components/ui/filters";
+import { ChipFilters, FilterBar, Pagination, SearchInput, SortSelect } from "@/components/ui/filters";
 import { PageBody, PageHeader } from "@/components/ui/page";
 import { Segmented } from "@/components/ui/tabs";
 import { PROJECT_ROW_FIELDS, buildProjectRows } from "./rows";
@@ -20,9 +20,19 @@ export const metadata = { title: "Projects" };
 const BOARD_COLUMN_LIMIT = 30;
 const TIMELINE_LIMIT = 60;
 
+const SORTS = {
+  newest: { label: "Newest first", order: [desc(Project.projectNo)] },
+  oldest: { label: "Oldest first", order: [asc(Project.projectNo)] },
+  updated: { label: "Recently updated", order: [desc(Project.updatedAt)] },
+  title: { label: "Title A–Z", order: [asc(nocase(Project.title)), desc(Project.projectNo)] },
+  titleDesc: { label: "Title Z–A", order: [desc(nocase(Project.title)), desc(Project.projectNo)] },
+  target: { label: "Target date (soonest)", order: [asc(sql`coalesce(${Project.targetDate}, '9999-12-31')`), desc(Project.projectNo)] },
+} satisfies SortChoices<SQL[]>;
+
 export default async function ProjectsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
   const sp = await searchParams;
+  const sort = sortParam(sp, SORTS);
   const settings = await getSettings();
   const statuses = settings.projectStatuses;
   const closedKeys = keysInCategories(statuses, PROJECT_CLOSED_CATEGORIES);
@@ -46,7 +56,7 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Pro
   if (view === "list") {
     const page = pageParam(sp);
     const [projects, matching] = await Promise.all([
-      db().select(PROJECT_ROW_FIELDS).from(Project).where(filter).orderBy(desc(Project.projectNo)).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
+      db().select(PROJECT_ROW_FIELDS).from(Project).where(filter).orderBy(...sort.order).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
       db().$count(Project, filter),
     ]);
     const rows = await buildProjectRows(user, projects, settings);
@@ -119,6 +129,7 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Pro
       <ChipFilters param="status" options={chipOptions} />
       <FilterBar>
         <SearchInput placeholder="Search projects" />
+        {view === "list" && <SortSelect options={sort.options} />}
       </FilterBar>
       {body}
     </PageBody>

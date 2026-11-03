@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { forbidden } from "next/navigation";
 import { KeyRound } from "lucide-react";
-import { and, asc, count, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq, type SQL } from "drizzle-orm";
 import { PersonCell } from "@/components/ui/avatar";
 import { Card, CardFooter } from "@/components/ui/card";
 import { OptionChip, StatusChip, Tag } from "@/components/ui/chip";
-import { ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter } from "@/components/ui/filters";
+import { ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter, SortSelect } from "@/components/ui/filters";
 import { Alert, PageBody, PageHeader } from "@/components/ui/page";
 import { EmptyRow, TableWrap, THead, Td, Th, Tr } from "@/components/ui/table";
 import { LinkTabs } from "@/components/ui/tabs";
@@ -13,17 +13,26 @@ import { can, requirePagePermission } from "@/lib/auth/session";
 import { cn } from "@/lib/cn";
 import { db } from "@/lib/db";
 import { PERSON_TYPES, Role, User } from "@/lib/models";
-import { pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
+import { pageParam, PAGE_SIZE, param, sortParam, type SearchParams, type SortChoices } from "@/lib/query";
 import { ROLE_KEYS } from "@/lib/rbac/permissions";
 import { assignableRoles, ensureRoles } from "@/lib/rbac/roles";
 import { getSettings } from "@/lib/settings";
-import { inList, searchAny } from "@/lib/sql";
+import { inList, nocase, searchAny } from "@/lib/sql";
 import { timeAgo } from "@/lib/time";
 import { CreateRoleButton, RoleEditor, type RoleView } from "./role-editor";
 import { LinkSelect } from "../settings/ui";
 import { UserActions } from "./user-actions";
 
 export const metadata = { title: "Roles & access" };
+
+const USER_SORTS = {
+  name: { label: "Name A–Z", order: [asc(nocase(User.name)), asc(User._id)] },
+  nameDesc: { label: "Name Z–A", order: [desc(nocase(User.name)), asc(User._id)] },
+  employeeId: { label: "Employee ID", order: [asc(User.employeeId)] },
+  lastLogin: { label: "Last sign-in (latest)", order: [desc(User.lastLoginAt), asc(nocase(User.name)), asc(User._id)] },
+  newest: { label: "Newest first", order: [desc(User.createdAt), asc(User._id)] },
+  updated: { label: "Recently updated", order: [desc(User.updatedAt), asc(User._id)] },
+} satisfies SortChoices<SQL[]>;
 
 export default async function Page({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePagePermission("roles.manage", "users.manage");
@@ -117,6 +126,7 @@ async function UsersTab({ sp, currentUserId }: { sp: SearchParams; currentUserId
   const roleFilter = param(sp, "role");
   const access = param(sp, "access");
   const page = pageParam(sp);
+  const sort = sortParam(sp, USER_SORTS);
 
   const filter = and(
     inList(User.personType, PERSON_TYPES),
@@ -131,7 +141,7 @@ async function UsersTab({ sp, currentUserId }: { sp: SearchParams; currentUserId
       .select({ _id: User._id, name: User.name, email: User.email, employeeId: User.employeeId, photo: User.photo, role: User.role, accountActive: User.accountActive, lastLoginAt: User.lastLoginAt, status: User.status })
       .from(User)
       .where(filter)
-      .orderBy(asc(User.name))
+      .orderBy(...sort.order)
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
     db().$count(User, filter),
@@ -174,6 +184,7 @@ async function UsersTab({ sp, currentUserId }: { sp: SearchParams; currentUserId
             { value: "inactive", label: "No access" },
           ]}
         />
+        <SortSelect options={sort.options} />
         <ClearFilters />
       </FilterBar>
 

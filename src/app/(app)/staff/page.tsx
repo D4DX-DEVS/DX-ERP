@@ -1,24 +1,24 @@
 import type { Metadata } from "next";
 import { Download, Plus, Upload, UserSearch } from "lucide-react";
 import { can, requirePagePermission } from "@/lib/auth/session";
-import { and, asc, count, eq, gt, isNotNull, isNull, lte, ne } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, isNotNull, isNull, lte, ne, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { Department, Designation, StoredFile, User } from "@/lib/models";
 import { namesFor } from "@/lib/people";
 import { assignableRoles } from "@/lib/rbac/roles";
 import { getSettings } from "@/lib/settings";
-import { PAGE_SIZE, pageParam, param, withParams, type SearchParams } from "@/lib/query";
+import { PAGE_SIZE, pageParam, param, sortParam, withParams, type SearchParams, type SortChoices } from "@/lib/query";
 import { addDays, fmtDate, todayKey } from "@/lib/time";
 import { Alert, EmptyState, PageBody, PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { ButtonLink } from "@/components/ui/button";
-import { ChipFilters, ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter } from "@/components/ui/filters";
+import { ChipFilters, ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter, SortSelect } from "@/components/ui/filters";
 import { Menu } from "@/components/ui/menu";
 import { PersonCell } from "@/components/ui/avatar";
 import { OptionChip, StatusChip, Tag } from "@/components/ui/chip";
 import { EmptyRow, Td, Th, THead, TableWrap, Tr } from "@/components/ui/table";
 import { statusTone } from "@/lib/status";
-import { inList, notInList } from "@/lib/sql";
+import { inList, nocase, notInList } from "@/lib/sql";
 import { EXITED_STATUSES } from "@/lib/people";
 import Link from "next/link";
 import { categoriesFor, expiryInfo, missingRequired } from "./_lib/documents";
@@ -29,12 +29,22 @@ export const metadata: Metadata = { title: "Staff" };
 
 const TYPE_LABELS: Record<string, string> = { employee: "Employees", trainee: "Trainees", intern: "Interns" };
 
+const SORTS = {
+  name: { label: "Name A–Z", order: [asc(nocase(User.name))] },
+  nameDesc: { label: "Name Z–A", order: [desc(nocase(User.name))] },
+  joinedDesc: { label: "Joined (newest)", order: [desc(User.joiningDate), asc(nocase(User.name))] },
+  joined: { label: "Joined (oldest)", order: [asc(sql`coalesce(${User.joiningDate}, '9999-12-31')`), asc(nocase(User.name))] },
+  employeeId: { label: "Employee ID", order: [asc(User.employeeId)] },
+  updated: { label: "Recently updated", order: [desc(User.updatedAt)] },
+} satisfies SortChoices<SQL[]>;
+
 export default async function StaffPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePagePermission("staff.view");
   const sp = await searchParams;
   const settings = await getSettings();
   const today = todayKey();
   const page = pageParam(sp);
+  const sort = sortParam(sp, SORTS);
   const filter = staffFilter(sp, settings);
   const canCreate = can(user, "staff.create");
   const canEdit = can(user, "staff.edit");
@@ -59,7 +69,7 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
       })
       .from(User)
       .where(filter)
-      .orderBy(asc(User.name))
+      .orderBy(...sort.order)
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
     db().$count(User, filter),
@@ -126,7 +136,7 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
     { value: "", label: "All", count: allCount },
     ...STAFF_TYPES.map((t) => ({ value: t, label: TYPE_LABELS[t], count: counts.get(t) ?? 0 })),
   ];
-  const hasFilters = Object.entries(sp).some(([k, v]) => k !== "page" && v);
+  const hasFilters = Object.entries(sp).some(([k, v]) => k !== "page" && k !== "sort" && v);
   const colCount = canEdit ? 8 : 7;
 
   return (
@@ -215,6 +225,7 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
                 { value: "any", label: "Has a contract period" },
               ]}
             />
+            <SortSelect options={sort.options} />
             <ClearFilters />
           </FilterBar>
         </div>

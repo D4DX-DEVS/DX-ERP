@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { and, asc, desc, eq, gte, lte, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lte, ne, type SQL } from "drizzle-orm";
 import { ActionButton, ReasonAction } from "@/components/ui/actions";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { StatusChip, Tag } from "@/components/ui/chip";
-import { Pagination } from "@/components/ui/filters";
+import { Pagination, SortSelect } from "@/components/ui/filters";
 import { EmptyState, PageBody, PageHeader, Progress } from "@/components/ui/page";
 import { Timeline, type TimelineItem } from "@/components/ui/timeline";
 import { AttachmentList } from "@/components/ui/file-upload";
@@ -17,7 +17,7 @@ import { namesFor } from "@/lib/people";
 import { plain } from "@/lib/serialize";
 import { getSettings } from "@/lib/settings";
 import { inList, jsonHas } from "@/lib/sql";
-import { pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
+import { pageParam, PAGE_SIZE, param, sortParam, type SearchParams, type SortChoices } from "@/lib/query";
 import { addDays, fmtDate, formatDuration, timeAgo, todayKey, weekday } from "@/lib/time";
 import { cancelLeave } from "./actions";
 import { ApplyLeaveForm } from "./apply-form";
@@ -29,6 +29,15 @@ import { daysLabel, leaveRangeLabel } from "./_lib/format";
 
 export const metadata = { title: "My leave" };
 
+const SORTS = {
+  newest: { label: "Newest first", order: [desc(LeaveRequest.createdAt)] },
+  oldest: { label: "Oldest first", order: [asc(LeaveRequest.createdAt)] },
+  start: { label: "Leave start (latest)", order: [desc(LeaveRequest.startDate), desc(LeaveRequest.createdAt)] },
+  startOldest: { label: "Leave start (earliest)", order: [asc(LeaveRequest.startDate), asc(LeaveRequest.createdAt)] },
+  days: { label: "Days (most)", order: [desc(LeaveRequest.days), desc(LeaveRequest.createdAt)] },
+  updated: { label: "Recently updated", order: [desc(LeaveRequest.updatedAt)] },
+} satisfies SortChoices<SQL[]>;
+
 export default async function MyLeavePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
   const sp = await searchParams;
@@ -39,6 +48,7 @@ export default async function MyLeavePage({ searchParams }: { searchParams: Prom
   const year = leaveYearOf(today, settings);
   const range = leaveYearRange(year, settings);
   const page = pageParam(sp);
+  const sort = sortParam(sp, SORTS);
   const mine = eq(LeaveRequest.user, user._id);
 
   const [balances, types, requests, requestTotal, busy, holidays, pendingForMe, claims] = await Promise.all([
@@ -47,7 +57,7 @@ export default async function MyLeavePage({ searchParams }: { searchParams: Prom
       .select()
       .from(LeaveType)
       .where(and(eq(LeaveType.active, true), jsonHas(LeaveType.applicableTo, user.personType))),
-    db().select().from(LeaveRequest).where(mine).orderBy(desc(LeaveRequest.createdAt)).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
+    db().select().from(LeaveRequest).where(mine).orderBy(...sort.order).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
     db().$count(LeaveRequest, mine),
     // Live requests the date picker warns about overlapping, independent of the page shown below.
     db()
@@ -234,7 +244,7 @@ export default async function MyLeavePage({ searchParams }: { searchParams: Prom
       </div>
 
       <Card>
-        <CardHeader title="My requests" subtitle="Most recent first" />
+        <CardHeader title="My requests" action={requestTotal > 0 && <SortSelect options={sort.options} />} />
         {requests.length === 0 ? (
           <EmptyState title="No leave requests yet" description="Requests you submit will appear here with their approval trail." />
         ) : (

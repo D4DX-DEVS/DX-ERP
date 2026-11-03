@@ -1,20 +1,20 @@
 import type { Metadata } from "next";
 import { forbidden } from "next/navigation";
 import { GraduationCap, Plus } from "lucide-react";
-import { and, asc, count, eq, gte, isNotNull, lte, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, isNotNull, lte, sql, type SQL } from "drizzle-orm";
 import { can, canAny, requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { Department, Review, User, type Id, type Internship } from "@/lib/models";
 import { namesFor } from "@/lib/people";
-import { idParam, PAGE_SIZE, pageParam, param, type SearchParams } from "@/lib/query";
-import { inList, jsonPath, searchAny } from "@/lib/sql";
+import { idParam, PAGE_SIZE, pageParam, param, sortParam, type SearchParams, type SortChoices } from "@/lib/query";
+import { inList, jsonPath, nocase, searchAny } from "@/lib/sql";
 import { STATUS, statusTone } from "@/lib/status";
 import { addDays, fmtDate, todayKey } from "@/lib/time";
 import { PersonCell } from "@/components/ui/avatar";
 import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { StatusChip, Tag } from "@/components/ui/chip";
-import { ChipFilters, ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter } from "@/components/ui/filters";
+import { ChipFilters, ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter, SortSelect } from "@/components/ui/filters";
 import { EmptyState, PageBody, PageHeader, Progress, StatCard } from "@/components/ui/page";
 import { EmptyRow, Td, Th, THead, TableWrap, Tr } from "@/components/ui/table";
 import { internshipProgress } from "../staff/_lib/constants";
@@ -38,6 +38,15 @@ interface InternRow {
 /** The internship's status inside the JSON column (the path is inlined so select and group-by use the same expression). */
 const internshipStatus = sql<string | null>`json_extract(${User.internship}, '$.status')`;
 
+const SORTS = {
+  name: { label: "Name A–Z", order: [asc(nocase(User.name)), asc(User._id)] },
+  nameDesc: { label: "Name Z–A", order: [desc(nocase(User.name)), asc(User._id)] },
+  started: { label: "Start date (newest)", order: [desc(jsonPath(User.internship, "startDate")), asc(nocase(User.name)), asc(User._id)] },
+  ending: { label: "End date (earliest)", order: [asc(sql`coalesce(${jsonPath(User.internship, "endDate")}, '9999-12-31')`), asc(nocase(User.name)), asc(User._id)] },
+  registered: { label: "Recently registered", order: [desc(User.createdAt), asc(User._id)] },
+  employeeId: { label: "Employee ID", order: [asc(User.employeeId)] },
+} satisfies SortChoices<SQL[]>;
+
 export default async function InternsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
   const sp = await searchParams;
@@ -50,6 +59,7 @@ export default async function InternsPage({ searchParams }: { searchParams: Prom
 
   const today = todayKey();
   const page = pageParam(sp);
+  const sort = sortParam(sp, SORTS);
   const type = param(sp, "type");
   const status = param(sp, "status");
   const mentorFilter = idParam(sp, "mentor");
@@ -75,7 +85,7 @@ export default async function InternsPage({ searchParams }: { searchParams: Prom
       })
       .from(User)
       .where(filter)
-      .orderBy(asc(User.name))
+      .orderBy(...sort.order)
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
     db().$count(User, filter),
@@ -118,7 +128,7 @@ export default async function InternsPage({ searchParams }: { searchParams: Prom
   const byStatus = new Map(statusCounts.map((c) => [c.status, c.n]));
   const active = (byStatus.get("active") ?? 0) + (byStatus.get("extended") ?? 0);
   const dueForReview = runningIds.length - recentlyReviewed.length;
-  const hasFilters = Object.entries(sp).some(([k, v]) => k !== "page" && v);
+  const hasFilters = Object.entries(sp).some(([k, v]) => k !== "page" && k !== "sort" && v);
   const typeOptions = [
     { value: "", label: "All", count: (byType.get("intern") ?? 0) + (byType.get("trainee") ?? 0) },
     { value: "intern", label: "Interns", count: byType.get("intern") ?? 0 },
@@ -154,6 +164,7 @@ export default async function InternsPage({ searchParams }: { searchParams: Prom
             <SearchInput placeholder="Name, email or ID" />
             <SelectFilter param="status" label="Internship status" allLabel="Any status" options={INTERN_STATUSES.map((s) => ({ value: s, label: STATUS.internship[s][0] }))} />
             {seeAll && <SelectFilter param="mentor" label="Mentor" allLabel="Any mentor" options={mentorIds.map((m) => ({ value: String(m), label: mentors.get(String(m)) ?? "Unknown" }))} />}
+            <SortSelect options={sort.options} />
             <ClearFilters />
           </FilterBar>
         </div>

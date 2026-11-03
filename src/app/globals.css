@@ -138,6 +138,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Dropdown arrow for native selects (appearance-none). Kept out of class strings: an inline SVG URL holds spaces. */
+@utility field-chevron {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235E6583' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
+  background-position: right 0.7rem center;
+  background-repeat: no-repeat;
+}
+
 @utility scrollbar-thin {
   scrollbar-width: thin;
   scrollbar-color: var(--color-line-strong) transparent;

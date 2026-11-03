@@ -4,14 +4,14 @@ import { Download } from "lucide-react";
 import { PersonCell } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter } from "@/components/ui/filters";
+import { ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter, SortSelect } from "@/components/ui/filters";
 import { Menu } from "@/components/ui/menu";
 import { EmptyRow, TableWrap, THead, Td, Th, Tr } from "@/components/ui/table";
 import { PageBody, PageHeader } from "@/components/ui/page";
 import { requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { AttendanceCorrection } from "@/lib/models";
-import { idParam, pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
+import { idParam, pageParam, PAGE_SIZE, param, sortParam, type SearchParams, type SortChoices } from "@/lib/query";
 import { fmtDate, formatDuration, monthKey } from "@/lib/time";
 import { MonthNav } from "../_components/month-nav";
 import { AttendanceTabs } from "../_components/tabs";
@@ -19,12 +19,23 @@ import { attendanceAccess } from "../_lib/access";
 import { currentTime } from "../_lib/clock";
 import { decidableFilter } from "../_lib/corrections";
 import { validMonthParam } from "../_lib/params";
-import { loadSummary } from "../_lib/register";
+import { loadSummary, type SummaryRow } from "../_lib/register";
 
 export const metadata = { title: "Attendance summary" };
 
 
 const num = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+
+const byName = (a: SummaryRow, b: SummaryRow) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+
+const SORTS = {
+  name: { label: "Name A–Z", order: byName },
+  nameDesc: { label: "Name Z–A", order: (a, b) => byName(b, a) },
+  present: { label: "Present days (most)", order: (a, b) => b.summary.present - a.summary.present || byName(a, b) },
+  absent: { label: "Absent days (most)", order: (a, b) => b.summary.absent - a.summary.absent || byName(a, b) },
+  late: { label: "Late arrivals (most)", order: (a, b) => b.summary.lateCount - a.summary.lateCount || byName(a, b) },
+  hours: { label: "Total hours (most)", order: (a, b) => b.summary.workMinutes - a.summary.workMinutes || byName(a, b) },
+} satisfies SortChoices<(a: SummaryRow, b: SummaryRow) => number>;
 
 export default async function AttendanceSummaryPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
@@ -37,12 +48,13 @@ export default async function AttendanceSummaryPage({ searchParams }: { searchPa
   const q = param(sp, "q");
   const dept = idParam(sp, "dept");
   const page = pageParam(sp);
+  const sort = sortParam(sp, SORTS);
 
   const [{ rows, departments }, pendingCorrections] = await Promise.all([
     loadSummary(access, { month, q, dept }),
     access.canDecide ? db().$count(AttendanceCorrection, and(eq(AttendanceCorrection.status, "pending"), decidableFilter(user, access))) : Promise.resolve(0),
   ]);
-  const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const pageRows = [...rows].sort(sort.order).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const total = rows.reduce(
     (t, r) => ({
       present: t.present + r.summary.present,
@@ -71,7 +83,7 @@ export default async function AttendanceSummaryPage({ searchParams }: { searchPa
         description={`${fmtDate(`${month}-01`, "MMMM yyyy")} · working days are counted up to today for the current month`}
         actions={
           <>
-            <MonthNav basePath="/attendance/summary" month={month} maxMonth={thisMonth} params={{ q, dept }} />
+            <MonthNav basePath="/attendance/summary" month={month} maxMonth={thisMonth} params={{ q, dept, sort: param(sp, "sort") }} />
             <Menu
               trigger={
                 <Button variant="secondary" icon={<Download className="size-4" />}>
@@ -94,6 +106,7 @@ export default async function AttendanceSummaryPage({ searchParams }: { searchPa
           <FilterBar>
             <SearchInput placeholder="Search people" />
             <SelectFilter param="dept" label="Department" allLabel="All departments" options={departments.map((d) => ({ value: d.id, label: d.name }))} />
+            <SortSelect options={sort.options} />
             <ClearFilters keep={["month"]} />
           </FilterBar>
           <span className="ml-auto text-xs text-muted">{rows.length} people</span>

@@ -1,11 +1,11 @@
 import { ChevronLeft, ChevronRight, Download, Repeat } from "lucide-react";
 import Link from "next/link";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, type SQL } from "drizzle-orm";
 import { ActionButton } from "@/components/ui/actions";
 import { PersonCell } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter } from "@/components/ui/filters";
+import { ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter, SortSelect } from "@/components/ui/filters";
 import { Input, Select } from "@/components/ui/input";
 import { PageBody, PageHeader } from "@/components/ui/page";
 import { EmptyRow, TableWrap, THead, Td, Th, Tr } from "@/components/ui/table";
@@ -14,9 +14,9 @@ import { db } from "@/lib/db";
 import { bulkLeaveBalances, leaveYearOf, leaveYearRange } from "@/lib/domain/leave-balance";
 import { Department, User } from "@/lib/models";
 import { peopleOptions } from "@/lib/people";
-import { PAGE_SIZE, idParam, pageParam, param, type SearchParams } from "@/lib/query";
+import { PAGE_SIZE, idParam, pageParam, param, sortParam, type SearchParams, type SortChoices } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
-import { notInList, inList, searchAny } from "@/lib/sql";
+import { nocase, notInList, inList, searchAny } from "@/lib/sql";
 import { cn } from "@/lib/cn";
 import { fmtDate, todayKey } from "@/lib/time";
 import { carryForward } from "../actions";
@@ -26,6 +26,11 @@ import { EXITED_STATUSES, STAFF_TYPES } from "../../attendance/_lib/access";
 import { AdjustBalanceDialog } from "./adjust-dialog";
 
 export const metadata = { title: "Leave balances" };
+
+const SORTS = {
+  name: { label: "Name A–Z", order: [asc(nocase(User.name))] },
+  nameDesc: { label: "Name Z–A", order: [desc(nocase(User.name))] },
+} satisfies SortChoices<SQL[]>;
 
 export default async function LeaveBalancesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePagePermission("leave.manage");
@@ -39,6 +44,7 @@ export default async function LeaveBalancesPage({ searchParams }: { searchParams
   const q = param(sp, "q");
   const dept = idParam(sp, "dept");
   const page = pageParam(sp);
+  const sort = sortParam(sp, SORTS);
 
   const filter = and(
     inList(User.personType, STAFF_TYPES),
@@ -53,7 +59,7 @@ export default async function LeaveBalancesPage({ searchParams }: { searchParams
       .select({ _id: User._id, name: User.name, employeeId: User.employeeId, photo: User.photo, personType: User.personType, department: User.department })
       .from(User)
       .where(filter)
-      .orderBy(asc(User.name))
+      .orderBy(...sort.order)
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
     db().select({ _id: Department._id, name: Department.name }).from(Department).orderBy(asc(Department.name)),
@@ -66,6 +72,7 @@ export default async function LeaveBalancesPage({ searchParams }: { searchParams
     const p = new URLSearchParams();
     if (q) p.set("q", q);
     if (dept) p.set("dept", dept);
+    if (param(sp, "sort")) p.set("sort", param(sp, "sort"));
     p.set("year", String(y));
     return `/leave/balances?${p.toString()}`;
   };
@@ -107,6 +114,7 @@ export default async function LeaveBalancesPage({ searchParams }: { searchParams
           <FilterBar>
             <SearchInput placeholder="Search people" />
             <SelectFilter param="dept" label="Department" allLabel="All departments" options={departments.map((d) => ({ value: d._id, label: d.name }))} />
+            <SortSelect options={sort.options} />
             <ClearFilters keep={["year"]} />
           </FilterBar>
           <span className="ml-auto text-xs text-muted">Select a balance to adjust it</span>

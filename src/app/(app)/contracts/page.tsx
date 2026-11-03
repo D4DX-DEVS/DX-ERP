@@ -4,15 +4,15 @@ import { and, asc, count, desc, eq, gte, sql, type SQL } from "drizzle-orm";
 import { can, requirePagePermission } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { Client, Contract, Project, Proposal, type ContractStatus } from "@/lib/models";
-import { idParam, pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
-import { inList, searchAny } from "@/lib/sql";
+import { idParam, pageParam, PAGE_SIZE, param, sortParam, type SearchParams, type SortChoices } from "@/lib/query";
+import { inList, nocase, searchAny } from "@/lib/sql";
 import { inr, inrCompact } from "@/lib/format";
 import { STATUS } from "@/lib/status";
 import { fmtDate } from "@/lib/time";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { StatusChip, Tag } from "@/components/ui/chip";
-import { ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter } from "@/components/ui/filters";
+import { ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter, SortSelect } from "@/components/ui/filters";
 import { PageBody, PageHeader, StatCard } from "@/components/ui/page";
 import { EmptyRow, TableWrap, THead, Th, Td, Tr } from "@/components/ui/table";
 import { canSeeContractSecrets, clientScope, hiddenClientIds, recordScope } from "@/app/(app)/crm/_lib/access";
@@ -20,11 +20,21 @@ import { endsWithin, today } from "@/app/(app)/crm/_lib/clock";
 
 export const metadata = { title: "Contracts" };
 
+const SORTS = {
+  endDate: { label: "End date (soonest)", order: [asc(Contract.endDate), desc(Contract.createdAt)] },
+  endDateDesc: { label: "End date (latest)", order: [desc(Contract.endDate), desc(Contract.createdAt)] },
+  newest: { label: "Newest first", order: [desc(Contract.createdAt)] },
+  oldest: { label: "Oldest first", order: [asc(Contract.createdAt)] },
+  title: { label: "Title A–Z", order: [asc(nocase(Contract.title)), desc(Contract.createdAt)] },
+  updated: { label: "Recently updated", order: [desc(Contract.updatedAt)] },
+} satisfies SortChoices<SQL[]>;
+
 export default async function ContractsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePagePermission("contracts.view");
   const sp = await searchParams;
   const canManage = can(user, "contracts.manage");
   const page = pageParam(sp);
+  const sort = sortParam(sp, SORTS);
   const status = param(sp, "status");
   const type = param(sp, "type");
   const clientId = idParam(sp, "client");
@@ -69,7 +79,7 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
       })
       .from(Contract)
       .where(filter)
-      .orderBy(asc(Contract.endDate), desc(Contract.createdAt))
+      .orderBy(...sort.order)
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
     db().$count(Contract, filter),
@@ -137,6 +147,7 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
         <SelectFilter param="type" label="Type" allLabel="All types" options={types.map((t) => t.type).filter((t): t is string => Boolean(t)).map((t) => ({ value: t, label: t }))} />
         <SelectFilter param="client" label="Client" allLabel="All clients" options={clients.map((c) => ({ value: c._id, label: c.name }))} />
         <SelectFilter param="expiring" label="Expiry" allLabel="Any expiry" options={[{ value: "1", label: "Expiring soon" }]} />
+        <SortSelect options={sort.options} />
         <ClearFilters />
       </FilterBar>
 

@@ -8,7 +8,7 @@ import { Client, Department, Movement, Project, User, type IMovement } from "@/l
 import { getSettings } from "@/lib/settings";
 import { directReportIds } from "@/lib/people";
 import { displayStatus, isOverdue, movementScope, overdueCutoff, scopeFilter, type MovementScope } from "@/lib/movement/access";
-import { dateParam, idParam, PAGE_SIZE, pageParam, param, type SearchParams, withParams } from "@/lib/query";
+import { dateParam, idParam, PAGE_SIZE, pageParam, param, sortParam, type SearchParams, type SortChoices, withParams } from "@/lib/query";
 import { inList, searchAny } from "@/lib/sql";
 import { addDays, eachDay, fmtDate, fmtTime, formatDuration, todayKey, weekStart, weekday } from "@/lib/time";
 import type { AppSettings } from "@/lib/config-defaults";
@@ -20,7 +20,7 @@ import { StatusChip, Tag } from "@/components/ui/chip";
 import { Avatar } from "@/components/ui/avatar";
 import { ButtonLink } from "@/components/ui/button";
 import { Menu } from "@/components/ui/menu";
-import { FilterBar, SearchInput, SelectFilter, DateFilter, ClearFilters, Pagination } from "@/components/ui/filters";
+import { FilterBar, SearchInput, SelectFilter, DateFilter, ClearFilters, Pagination, SortSelect } from "@/components/ui/filters";
 import { GroupedBarChart } from "@/components/ui/charts";
 import { CurrentMovementCard } from "./current-movement-card";
 import { ApprovalButtons, LiveElapsed } from "./movement-controls";
@@ -28,6 +28,14 @@ import { ApprovalButtons, LiveElapsed } from "./movement-controls";
 export const metadata: Metadata = { title: "Movement register" };
 
 const REVIEW_STATUSES: IMovement["approvalStatus"][] = ["pending", "correction_requested"];
+
+const SORTS = {
+  outNewest: { label: "Out time (newest)", order: [desc(Movement.outTime)] },
+  outOldest: { label: "Out time (oldest)", order: [asc(Movement.date), asc(Movement.outTime)] },
+  longest: { label: "Time outside (longest)", order: [desc(Movement.durationMinutes), desc(Movement.outTime)] },
+  logged: { label: "Recently logged", order: [desc(Movement.createdAt)] },
+  updated: { label: "Recently updated", order: [desc(Movement.updatedAt)] },
+} satisfies SortChoices<SQL[]>;
 
 interface Ctx {
   user: CurrentUser;
@@ -120,6 +128,7 @@ async function RegisterView({ ctx, scope, sp }: { ctx: Ctx; scope: MovementScope
   const from = dateParam(sp, "from") ?? today;
   const to = dateParam(sp, "to") ?? from;
   const page = pageParam(sp);
+  const sort = sortParam(sp, SORTS);
   const department = idParam(sp, "department");
   const category = param(sp, "category");
   const approval = param(sp, "approval");
@@ -152,7 +161,7 @@ async function RegisterView({ ctx, scope, sp }: { ctx: Ctx; scope: MovementScope
 
   const monday = weekStart(today);
   const [rows, total, openAll, todayAll, pending, weekRows, departments] = await Promise.all([
-    db().select().from(Movement).where(filter).orderBy(desc(Movement.outTime)).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
+    db().select().from(Movement).where(filter).orderBy(...sort.order).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
     db().$count(Movement, filter),
     db().select().from(Movement).where(and(base, eq(Movement.status, "out"))).orderBy(asc(Movement.outTime)),
     db()
@@ -289,6 +298,7 @@ async function RegisterView({ ctx, scope, sp }: { ctx: Ctx; scope: MovementScope
                   { value: "correction_requested", label: "Correction requested" },
                 ]}
               />
+              <SortSelect options={sort.options} />
               <ClearFilters keep={["tab"]} />
             </FilterBar>
             {!can(user, "movement.view_personal") && <p className="mt-2 text-xs text-muted">Personal movement details are visible to HR and the person&apos;s manager only.</p>}
@@ -417,9 +427,10 @@ async function MineView({ ctx, sp }: { ctx: Ctx; sp: SearchParams }) {
   const from = dateParam(sp, "from") ?? addDays(today, -30);
   const to = dateParam(sp, "to") ?? today;
   const page = pageParam(sp);
+  const sort = sortParam(sp, SORTS);
   const filter = and(eq(Movement.user, user._id), gte(Movement.date, from), lte(Movement.date, to));
   const [rows, total, totals] = await Promise.all([
-    db().select().from(Movement).where(filter).orderBy(desc(Movement.outTime)).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
+    db().select().from(Movement).where(filter).orderBy(...sort.order).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
     db().$count(Movement, filter),
     db()
       .select({ durationMinutes: Movement.durationMinutes, official: Movement.official })
@@ -464,6 +475,7 @@ async function MineView({ ctx, sp }: { ctx: Ctx; sp: SearchParams }) {
           <FilterBar>
             <DateFilter param="from" label="From" />
             <DateFilter param="to" label="To" />
+            <SortSelect options={sort.options} />
             <ClearFilters keep={["tab"]} />
           </FilterBar>
         </div>

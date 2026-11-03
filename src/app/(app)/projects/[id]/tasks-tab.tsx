@@ -3,13 +3,13 @@ import { db } from "@/lib/db";
 import { Task, type IProject } from "@/lib/models";
 import type { CurrentUser } from "@/lib/auth/session";
 import type { AppSettings } from "@/lib/config-defaults";
-import { pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
+import { pageParam, PAGE_SIZE, param, sortParam, type SearchParams } from "@/lib/query";
 import { searchAny } from "@/lib/sql";
 import { keysInCategories, taskFilter, TASK_CLOSED_CATEGORIES, type Filter } from "@/lib/work-access";
 import { Card } from "@/components/ui/card";
-import { FilterBar, Pagination, SearchInput, SelectFilter } from "@/components/ui/filters";
+import { FilterBar, Pagination, SearchInput, SelectFilter, SortSelect } from "@/components/ui/filters";
 import { Segmented } from "@/components/ui/tabs";
-import { queryTaskBoard, queryTasks, topLevelTask } from "../../tasks/_components/task-query";
+import { queryTaskBoard, queryTasks, TASK_SORTS, topLevelTask } from "../../tasks/_components/task-query";
 import { toTaskRows } from "../../tasks/_components/task-rows";
 import { TaskBoard, TaskTable } from "../../tasks/_components/task-ui";
 
@@ -27,11 +27,12 @@ export async function TasksTab({ user, project, settings, sp }: { user: CurrentU
   if (view === "list" && statuses.some((s) => s.key === status)) conds.push(eq(Task.status, status));
   conds.push(searchAny(param(sp, "q"), Task.title, Task.taskNo));
   const filter: Filter = and(...conds);
+  const sort = sortParam(sp, TASK_SORTS);
 
   let body;
   if (view === "list") {
     const page = pageParam(sp);
-    const [tasks, total] = await Promise.all([queryTasks(filter, closedKeys, (page - 1) * PAGE_SIZE, PAGE_SIZE), db().$count(Task, filter)]);
+    const [tasks, total] = await Promise.all([queryTasks(filter, closedKeys, (page - 1) * PAGE_SIZE, PAGE_SIZE, sort.order), db().$count(Task, filter)]);
     const rows = await toTaskRows(user, tasks, settings);
     body = (
       <Card>
@@ -60,6 +61,7 @@ export async function TasksTab({ user, project, settings, sp }: { user: CurrentU
       <FilterBar>
         <SearchInput placeholder="Search tasks" />
         {view === "list" && <SelectFilter param="status" allLabel="Any status" label="Status" options={statuses.map((s) => ({ value: s.key, label: s.label }))} />}
+        {view === "list" && <SortSelect options={sort.options} />}
       </FilterBar>
       {body}
     </div>

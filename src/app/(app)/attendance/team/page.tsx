@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { Download, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ClearFilters, DateFilter, FilterBar, Pagination, SearchInput, SelectFilter } from "@/components/ui/filters";
+import { ClearFilters, DateFilter, FilterBar, Pagination, SearchInput, SelectFilter, SortSelect } from "@/components/ui/filters";
 import { Menu } from "@/components/ui/menu";
 import { Alert, EmptyState, PageBody, PageHeader, StatCard } from "@/components/ui/page";
 import { PersonCell } from "@/components/ui/avatar";
@@ -12,7 +12,7 @@ import { requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { peopleOptions } from "@/lib/people";
 import { AttendanceCorrection } from "@/lib/models";
-import { idParam, pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
+import { idParam, pageParam, PAGE_SIZE, param, sortParam, type SearchParams, type SortChoices } from "@/lib/query";
 import { fmtDate, fmtTime, formatDuration, timeOf, todayKey } from "@/lib/time";
 import { cn } from "@/lib/cn";
 import { DayChips } from "../_components/day-chip";
@@ -25,6 +25,16 @@ import { isEarly, isLate, isPresent, loadRegister, matchesStatus, REGISTER_STATU
 
 export const metadata = { title: "Daily attendance" };
 
+const byName = (a: RegisterRow, b: RegisterRow) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+
+const SORTS = {
+  name: { label: "Name A–Z", order: byName },
+  nameDesc: { label: "Name Z–A", order: (a, b) => byName(b, a) },
+  checkIn: { label: "Check-in (earliest)", order: (a, b) => (a.checkIn?.getTime() ?? Infinity) - (b.checkIn?.getTime() ?? Infinity) || byName(a, b) },
+  checkInLatest: { label: "Check-in (latest)", order: (a, b) => (b.checkIn?.getTime() ?? -Infinity) - (a.checkIn?.getTime() ?? -Infinity) || byName(a, b) },
+  worked: { label: "Hours worked (most)", order: (a, b) => (b.workMinutes ?? -1) - (a.workMinutes ?? -1) || byName(a, b) },
+  late: { label: "Late by (most)", order: (a, b) => b.lateMinutes - a.lateMinutes || byName(a, b) },
+} satisfies SortChoices<(a: RegisterRow, b: RegisterRow) => number>;
 
 function RightNow({ row, isToday }: { row: RegisterRow; isToday: boolean }) {
   if (!isToday) return <span className="text-muted">—</span>;
@@ -67,6 +77,7 @@ export default async function TeamAttendancePage({ searchParams }: { searchParam
   const dept = idParam(sp, "dept");
   const status = param(sp, "status");
   const page = pageParam(sp);
+  const sort = sortParam(sp, SORTS);
 
   const [register, pendingCorrections, staffOptions] = await Promise.all([
     loadRegister(access, { date, q, dept }),
@@ -83,7 +94,7 @@ export default async function TeamAttendancePage({ searchParams }: { searchParam
     outside: rows.filter((r) => r.outside).length,
     missing: rows.filter((r) => r.key === "missing_checkout").length,
   };
-  const filtered = rows.filter((r) => matchesStatus(r, status));
+  const filtered = rows.filter((r) => matchesStatus(r, status)).sort(sort.order);
   const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const exportHref = (format: string) => {
@@ -147,6 +158,7 @@ export default async function TeamAttendancePage({ searchParams }: { searchParam
             <SearchInput placeholder="Search people" />
             <SelectFilter param="dept" label="Department" allLabel="All departments" options={register.departments.map((d) => ({ value: d.id, label: d.name }))} />
             <SelectFilter param="status" label="Status" allLabel="All statuses" options={REGISTER_STATUS_OPTIONS} />
+            <SortSelect options={sort.options} />
             <ClearFilters keep={["date"]} />
           </FilterBar>
           <span className="ml-auto text-xs text-muted">{filtered.length} of {rows.length} people</span>

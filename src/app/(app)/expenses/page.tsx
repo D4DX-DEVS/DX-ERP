@@ -8,7 +8,7 @@ import { Department, Expense, Project } from "@/lib/models";
 import { inList, jsonHasField } from "@/lib/sql";
 import { getSettings } from "@/lib/settings";
 import { namesFor, peopleOptions } from "@/lib/people";
-import { pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
+import { pageParam, PAGE_SIZE, param, sortParam, type SearchParams, type SortChoices } from "@/lib/query";
 import { inr, plural } from "@/lib/format";
 import { fmtDate, monthKey, monthRange, todayKey } from "@/lib/time";
 import { statusLabel } from "@/lib/status";
@@ -17,7 +17,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ButtonLink, buttonClass } from "@/components/ui/button";
 import { Chip, StatusChip } from "@/components/ui/chip";
 import { EmptyRow, TableWrap, THead, Th, Td, Tr } from "@/components/ui/table";
-import { ChipFilters, ClearFilters, DateFilter, FilterBar, Pagination, SearchInput, SelectFilter } from "@/components/ui/filters";
+import { ChipFilters, ClearFilters, DateFilter, FilterBar, Pagination, SearchInput, SelectFilter, SortSelect } from "@/components/ui/filters";
 import { LinkTabs } from "@/components/ui/tabs";
 import { Menu } from "@/components/ui/menu";
 import { HBarList } from "@/components/ui/charts";
@@ -41,6 +41,15 @@ async function totalOf(match: SQL | undefined): Promise<Total> {
 
 const VIEW_LABEL: Record<ExpenseView, string> = { mine: "My expenses", all: "All expenses", approve: "Approvals", pay: "To pay" };
 
+const SORTS = {
+  date: { label: "Date (newest)", order: [desc(Expense.date), desc(Expense.createdAt)] },
+  dateAsc: { label: "Date (oldest)", order: [asc(Expense.date), asc(Expense.createdAt)] },
+  amountDesc: { label: "Amount (high → low)", order: [desc(Expense.amount), desc(Expense.date)] },
+  amountAsc: { label: "Amount (low → high)", order: [asc(Expense.amount), desc(Expense.date)] },
+  number: { label: "Expense number", order: [asc(Expense.expenseNo)] },
+  updated: { label: "Recently updated", order: [desc(Expense.updatedAt)] },
+} satisfies SortChoices<SQL[]>;
+
 export default async function ExpensesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
   const sp = await searchParams;
@@ -54,6 +63,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
   const today = todayKey();
   const month = monthRange(monthKey());
   const page = pageParam(sp);
+  const sort = sortParam(sp, SORTS);
   const { filter, withoutStatus } = expenseFilters(user, view, sp);
   const scope = viewAll ? undefined : eq(Expense.user, user._id);
   const showAside = view === "mine" || view === "all";
@@ -76,7 +86,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
       })
       .from(Expense)
       .where(filter)
-      .orderBy(desc(Expense.date), desc(Expense.createdAt))
+      .orderBy(...sort.order)
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
     db().$count(Expense, filter),
@@ -195,6 +205,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
               {view === "all" && <SelectFilter param="person" allLabel="Everyone" label="Person" options={people.map((p) => ({ value: p.id, label: p.name }))} className="w-44" />}
               <DateFilter param="from" label="From" />
               <DateFilter param="to" label="to" />
+              <SortSelect options={sort.options} />
               <ClearFilters keep={["view"]} />
             </FilterBar>
           </div>

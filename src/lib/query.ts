@@ -46,3 +46,16 @@ export function withParams(path: string, sp: SearchParams, updates: Record<strin
   const qs = next.toString();
   return qs ? `${path}?${qs}` : path;
 }
+
+/** Sort choices for a listing, keyed by their `?sort=` value; the first one is the default. */
+export type SortChoices<O> = Record<string, { label: string; order: O }>;
+
+/**
+ * Resolves `?sort=` against a listing's choices (unknown values fall back to the first choice).
+ * Returns the chosen entry plus `options` for `<SortSelect>`.
+ */
+export function sortParam<T extends Record<string, { label: string }>>(sp: SearchParams, choices: T): T[keyof T] & { key: Extract<keyof T, string>; options: { value: string; label: string }[] } {
+  const v = param(sp, "sort");
+  const key = (Object.hasOwn(choices, v) ? v : Object.keys(choices)[0]) as Extract<keyof T, string>;
+  return { ...choices[key], key, options: Object.entries(choices).map(([value, c]) => ({ value, label: c.label })) };
+}

@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { Plus, Search, Users } from "lucide-react";
-import { and, desc, eq, lte, or, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, lte, or, sql, type SQL } from "drizzle-orm";
 import { can, requirePagePermission } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { Lead } from "@/lib/models";
 import { peopleOptions } from "@/lib/people";
-import { pageParam, PAGE_SIZE, param, withParams, idParam, type SearchParams } from "@/lib/query";
-import { searchAny } from "@/lib/sql";
+import { pageParam, PAGE_SIZE, param, sortParam, withParams, idParam, type SearchParams, type SortChoices } from "@/lib/query";
+import { nocase, searchAny } from "@/lib/sql";
 import { getSettings } from "@/lib/settings";
 import { inr, inrCompact, plural } from "@/lib/format";
 import { fmtDate } from "@/lib/time";
@@ -14,7 +14,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Chip, OptionChip } from "@/components/ui/chip";
-import { ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter } from "@/components/ui/filters";
+import { ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter, SortSelect } from "@/components/ui/filters";
 import { PageBody, PageHeader, StatCard } from "@/components/ui/page";
 import { Segmented } from "@/components/ui/tabs";
 import { EmptyRow, TableWrap, THead, Th, Td, Tr } from "@/components/ui/table";
@@ -47,6 +47,15 @@ const leadColumns = {
   updatedAt: Lead.updatedAt,
 };
 
+const SORTS = {
+  updated: { label: "Recently updated", order: [desc(Lead.updatedAt)] },
+  newest: { label: "Newest first", order: [desc(Lead.createdAt)] },
+  oldest: { label: "Oldest first", order: [asc(Lead.createdAt)] },
+  title: { label: "Title A–Z", order: [asc(nocase(Lead.title)), desc(Lead.updatedAt)] },
+  value: { label: "Value (high to low)", order: [desc(Lead.expectedValue), desc(Lead.updatedAt)] },
+  followUp: { label: "Next follow-up (soonest)", order: [asc(sql`${Lead.nextFollowUp} is null`), asc(Lead.nextFollowUp), desc(Lead.updatedAt)] },
+} satisfies SortChoices<SQL[]>;
+
 export default async function PipelinePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePagePermission("crm.view");
   const sp = await searchParams;
@@ -62,6 +71,7 @@ export default async function PipelinePage({ searchParams }: { searchParams: Pro
   const q = param(sp, "q");
   const dueOnly = param(sp, "due") === "1";
   const page = pageParam(sp);
+  const sort = sortParam(sp, SORTS);
 
   const hidden = await hiddenClientIds(user);
   const scope = notHiddenClient(hidden, Lead.client);
@@ -149,13 +159,14 @@ export default async function PipelinePage({ searchParams }: { searchParams: Pro
         ]}
       />
       {dueOnly && <Chip tone="red">Follow-up due</Chip>}
+      {view === "list" && <SortSelect options={sort.options} />}
       <ClearFilters keep={["view"]} />
     </FilterBar>
   );
 
   if (view === "list") {
     const [rows, total] = await Promise.all([
-      db().select(leadColumns).from(Lead).where(filter).orderBy(desc(Lead.updatedAt)).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
+      db().select(leadColumns).from(Lead).where(filter).orderBy(...sort.order).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
       db().$count(Lead, filter),
     ]);
     const owners = await userCards(rows.map((r) => r.assignedTo));

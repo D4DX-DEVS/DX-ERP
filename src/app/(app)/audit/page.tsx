@@ -1,9 +1,9 @@
 import { Download } from "lucide-react";
-import { desc } from "drizzle-orm";
+import { asc, desc, type SQL } from "drizzle-orm";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Chip } from "@/components/ui/chip";
-import { ClearFilters, DateFilter, FilterBar, Pagination, SearchInput, SelectFilter } from "@/components/ui/filters";
+import { ClearFilters, DateFilter, FilterBar, Pagination, SearchInput, SelectFilter, SortSelect } from "@/components/ui/filters";
 import { Menu } from "@/components/ui/menu";
 import { PageBody, PageHeader } from "@/components/ui/page";
 import { EmptyRow, TableWrap, THead, Td, Th, Tr } from "@/components/ui/table";
@@ -12,8 +12,9 @@ import { db } from "@/lib/db";
 import { titleCase } from "@/lib/format";
 import { AuditLog } from "@/lib/models";
 import { peopleOptions } from "@/lib/people";
-import { pageParam, PAGE_SIZE, withParams, type SearchParams } from "@/lib/query";
+import { pageParam, PAGE_SIZE, sortParam, withParams, type SearchParams, type SortChoices } from "@/lib/query";
 import { ROLE_LABELS } from "@/lib/rbac/permissions";
+import { nocase } from "@/lib/sql";
 import { fmtDateTime } from "@/lib/time";
 import { buildAuditFilter } from "./filters";
 import { actionLabel, actionTone, AUDIT_ACTIONS } from "./meta";
@@ -21,10 +22,21 @@ import { PersonFilter } from "./person-filter";
 
 export const metadata = { title: "Audit trail" };
 
+/** Change values are stored as text, but ISO timestamps come back from the JSON column as Dates. */
+const changeValue = (v: unknown) => (v instanceof Date ? fmtDateTime(v) : v ? String(v) : "—");
+
+const SORTS = {
+  newest: { label: "Newest first", order: [desc(AuditLog.at), desc(AuditLog._id)] },
+  oldest: { label: "Oldest first", order: [asc(AuditLog.at), asc(AuditLog._id)] },
+  user: { label: "User A–Z", order: [asc(nocase(AuditLog.actorName)), desc(AuditLog.at), desc(AuditLog._id)] },
+  record: { label: "Record type A–Z", order: [asc(AuditLog.entity), desc(AuditLog.at), desc(AuditLog._id)] },
+} satisfies SortChoices<SQL[]>;
+
 export default async function Page({ searchParams }: { searchParams: Promise<SearchParams> }) {
   await requirePagePermission("audit.view");
   const sp = await searchParams;
   const page = pageParam(sp);
+  const sort = sortParam(sp, SORTS);
   const filter = buildAuditFilter(sp);
 
   const [rows, total, entityRows, people] = await Promise.all([
@@ -32,7 +44,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       .select()
       .from(AuditLog)
       .where(filter)
-      .orderBy(desc(AuditLog.at), desc(AuditLog._id))
+      .orderBy(...sort.order)
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
     db().$count(AuditLog, filter),
@@ -74,6 +86,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         <PersonFilter param="actor" options={people} placeholder="Any user" />
         <SelectFilter param="action" allLabel="All actions" options={AUDIT_ACTIONS.map((a) => ({ value: a, label: actionLabel(a) }))} />
         <SelectFilter param="entity" allLabel="All records" options={[...entities].sort().map((e) => ({ value: e, label: titleCase(e) }))} />
+        <SortSelect options={sort.options} />
         <ClearFilters />
       </FilterBar>
 
@@ -121,8 +134,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
                             {changes.map((c, i) => (
                               <div key={i} className="grid grid-cols-[minmax(5rem,0.8fr)_1fr_1fr] border-t border-line-soft">
                                 <span className="px-2.5 py-1.5 break-words text-muted">{c.field}</span>
-                                <span className="px-2.5 py-1.5 break-words text-danger line-through decoration-danger/40">{c.from || "—"}</span>
-                                <span className="px-2.5 py-1.5 font-semibold break-words text-success">{c.to || "—"}</span>
+                                <span className="px-2.5 py-1.5 break-words text-danger line-through decoration-danger/40">{changeValue(c.from)}</span>
+                                <span className="px-2.5 py-1.5 font-semibold break-words text-success">{changeValue(c.to)}</span>
                               </div>
                             ))}
                           </div>

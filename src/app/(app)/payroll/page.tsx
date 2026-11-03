@@ -1,9 +1,9 @@
 import Link from "next/link";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
 import { can, requirePagePermission } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { PayrollRun, SalaryAdvance } from "@/lib/models";
-import { monthParam, pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
+import { monthParam, pageParam, PAGE_SIZE, param, sortParam, type SearchParams, type SortChoices } from "@/lib/query";
 import { inr, plural, round2 } from "@/lib/format";
 import { fmtDate, monthKey } from "@/lib/time";
 import { KIND_LABEL, periodLabel } from "@/lib/payroll/constants";
@@ -11,7 +11,7 @@ import { PageBody, PageHeader, StatCard } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Chip, StatusChip } from "@/components/ui/chip";
 import { EmptyRow, TableWrap, THead, Th, Td, Tr } from "@/components/ui/table";
-import { ClearFilters, DateFilter, FilterBar, Pagination, SelectFilter } from "@/components/ui/filters";
+import { ClearFilters, DateFilter, FilterBar, Pagination, SelectFilter, SortSelect } from "@/components/ui/filters";
 import { LinkTabs } from "@/components/ui/tabs";
 import { statusLabel } from "@/lib/status";
 import { NewRunDialog } from "./new-run";
@@ -20,10 +20,19 @@ export const metadata = { title: "Payroll & stipends" };
 
 const STATUSES = ["draft", "verified", "approved", "paid", "cancelled"] as const;
 
+const SORTS = {
+  period: { label: "Period (newest)", order: [desc(PayrollRun.period), desc(PayrollRun.createdAt)] },
+  periodAsc: { label: "Period (oldest)", order: [asc(PayrollRun.period), asc(PayrollRun.createdAt)] },
+  created: { label: "Recently created", order: [desc(PayrollRun.createdAt)] },
+  net: { label: "Net pay (high → low)", order: [desc(sql`json_extract(${PayrollRun.totals}, '$.net')`), desc(PayrollRun.period)] },
+  runNo: { label: "Run number", order: [asc(PayrollRun.runNo)] },
+} satisfies SortChoices<SQL[]>;
+
 export default async function PayrollPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePagePermission("payroll.view");
   const sp = await searchParams;
   const page = pageParam(sp);
+  const sort = sortParam(sp, SORTS);
 
   const kind = param(sp, "kind");
   const status = param(sp, "status");
@@ -34,7 +43,7 @@ export default async function PayrollPage({ searchParams }: { searchParams: Prom
     period ? eq(PayrollRun.period, period) : undefined,
   );
 
-  const [rows, total, awaitingApproval, awaitingPayment, advances] = await Promise.all([
+  const [rows, total, latest, awaitingApproval, awaitingPayment, advances] = await Promise.all([
     db()
       .select({
         _id: PayrollRun._id,
@@ -48,10 +57,11 @@ export default async function PayrollPage({ searchParams }: { searchParams: Prom
       })
       .from(PayrollRun)
       .where(filter)
-      .orderBy(desc(PayrollRun.period), desc(PayrollRun.createdAt))
+      .orderBy(...sort.order)
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
     db().$count(PayrollRun, filter),
+    db().select({ period: PayrollRun.period, kind: PayrollRun.kind, status: PayrollRun.status }).from(PayrollRun).orderBy(desc(PayrollRun.period), desc(PayrollRun.createdAt)).limit(1),
     db().select({ totals: PayrollRun.totals }).from(PayrollRun).where(eq(PayrollRun.status, "verified")),
     db().select({ totals: PayrollRun.totals }).from(PayrollRun).where(eq(PayrollRun.status, "approved")),
     db().select({ amount: SalaryAdvance.amount, recovered: SalaryAdvance.recovered }).from(SalaryAdvance).where(eq(SalaryAdvance.status, "open")),
@@ -78,7 +88,7 @@ export default async function PayrollPage({ searchParams }: { searchParams: Prom
       />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Latest run" value={rows[0] && !hasFilters ? periodLabel(rows[0].period) : "—"} sub={rows[0] && !hasFilters ? `${KIND_LABEL[rows[0].kind]} · ${statusLabel("payrollRun", rows[0].status)}` : "No runs yet"} />
+        <StatCard label="Latest run" value={latest[0] && !hasFilters ? periodLabel(latest[0].period) : "—"} sub={latest[0] && !hasFilters ? `${KIND_LABEL[latest[0].kind]} · ${statusLabel("payrollRun", latest[0].status)}` : "No runs yet"} />
         <StatCard label="Awaiting approval" value={awaitingApproval.length} sub={awaitingApproval.length ? `Net ${inr(approvalNet)}` : "Nothing waiting"} tone={awaitingApproval.length ? "brand" : "default"} />
         <StatCard label="Approved, to pay" value={awaitingPayment.length} sub={awaitingPayment.length ? `Net ${inr(paymentNet)}` : "Nothing to pay"} />
         <StatCard label="Advances to recover" value={inr(advanceBalance)} sub={plural(advances.length, "open advance")} href="/payroll/advances" />
@@ -90,6 +100,7 @@ export default async function PayrollPage({ searchParams }: { searchParams: Prom
             <SelectFilter param="kind" allLabel="Salary & stipend" label="Kind" options={[{ value: "salary", label: "Salary" }, { value: "stipend", label: "Stipend" }]} />
             <SelectFilter param="status" allLabel="All statuses" label="Status" options={STATUSES.map((s) => ({ value: s, label: statusLabel("payrollRun", s) }))} />
             <DateFilter param="period" label="Month" type="month" />
+            <SortSelect options={sort.options} />
             <ClearFilters />
           </FilterBar>
         </div>

@@ -4,8 +4,8 @@ import { and, asc, count, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm"
 import { can, requirePagePermission } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { Client, Proposal, type ProposalStatus } from "@/lib/models";
-import { idParam, pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
-import { inList, searchAny } from "@/lib/sql";
+import { idParam, pageParam, PAGE_SIZE, param, sortParam, type SearchParams, type SortChoices } from "@/lib/query";
+import { inList, nocase, searchAny } from "@/lib/sql";
 import { inr, inrCompact, plural } from "@/lib/format";
 import { STATUS } from "@/lib/status";
 import { fmtDate } from "@/lib/time";
@@ -13,7 +13,7 @@ import { cn } from "@/lib/cn";
 import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { StatusChip, Tag } from "@/components/ui/chip";
-import { ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter } from "@/components/ui/filters";
+import { ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter, SortSelect } from "@/components/ui/filters";
 import { PageBody, PageHeader, StatCard } from "@/components/ui/page";
 import { EmptyRow, TableWrap, THead, Th, Td, Tr } from "@/components/ui/table";
 import { clientScope, hiddenClientIds, recordScope } from "@/app/(app)/crm/_lib/access";
@@ -21,10 +21,20 @@ import { daysUntil, inDays, today } from "@/app/(app)/crm/_lib/clock";
 
 export const metadata = { title: "Proposals" };
 
+const SORTS = {
+  newest: { label: "Newest first", order: [desc(Proposal.createdAt)] },
+  oldest: { label: "Oldest first", order: [asc(Proposal.createdAt)] },
+  updated: { label: "Recently updated", order: [desc(Proposal.updatedAt)] },
+  title: { label: "Title A–Z", order: [asc(nocase(Proposal.title)), desc(Proposal.createdAt)] },
+  total: { label: "Total (high to low)", order: [desc(Proposal.total), desc(Proposal.createdAt)] },
+  validUntil: { label: "Valid until (soonest)", order: [asc(sql`coalesce(${Proposal.validUntil}, '9999-12-31')`), desc(Proposal.createdAt)] },
+} satisfies SortChoices<SQL[]>;
+
 export default async function ProposalsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePagePermission("proposals.view");
   const sp = await searchParams;
   const page = pageParam(sp);
+  const sort = sortParam(sp, SORTS);
   const status = param(sp, "status");
   const kind = param(sp, "kind");
   const clientId = idParam(sp, "client");
@@ -54,7 +64,7 @@ export default async function ProposalsPage({ searchParams }: { searchParams: Pr
       })
       .from(Proposal)
       .where(filter)
-      .orderBy(desc(Proposal.createdAt))
+      .orderBy(...sort.order)
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
     db().$count(Proposal, filter),
@@ -116,6 +126,7 @@ export default async function ProposalsPage({ searchParams }: { searchParams: Pr
           ]}
         />
         <SelectFilter param="client" label="Client" allLabel="All clients" options={clients.map((c) => ({ value: c._id, label: c.name }))} />
+        <SortSelect options={sort.options} />
         <ClearFilters />
       </FilterBar>
 

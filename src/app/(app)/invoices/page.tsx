@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { Download, Plus } from "lucide-react";
-import { and, asc, desc, isNotNull } from "drizzle-orm";
+import { and, asc, desc, isNotNull, type SQL } from "drizzle-orm";
 import { can, requirePagePermission } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { Client, Invoice, Payment, Project } from "@/lib/models";
-import { pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
+import { pageParam, PAGE_SIZE, param, sortParam, type SearchParams, type SortChoices } from "@/lib/query";
 import { inr, plural } from "@/lib/format";
 import { fmtDate, todayKey } from "@/lib/time";
 import { PageBody, PageHeader, StatCard } from "@/components/ui/page";
@@ -12,7 +12,7 @@ import { Card } from "@/components/ui/card";
 import { ButtonLink, buttonClass } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/chip";
 import { EmptyRow, TableWrap, THead, Th, Td, Tr } from "@/components/ui/table";
-import { ChipFilters, ClearFilters, DateFilter, FilterBar, Pagination, SearchInput, SelectFilter } from "@/components/ui/filters";
+import { ChipFilters, ClearFilters, DateFilter, FilterBar, Pagination, SearchInput, SelectFilter, SortSelect } from "@/components/ui/filters";
 import { LinkTabs } from "@/components/ui/tabs";
 import { Menu } from "@/components/ui/menu";
 import { statusLabel } from "@/lib/status";
@@ -35,6 +35,15 @@ export const metadata = { title: "Invoices & payments" };
 
 const AGING_COLORS = ["#284CC7", "#D0691F", "#B42323", "#7F1D1D", "#450A0A"];
 
+const SORTS = {
+  newest: { label: "Newest first", order: [desc(Invoice.createdAt)] },
+  oldest: { label: "Oldest first", order: [asc(Invoice.createdAt)] },
+  issued: { label: "Issue date (newest)", order: [desc(Invoice.issueDate), desc(Invoice.createdAt)] },
+  due: { label: "Due date (soonest)", order: [asc(Invoice.dueDate), desc(Invoice.createdAt)] },
+  amountDesc: { label: "Amount (high → low)", order: [desc(Invoice.total), desc(Invoice.createdAt)] },
+  amountAsc: { label: "Amount (low → high)", order: [asc(Invoice.total), desc(Invoice.createdAt)] },
+} satisfies SortChoices<SQL[]>;
+
 function exportHref(sp: SearchParams, format: string): string {
   const q = new URLSearchParams();
   for (const k of ["status", "client", "project", "from", "to", "q"]) {
@@ -51,6 +60,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
   const sp = await searchParams;
   const today = todayKey();
   const page = pageParam(sp);
+  const sort = sortParam(sp, SORTS);
   const fy = fiscalRange(today);
   const month = monthRangeOf(today);
 
@@ -78,7 +88,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
       })
       .from(Invoice)
       .where(filter)
-      .orderBy(desc(Invoice.createdAt))
+      .orderBy(...sort.order)
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
     db().$count(Invoice, filter),
@@ -194,6 +204,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             <SelectFilter param="project" allLabel="All projects" label="Project" options={projects.map((p) => ({ value: p._id, label: `${p.projectNo} · ${p.title}` }))} className="w-44" />
             <DateFilter param="from" label="Issued from" />
             <DateFilter param="to" label="to" />
+            <SortSelect options={sort.options} />
             <ClearFilters />
           </FilterBar>
           {hasFilters && (

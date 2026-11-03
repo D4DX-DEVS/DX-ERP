@@ -7,7 +7,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { HBarList } from "@/components/ui/charts";
 import { LinkTabs } from "@/components/ui/tabs";
 import { Chip, StatusChip } from "@/components/ui/chip";
-import { ChipFilters, ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter } from "@/components/ui/filters";
+import { ChipFilters, ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter, SortSelect } from "@/components/ui/filters";
 import { EmptyState, PageBody, PageHeader, StatCard } from "@/components/ui/page";
 import { EmptyRow, TableWrap, THead, Td, Th, Tr } from "@/components/ui/table";
 import { can, requirePagePermission } from "@/lib/auth/session";
@@ -15,9 +15,9 @@ import { db } from "@/lib/db";
 import { inr, inrCompact } from "@/lib/format";
 import { Asset, Department } from "@/lib/models";
 import { namesFor, peopleOptions } from "@/lib/people";
-import { idParam, pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
+import { idParam, pageParam, PAGE_SIZE, param, sortParam, type SearchParams, type SortChoices } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
-import { notInList, searchAny } from "@/lib/sql";
+import { nocase, notInList, searchAny } from "@/lib/sql";
 import { addDays, fmtDate, todayKey } from "@/lib/time";
 import { statusLabel } from "@/lib/status";
 import { ASSET_KIND_LABELS, ASSET_STATUSES, warrantyState, type AssetKindKey } from "./meta";
@@ -30,6 +30,15 @@ const KIND_STATUSES: Record<AssetKindKey, readonly string[]> = {
 
 export const metadata = { title: "Assets & inventory" };
 
+const SORTS = {
+  newest: { label: "Newest first", order: [desc(Asset.createdAt), desc(Asset._id)] },
+  oldest: { label: "Oldest first", order: [asc(Asset.createdAt), asc(Asset._id)] },
+  name: { label: "Name A–Z", order: [asc(nocase(Asset.name)), asc(Asset._id)] },
+  purchased: { label: "Purchased (newest)", order: [desc(Asset.purchaseDate), desc(Asset.createdAt), desc(Asset._id)] },
+  warranty: { label: "Warranty expiry (earliest)", order: [asc(sql`coalesce(${Asset.warrantyUntil}, '9999-12-31')`), desc(Asset.createdAt), desc(Asset._id)] },
+  cost: { label: "Cost (high → low)", order: [desc(Asset.cost), desc(Asset.createdAt), desc(Asset._id)] },
+} satisfies SortChoices<SQL[]>;
+
 export default async function Page({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePagePermission("assets.view");
   const canManage = can(user, "assets.manage");
@@ -40,6 +49,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   const today = todayKey();
   const soon = addDays(today, 30);
   const page = pageParam(sp);
+  const sort = sortParam(sp, SORTS);
   const status = param(sp, "status");
   const category = param(sp, "category");
   const assignee = idParam(sp, "assignee");
@@ -76,7 +86,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
       })
       .from(Asset)
       .where(filter)
-      .orderBy(desc(Asset.createdAt), desc(Asset._id))
+      .orderBy(...sort.order)
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
     db().$count(Asset, filter),
@@ -191,6 +201,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
             <SelectFilter param="department" allLabel="All departments" options={departments.map((d) => ({ value: d._id, label: d.name }))} />
             {!isCompany && <PersonFilter param="assignee" options={people} placeholder="Assigned to anyone" />}
             {warranty && <Chip tone="orange">Warranty ending in 30 days</Chip>}
+            <SortSelect options={sort.options} />
             <ClearFilters keep={["kind"]} />
           </FilterBar>
         </div>

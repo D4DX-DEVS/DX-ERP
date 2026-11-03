@@ -19,7 +19,7 @@ export function Select({ className, children, ...props }: ComponentProps<"select
     <select
       className={cn(
         fieldBase,
-        "h-10 appearance-none bg-[url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2216%22 height=%2216%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%235E6583%22 stroke-width=%222%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22><path d=%22M6 9l6 6 6-6%22/></svg>')] bg-[right_0.75rem_center] bg-no-repeat pr-9 sm:h-10",
+        "h-10 appearance-none field-chevron pr-9 sm:h-10",
         className,
       )}
       {...props}

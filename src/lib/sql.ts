@@ -85,6 +85,11 @@ export function startsWithText(col: Operand, q: string): SQL {
   return sql`${col} like ${`${escapeLike(q)}%`} escape '\\'`;
 }
 
+/** Case-insensitive sort key for names and titles: `.orderBy(asc(nocase(User.name)))`. */
+export function nocase(col: Operand): SQL {
+  return sql`${col} collate nocase`;
+}
+
 /** Case-insensitive equality (the old `^value$` / "i" regex). */
 export function eqIgnoreCase(col: Operand, value: string): SQL {
   return sql`lower(${col}) = lower(${value})`;

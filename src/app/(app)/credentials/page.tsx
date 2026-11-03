@@ -1,14 +1,14 @@
 import { notFound } from "next/navigation";
-import { and, asc, count, desc, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq, type SQL } from "drizzle-orm";
 import { ShieldCheck } from "lucide-react";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter } from "@/components/ui/filters";
+import { ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter, SortSelect } from "@/components/ui/filters";
 import { Alert, PageBody, PageHeader } from "@/components/ui/page";
 import { requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { CREDENTIAL_CATEGORIES, Credential, VaultEvent, type CredentialCategory } from "@/lib/models";
-import { pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
-import { searchAny } from "@/lib/sql";
+import { pageParam, PAGE_SIZE, param, sortParam, type SearchParams, type SortChoices } from "@/lib/query";
+import { nocase, searchAny } from "@/lib/sql";
 import { fmtDateTime } from "@/lib/time";
 import { COMPANY_VAULT } from "@/lib/vault/credentials";
 import { vaultConfigured } from "@/lib/vault/crypto";
@@ -16,6 +16,15 @@ import { CredentialDialog, CredentialList } from "./credentials-panel";
 import { CREDENTIAL_CATEGORY_LABELS, CREDENTIAL_EVENT_LABELS } from "./meta";
 
 export const metadata = { title: "Credential storage" };
+
+const SORTS = {
+  platform: { label: "Platform A–Z", order: [asc(nocase(Credential.platform)), asc(Credential._id)] },
+  platformDesc: { label: "Platform Z–A", order: [desc(nocase(Credential.platform)), asc(Credential._id)] },
+  category: { label: "Category A–Z", order: [asc(Credential.category), asc(nocase(Credential.platform)), asc(Credential._id)] },
+  valuesUpdated: { label: "Values updated (latest)", order: [desc(Credential.valuesUpdatedAt), asc(Credential._id)] },
+  newest: { label: "Newest added", order: [desc(Credential.createdAt), asc(Credential._id)] },
+  oldest: { label: "Oldest added", order: [asc(Credential.createdAt), asc(Credential._id)] },
+} satisfies SortChoices<SQL[]>;
 
 /** Company logins (social media, email, hosting, banking…) — Super Admin only; values are encrypted and every reveal is logged. */
 export default async function CredentialsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -28,13 +37,14 @@ export default async function CredentialsPage({ searchParams }: { searchParams: 
   const category = (CREDENTIAL_CATEGORIES as readonly string[]).includes(categoryParam) ? (categoryParam as CredentialCategory) : undefined;
   const filter = and(searchAny(q, Credential.platform, Credential.url), category ? eq(Credential.category, category) : undefined);
   const page = pageParam(sp);
+  const sort = sortParam(sp, SORTS);
 
   const [rows, matching, counts, events] = await Promise.all([
     db()
       .select({ _id: Credential._id, platform: Credential.platform, category: Credential.category, url: Credential.url, valuesUpdatedAt: Credential.valuesUpdatedAt })
       .from(Credential)
       .where(filter)
-      .orderBy(asc(Credential.platform))
+      .orderBy(...sort.order)
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
     db().$count(Credential, filter),
@@ -82,6 +92,7 @@ export default async function CredentialsPage({ searchParams }: { searchParams: 
               allLabel="All categories"
               options={CREDENTIAL_CATEGORIES.map((c) => ({ value: c, label: `${CREDENTIAL_CATEGORY_LABELS[c]} (${counts.find((x) => x.category === c)?.n ?? 0})` }))}
             />
+            <SortSelect options={sort.options} />
             <ClearFilters />
           </FilterBar>
         </div>

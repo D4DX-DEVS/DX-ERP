@@ -1,11 +1,11 @@
 import { forbidden } from "next/navigation";
 import { Check, RotateCcw, X } from "lucide-react";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, type SQL } from "drizzle-orm";
 import { requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { Project, Task, TimesheetEntry } from "@/lib/models";
 import { peopleOptions } from "@/lib/people";
-import { pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
+import { pageParam, PAGE_SIZE, param, sortParam, type SearchParams, type SortChoices } from "@/lib/query";
 import { inList } from "@/lib/sql";
 import { fmtDate, fmtDateTime, formatDuration } from "@/lib/time";
 import { peopleMap, projectFilter, timesheetScope, type Filter } from "@/lib/work-access";
@@ -13,7 +13,7 @@ import { ActionButton, ReasonAction } from "@/components/ui/actions";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { StatusChip, Tag } from "@/components/ui/chip";
-import { Pagination } from "@/components/ui/filters";
+import { Pagination, SortSelect } from "@/components/ui/filters";
 import { EmptyState, PageBody, PageHeader } from "@/components/ui/page";
 import { EmptyRow, TableWrap, THead, Th, Td, Tr } from "@/components/ui/table";
 import { LinkTabs } from "@/components/ui/tabs";
@@ -22,6 +22,15 @@ import { approveEntries, rejectEntries, reopenEntry } from "./actions";
 import { ExportDialog } from "./export-dialog";
 
 export const metadata = { title: "Timesheet approvals" };
+
+const SORTS = {
+  reviewed: { label: "Recently reviewed", order: [desc(TimesheetEntry.reviewedAt), desc(TimesheetEntry._id)] },
+  reviewedOldest: { label: "Reviewed (oldest)", order: [asc(TimesheetEntry.reviewedAt), asc(TimesheetEntry._id)] },
+  date: { label: "Entry date (newest)", order: [desc(TimesheetEntry.date), desc(TimesheetEntry._id)] },
+  dateOldest: { label: "Entry date (oldest)", order: [asc(TimesheetEntry.date), asc(TimesheetEntry._id)] },
+  longest: { label: "Duration (longest)", order: [desc(TimesheetEntry.minutes), desc(TimesheetEntry._id)] },
+  shortest: { label: "Duration (shortest)", order: [asc(TimesheetEntry.minutes), desc(TimesheetEntry._id)] },
+} satisfies SortChoices<SQL[]>;
 
 export default async function TimesheetApprovalsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
@@ -202,6 +211,7 @@ async function PendingTab({ filter, allowed }: { filter: Filter; allowed: boolea
 
 async function HistoryTab({ sp, viewScope, approveScope }: { sp: SearchParams; viewScope: Scope; approveScope: Scope }) {
   const page = pageParam(sp);
+  const sort = sortParam(sp, SORTS);
   const filter: Filter = and(viewScope.all ? undefined : viewScope.filter, inList(TimesheetEntry.status, ["approved", "rejected"]));
   const [entries, total] = await Promise.all([
     db()
@@ -222,7 +232,7 @@ async function HistoryTab({ sp, viewScope, approveScope }: { sp: SearchParams; v
       })
       .from(TimesheetEntry)
       .where(filter)
-      .orderBy(desc(TimesheetEntry.reviewedAt), desc(TimesheetEntry._id))
+      .orderBy(...sort.order)
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
     db().$count(TimesheetEntry, filter),
@@ -230,6 +240,9 @@ async function HistoryTab({ sp, viewScope, approveScope }: { sp: SearchParams; v
   const [names, labels] = await Promise.all([peopleMap(entries.map((e) => e.user)), labelsFor(entries)]);
   return (
     <Card>
+      <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-4 py-3">
+        <SortSelect options={sort.options} />
+      </div>
       <TableWrap phone={[1, 4, "last"]} tablet={[1, 2, 4, 5, "last"]}>
         <THead>
           <Th>Person</Th>

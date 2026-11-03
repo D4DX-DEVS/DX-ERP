@@ -5,7 +5,7 @@ import { desc, eq } from "drizzle-orm";
 import { requirePagePermission } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { Invoice, Payment } from "@/lib/models";
-import { idParam, pageParam, PAGE_SIZE, type SearchParams } from "@/lib/query";
+import { idParam, pageParam, PAGE_SIZE, sortParam, withParams, type SearchParams, type SortChoices } from "@/lib/query";
 import { inr, plural } from "@/lib/format";
 import { fmtDate, todayKey } from "@/lib/time";
 import { PageBody, PageHeader, StatCard } from "@/components/ui/page";
@@ -13,7 +13,7 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { buttonClass } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/chip";
 import { EmptyRow, TableWrap, THead, Th, Td, Tr } from "@/components/ui/table";
-import { Pagination } from "@/components/ui/filters";
+import { Pagination, SortSelect } from "@/components/ui/filters";
 import { LinkTabs } from "@/components/ui/tabs";
 import { Menu } from "@/components/ui/menu";
 import { cn } from "@/lib/cn";
@@ -23,27 +23,49 @@ import { effectiveStatus } from "../totals";
 
 export const metadata = { title: "Receivables" };
 
+interface ClientRow {
+  client: string;
+  name: string;
+  count: number;
+  total: number;
+  oldest: number;
+  buckets: Record<AgingKey, number>;
+}
+
+const byName = (a: ClientRow, b: ClientRow) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+
+const SORTS = {
+  outstanding: { label: "Outstanding (high → low)", order: (a, b) => b.total - a.total },
+  outstandingAsc: { label: "Outstanding (low → high)", order: (a, b) => a.total - b.total },
+  overdue: { label: "Longest overdue", order: (a, b) => b.oldest - a.oldest || b.total - a.total },
+  invoices: { label: "Most invoices", order: (a, b) => b.count - a.count || b.total - a.total },
+  name: { label: "Client A–Z", order: byName },
+  nameDesc: { label: "Client Z–A", order: (a, b) => byName(b, a) },
+} satisfies SortChoices<(a: ClientRow, b: ClientRow) => number>;
+
 export default async function ReceivablesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePagePermission("invoices.view");
   const sp = await searchParams;
   const today = todayKey();
   const selected = idParam(sp, "client");
+  const sort = sortParam(sp, SORTS);
+  const sortQuery = sort.key === sort.options[0].value ? "" : `&sort=${sort.key}`;
   const hidden = await hiddenClientIds(user);
   if (selected && hidden.includes(selected)) forbidden();
 
   const receivables = await loadReceivables(today, notHiddenClient(hidden, Invoice.client));
   const names = await clientNames(receivables.map((r) => r.client).concat(selected ? [selected] : []));
 
-  const byClient = new Map<string, { client: string; count: number; total: number; oldest: number; buckets: Record<AgingKey, number> }>();
+  const byClient = new Map<string, ClientRow>();
   for (const r of receivables) {
-    const row = byClient.get(r.client) ?? { client: r.client, count: 0, total: 0, oldest: 0, buckets: { current: 0, d30: 0, d60: 0, d90: 0, d90plus: 0 } };
+    const row = byClient.get(r.client) ?? { client: r.client, name: names.get(r.client)?.name ?? "Unknown client", count: 0, total: 0, oldest: 0, buckets: { current: 0, d30: 0, d60: 0, d90: 0, d90plus: 0 } };
     row.count += 1;
     row.total += r.balance;
     row.oldest = Math.max(row.oldest, r.daysPastDue);
     row.buckets[r.bucket] += r.balance;
     byClient.set(r.client, row);
   }
-  const rows = [...byClient.values()].sort((a, b) => b.total - a.total);
+  const rows = [...byClient.values()].sort(sort.order);
   // The totals row and the tiles cover every client; the table shows one page of them.
   const page = pageParam(sp);
   const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -91,7 +113,7 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
       </div>
 
       <Card>
-        <CardHeader title="Client-wise outstanding" subtitle="Select a client to see their open invoices and payment history." />
+        <CardHeader title="Client-wise outstanding" subtitle="Select a client to see their open invoices and payment history." action={<SortSelect options={sort.options} />} />
         <TableWrap tablet={[1, 2, 3, 4]}>
           <THead>
             <Th>Client</Th>
@@ -108,7 +130,7 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
             {pageRows.map((r) => (
               <Tr key={r.client} className={cn(selected === r.client && "bg-brand-50 hover:bg-brand-50")}>
                 <Td>
-                  <Link href={`/invoices/receivables?client=${r.client}${page > 1 ? `&page=${page}` : ""}`} scroll={false} className="font-semibold text-ink hover:text-brand-600" aria-current={selected === r.client ? "true" : undefined}>
+                  <Link href={`/invoices/receivables?client=${r.client}${page > 1 ? `&page=${page}` : ""}${sortQuery}`} scroll={false} className="font-semibold text-ink hover:text-brand-600" aria-current={selected === r.client ? "true" : undefined}>
                     {names.get(r.client)?.name ?? "Unknown client"}
                   </Link>
                   {names.get(r.client) && <div className="text-xs text-muted">{names.get(r.client)?.clientNo}</div>}
@@ -144,7 +166,7 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
       {selected && (
         <div className="grid items-start gap-4 lg:grid-cols-2">
           <Card>
-            <CardHeader title={`Open invoices · ${names.get(selected)?.name ?? "Client"}`} href="/invoices/receivables" hrefLabel="Close" />
+            <CardHeader title={`Open invoices · ${names.get(selected)?.name ?? "Client"}`} href={withParams("/invoices/receivables", sp, { client: null })} hrefLabel="Close" />
             <TableWrap phone={[1, 3, 4]} tablet={[1, 2, 3, 4]}>
               <THead>
                 <Th>Invoice</Th>

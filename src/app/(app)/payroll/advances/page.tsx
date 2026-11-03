@@ -1,9 +1,9 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
 import { can, requirePagePermission } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { SalaryAdvance } from "@/lib/models";
 import { namesFor, peopleOptions } from "@/lib/people";
-import { idParam, pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
+import { idParam, pageParam, PAGE_SIZE, param, sortParam, type SearchParams, type SortChoices } from "@/lib/query";
 import { inr, plural, round2 } from "@/lib/format";
 import { fmtDate, todayKey } from "@/lib/time";
 import { periodLabel } from "@/lib/payroll/constants";
@@ -11,16 +11,26 @@ import { PageBody, PageHeader, StatCard } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Chip } from "@/components/ui/chip";
 import { EmptyRow, TableWrap, THead, Th, Td, Tr } from "@/components/ui/table";
-import { ChipFilters, ClearFilters, FilterBar, Pagination, SelectFilter } from "@/components/ui/filters";
+import { ChipFilters, ClearFilters, FilterBar, Pagination, SelectFilter, SortSelect } from "@/components/ui/filters";
 import { LinkTabs } from "@/components/ui/tabs";
 import { AdvanceDialog } from "./advance-dialog";
 
 export const metadata = { title: "Salary advances" };
 
+const SORTS = {
+  date: { label: "Date given (newest)", order: [desc(SalaryAdvance.date), desc(SalaryAdvance.createdAt)] },
+  dateAsc: { label: "Date given (oldest)", order: [asc(SalaryAdvance.date), asc(SalaryAdvance.createdAt)] },
+  amountDesc: { label: "Amount (high → low)", order: [desc(SalaryAdvance.amount), desc(SalaryAdvance.date)] },
+  amountAsc: { label: "Amount (low → high)", order: [asc(SalaryAdvance.amount), desc(SalaryAdvance.date)] },
+  remaining: { label: "Remaining (high → low)", order: [desc(sql`${SalaryAdvance.amount} - ${SalaryAdvance.recovered}`), desc(SalaryAdvance.date)] },
+  updated: { label: "Recently updated", order: [desc(SalaryAdvance.updatedAt)] },
+} satisfies SortChoices<SQL[]>;
+
 export default async function AdvancesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePagePermission("payroll.view");
   const sp = await searchParams;
   const page = pageParam(sp);
+  const sort = sortParam(sp, SORTS);
   const record = can(user, "payroll.prepare") || can(user, "payroll.pay");
 
   const status = param(sp, "status");
@@ -28,7 +38,7 @@ export default async function AdvancesPage({ searchParams }: { searchParams: Pro
   const filter = and(status === "open" || status === "closed" ? eq(SalaryAdvance.status, status) : undefined, person ? eq(SalaryAdvance.user, person) : undefined);
 
   const [rows, total, open, people] = await Promise.all([
-    db().select().from(SalaryAdvance).where(filter).orderBy(desc(SalaryAdvance.date), desc(SalaryAdvance.createdAt)).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
+    db().select().from(SalaryAdvance).where(filter).orderBy(...sort.order).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
     db().$count(SalaryAdvance, filter),
     db().select({ amount: SalaryAdvance.amount, recovered: SalaryAdvance.recovered, monthlyRecovery: SalaryAdvance.monthlyRecovery }).from(SalaryAdvance).where(eq(SalaryAdvance.status, "open")),
     peopleOptions({ includeExited: true }),
@@ -62,6 +72,7 @@ export default async function AdvancesPage({ searchParams }: { searchParams: Pro
           <ChipFilters param="status" allLabel="All" options={[{ value: "open", label: "Open" }, { value: "closed", label: "Cleared" }]} />
           <FilterBar>
             <SelectFilter param="person" allLabel="Everyone" label="Person" options={people.map((p) => ({ value: p.id, label: p.name }))} className="w-48" />
+            <SortSelect options={sort.options} />
             <ClearFilters />
           </FilterBar>
         </div>

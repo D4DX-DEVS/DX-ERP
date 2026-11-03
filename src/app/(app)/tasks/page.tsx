@@ -4,17 +4,17 @@ import { can, requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { PRIORITIES, Project, Task } from "@/lib/models";
 import { peopleOptions } from "@/lib/people";
-import { idParam, pageParam, PAGE_SIZE, param, withParams, type SearchParams } from "@/lib/query";
+import { idParam, pageParam, PAGE_SIZE, param, sortParam, withParams, type SearchParams } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
 import { notInList, searchAny } from "@/lib/sql";
 import { addDays, todayKey, weekStart } from "@/lib/time";
 import { keysInCategories, projectFilter, taskFilter, TASK_CLOSED_CATEGORIES, type Filter } from "@/lib/work-access";
 import { Card } from "@/components/ui/card";
 import { ButtonLink } from "@/components/ui/button";
-import { ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter } from "@/components/ui/filters";
+import { ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter, SortSelect } from "@/components/ui/filters";
 import { PageBody, PageHeader } from "@/components/ui/page";
 import { Segmented } from "@/components/ui/tabs";
-import { assignedToTaskOrSubtask, queryTaskBoard, queryTasks, topLevelTask } from "./_components/task-query";
+import { assignedToTaskOrSubtask, queryTaskBoard, queryTasks, TASK_SORTS, topLevelTask } from "./_components/task-query";
 import { toTaskRows } from "./_components/task-rows";
 import { TaskBoard, TaskTable } from "./_components/task-ui";
 import { PRIORITY_OPTIONS } from "./_components/options";
@@ -56,6 +56,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const filter: Filter = and(...conds);
 
   const page = pageParam(sp);
+  const sort = sortParam(sp, TASK_SORTS);
 
   const [projects, people, canCreateAny] = await Promise.all([
     db().select({ _id: Project._id, projectNo: Project.projectNo, title: Project.title }).from(Project).where(projectFilter(user)).orderBy(desc(Project.projectNo)).limit(300),
@@ -72,7 +73,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
 
   let body;
   if (view === "list") {
-    const [tasks, total] = await Promise.all([queryTasks(filter, closedKeys, (page - 1) * PAGE_SIZE, PAGE_SIZE), db().$count(Task, filter)]);
+    const [tasks, total] = await Promise.all([queryTasks(filter, closedKeys, (page - 1) * PAGE_SIZE, PAGE_SIZE, sort.order), db().$count(Task, filter)]);
     const rows = await toTaskRows(user, tasks, settings);
     body = (
       <Card>
@@ -121,6 +122,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
         <SelectFilter param="priority" allLabel="Any priority" label="Priority" options={PRIORITY_OPTIONS} />
         {view === "list" && <SelectFilter param="status" allLabel="Any status" label="Status" options={statuses.map((s) => ({ value: s.key, label: s.label }))} />}
         <SelectFilter param="due" allLabel="Any due date" label="Due" options={[{ value: "overdue", label: "Overdue" }, { value: "week", label: "Due this week" }]} />
+        {view === "list" && <SortSelect options={sort.options} />}
         <ClearFilters keep={["scope", "view"]} />
       </FilterBar>
       {body}

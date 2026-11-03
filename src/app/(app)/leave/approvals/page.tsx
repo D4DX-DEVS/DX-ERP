@@ -1,12 +1,12 @@
 import { forbidden } from "next/navigation";
-import { and, asc, desc, eq, gte, lte, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lte, ne, type SQL } from "drizzle-orm";
 import { CheckCircle2, Download } from "lucide-react";
 import { AttachmentList } from "@/components/ui/file-upload";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { StatusChip, Tag } from "@/components/ui/chip";
-import { Pagination } from "@/components/ui/filters";
+import { Pagination, SortSelect } from "@/components/ui/filters";
 import { Menu } from "@/components/ui/menu";
 import { Alert, EmptyState, PageBody, PageHeader } from "@/components/ui/page";
 import { EmptyRow, TableWrap, THead, Td, Th, Tr } from "@/components/ui/table";
@@ -15,7 +15,7 @@ import { requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { bulkLeaveBalances, leaveYearOf } from "@/lib/domain/leave-balance";
 import { CompOffClaim, Department, Designation, Holiday, LeaveRequest, LeaveType, User, type LeaveStatus } from "@/lib/models";
-import { PAGE_SIZE, pageParam, param, type SearchParams } from "@/lib/query";
+import { PAGE_SIZE, pageParam, param, sortParam, type SearchParams, type SortChoices } from "@/lib/query";
 import { plain } from "@/lib/serialize";
 import { getSettings } from "@/lib/settings";
 import { inList } from "@/lib/sql";
@@ -32,6 +32,24 @@ export const metadata = { title: "Leave approvals" };
 
 const PENDING: LeaveStatus[] = ["pending_manager", "pending_hr"];
 const TABS = ["pending", "approved", "rejected", "all", "compoff"] as const;
+
+const LEAVE_SORTS = {
+  newest: { label: "Newest first", order: [desc(LeaveRequest.createdAt)] },
+  oldest: { label: "Oldest first", order: [asc(LeaveRequest.createdAt)] },
+  start: { label: "Leave start (latest)", order: [desc(LeaveRequest.startDate), desc(LeaveRequest.createdAt)] },
+  startOldest: { label: "Leave start (earliest)", order: [asc(LeaveRequest.startDate), asc(LeaveRequest.createdAt)] },
+  days: { label: "Days (most)", order: [desc(LeaveRequest.days), desc(LeaveRequest.createdAt)] },
+  updated: { label: "Recently updated", order: [desc(LeaveRequest.updatedAt)] },
+} satisfies SortChoices<SQL[]>;
+
+const CLAIM_SORTS = {
+  newest: { label: "Newest first", order: [desc(CompOffClaim.createdAt)] },
+  oldest: { label: "Oldest first", order: [asc(CompOffClaim.createdAt)] },
+  worked: { label: "Day worked (latest)", order: [desc(CompOffClaim.workDate), desc(CompOffClaim.createdAt)] },
+  workedOldest: { label: "Day worked (earliest)", order: [asc(CompOffClaim.workDate), asc(CompOffClaim.createdAt)] },
+  days: { label: "Credit (most)", order: [desc(CompOffClaim.days), desc(CompOffClaim.createdAt)] },
+  decided: { label: "Recently decided", order: [desc(CompOffClaim.decidedAt), desc(CompOffClaim.createdAt)] },
+} satisfies SortChoices<SQL[]>;
 
 export default async function LeaveApprovalsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
@@ -96,8 +114,9 @@ export default async function LeaveApprovalsPage({ searchParams }: { searchParam
   );
 
   if (tab === "compoff") {
+    const sort = sortParam(sp, CLAIM_SORTS);
     const [claims, total] = await Promise.all([
-      db().select().from(CompOffClaim).where(claimScope).orderBy(desc(CompOffClaim.createdAt)).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
+      db().select().from(CompOffClaim).where(claimScope).orderBy(...sort.order).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
       db().$count(CompOffClaim, claimScope),
     ]);
     const people = await db()
@@ -115,6 +134,9 @@ export default async function LeaveApprovalsPage({ searchParams }: { searchParam
         {header}
         {tabs}
         <Card>
+          <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-4 py-3">
+            <SortSelect options={sort.options} />
+          </div>
           <TableWrap phone={[1, 2, 5]} tablet={[1, 2, 3, 5, 6]}>
             <THead>
               <Th>Person</Th>
@@ -184,12 +206,13 @@ export default async function LeaveApprovalsPage({ searchParams }: { searchParam
   }
 
   if (tab !== "pending") {
+    const sort = sortParam(sp, LEAVE_SORTS);
     const [rows, total] = await Promise.all([
       db()
         .select()
         .from(LeaveRequest)
         .where(historyFilter)
-        .orderBy(desc(LeaveRequest.createdAt))
+        .orderBy(...sort.order)
         .limit(PAGE_SIZE)
         .offset((page - 1) * PAGE_SIZE),
       db().$count(LeaveRequest, historyFilter),
@@ -209,6 +232,9 @@ export default async function LeaveApprovalsPage({ searchParams }: { searchParam
         {header}
         {tabs}
         <Card>
+          <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-4 py-3">
+            <SortSelect options={sort.options} />
+          </div>
           <TableWrap phone={[1, 3, 6]} tablet={[1, 2, 3, 5, 6]}>
             <THead>
               <Th>Person</Th>

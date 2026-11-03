@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
-import { and, asc, count, desc, eq, gt, gte, isNotNull, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, gte, isNotNull, or, sql, type SQL } from "drizzle-orm";
 import { can, requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { ISSUE_STATUSES, Issue, Project, Task, type Id, type IssueSeverity } from "@/lib/models";
 import { peopleOptions } from "@/lib/people";
-import { idParam, pageParam, PAGE_SIZE, param, withParams, type SearchParams } from "@/lib/query";
-import { inList, notInList, searchAny } from "@/lib/sql";
+import { idParam, pageParam, PAGE_SIZE, param, sortParam, withParams, type SearchParams, type SortChoices } from "@/lib/query";
+import { inList, nocase, notInList, searchAny } from "@/lib/sql";
 import { statusLabel } from "@/lib/status";
 import { addDays, dateKey, diffDays, fmtDate, startOfDay, todayKey, weekStart } from "@/lib/time";
 import { ISSUE_RESOLVED_STATUSES, issueFilter, myProjectIds, peopleMap, projectFilter, type Filter } from "@/lib/work-access";
@@ -15,7 +15,7 @@ import { ButtonLink } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { StatusChip } from "@/components/ui/chip";
 import { GroupedBarChart } from "@/components/ui/charts";
-import { ChipFilters, ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter } from "@/components/ui/filters";
+import { ChipFilters, ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter, SortSelect } from "@/components/ui/filters";
 import { PageBody, PageHeader, StatCard } from "@/components/ui/page";
 import { EmptyRow, TableWrap, THead, Th, Td, Tr } from "@/components/ui/table";
 import { Segmented } from "@/components/ui/tabs";
@@ -28,9 +28,27 @@ export const metadata = { title: "QA & issues" };
 const WORKING = ["open", "assigned", "in_progress", "reopened"];
 const TREND_WEEKS = 8;
 
+const SORTS = {
+  severity: {
+    label: "Severity (open first)",
+    order: [
+      asc(sql`case when ${inList(Issue.status, ISSUE_RESOLVED_STATUSES)} then 1 else 0 end`),
+      asc(sql`case ${Issue.severity} when 'critical' then 0 when 'major' then 1 when 'minor' then 2 when 'trivial' then 3 else -1 end`),
+      asc(sql`coalesce(${Issue.targetDate}, '9999-12-31')`),
+      desc(Issue.createdAt),
+    ],
+  },
+  newest: { label: "Newest first", order: [desc(Issue.createdAt)] },
+  oldest: { label: "Oldest first", order: [asc(Issue.createdAt)] },
+  target: { label: "Target date (soonest)", order: [asc(sql`coalesce(${Issue.targetDate}, '9999-12-31')`), desc(Issue.createdAt)] },
+  title: { label: "Title A–Z", order: [asc(nocase(Issue.title)), desc(Issue.createdAt)] },
+  updated: { label: "Recently updated", order: [desc(Issue.updatedAt)] },
+} satisfies SortChoices<SQL[]>;
+
 export default async function QaPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
   const sp = await searchParams;
+  const sort = sortParam(sp, SORTS);
   const today = todayKey();
   const currentWeek = weekStart(today);
 
@@ -72,12 +90,7 @@ export default async function QaPage({ searchParams }: { searchParams: Promise<S
       .select({ _id: Issue._id, issueNo: Issue.issueNo, title: Issue.title, task: Issue.task, severity: Issue.severity, assignee: Issue.assignee, targetDate: Issue.targetDate, status: Issue.status, project: Issue.project })
       .from(Issue)
       .where(filter)
-      .orderBy(
-        asc(sql`case when ${inList(Issue.status, ISSUE_RESOLVED_STATUSES)} then 1 else 0 end`),
-        asc(sql`case ${Issue.severity} when 'critical' then 0 when 'major' then 1 when 'minor' then 2 when 'trivial' then 3 else -1 end`),
-        asc(sql`coalesce(${Issue.targetDate}, '9999-12-31')`),
-        desc(Issue.createdAt),
-      )
+      .orderBy(...sort.order)
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
     db().$count(Issue, filter),
@@ -175,6 +188,7 @@ export default async function QaPage({ searchParams }: { searchParams: Promise<S
             <SelectFilter param="project" allLabel="All projects" label="Project" options={projectDocs.map((p) => ({ value: p._id, label: `${p.projectNo} · ${p.title}` }))} className="w-44" />
             <SelectFilter param="severity" allLabel="Any severity" label="Severity" options={SEVERITY_OPTIONS} />
             <SelectFilter param="assignee" allLabel="Any assignee" label="Assignee" options={people.map((p) => ({ value: p.id, label: p.name }))} className="w-40" />
+            <SortSelect options={sort.options} />
             <ClearFilters />
           </FilterBar>
         </div>

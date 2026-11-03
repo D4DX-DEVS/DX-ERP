@@ -1,18 +1,18 @@
 import Link from "next/link";
 import { Lock, Plus } from "lucide-react";
-import { and, asc, count, eq, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, sql, type SQL } from "drizzle-orm";
 import { can, requirePagePermission } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { Client, Invoice, Project, type ClientStatus } from "@/lib/models";
 import { peopleOptions } from "@/lib/people";
-import { idParam, pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
-import { inList, searchAny } from "@/lib/sql";
+import { idParam, pageParam, PAGE_SIZE, param, sortParam, type SearchParams, type SortChoices } from "@/lib/query";
+import { inList, nocase, searchAny } from "@/lib/sql";
 import { inr } from "@/lib/format";
 import { STATUS } from "@/lib/status";
 import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { StatusChip } from "@/components/ui/chip";
-import { ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter } from "@/components/ui/filters";
+import { ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter, SortSelect } from "@/components/ui/filters";
 import { PageBody, PageHeader } from "@/components/ui/page";
 import { Segmented } from "@/components/ui/tabs";
 import { EmptyRow, TableWrap, THead, Th, Td, Tr } from "@/components/ui/table";
@@ -21,10 +21,20 @@ import { userCards } from "../_lib/queries";
 
 export const metadata = { title: "Clients" };
 
+const SORTS = {
+  name: { label: "Name A–Z", order: [asc(nocase(Client.name)), asc(Client.clientNo)] },
+  nameDesc: { label: "Name Z–A", order: [desc(nocase(Client.name)), asc(Client.clientNo)] },
+  newest: { label: "Newest first", order: [desc(Client.createdAt)] },
+  oldest: { label: "Oldest first", order: [asc(Client.createdAt)] },
+  updated: { label: "Recently updated", order: [desc(Client.updatedAt)] },
+  clientNo: { label: "Client no.", order: [asc(Client.clientNo)] },
+} satisfies SortChoices<SQL[]>;
+
 export default async function ClientsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePagePermission("crm.view");
   const sp = await searchParams;
   const page = pageParam(sp);
+  const sort = sortParam(sp, SORTS);
   const status = param(sp, "status");
   const owner = idParam(sp, "owner");
   const q = param(sp, "q");
@@ -53,7 +63,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
       })
       .from(Client)
       .where(filter)
-      .orderBy(asc(Client.name))
+      .orderBy(...sort.order)
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
     db().$count(Client, filter),
@@ -100,6 +110,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
         <SearchInput placeholder="Search name, number, contact, email, phone" />
         <SelectFilter param="status" label="Status" allLabel="All statuses" options={Object.entries(STATUS.client).map(([value, [label]]) => ({ value, label }))} />
         <SelectFilter param="owner" label="Owner" allLabel="All owners" options={people.map((p) => ({ value: p.id, label: p.name }))} />
+        <SortSelect options={sort.options} />
         <ClearFilters />
       </FilterBar>
       <Card>
