@@ -150,9 +150,11 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
               <span>
                 {project.startDate ? fmtDate(project.startDate) : "No start"} – {project.targetDate ? fmtDate(project.targetDate) : "no target"}
               </span>
-              <span>
-                Priority <StatusChip domain="priority" value={project.priority} size="sm" />
-              </span>
+              {!isClosed && (
+                <span>
+                  Priority <StatusChip domain="priority" value={project.priority} size="sm" />
+                </span>
+              )}
               {(contract || proposal) && (
                 <span>
                   {contract ? `Contract ${contract.contractNo}` : ""}
