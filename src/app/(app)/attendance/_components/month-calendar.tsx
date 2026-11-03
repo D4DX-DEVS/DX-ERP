@@ -57,13 +57,13 @@ export function CalendarLegend() {
   );
 }
 
-/** Month grid (Monday first) of classified days; each cell shows hours worked, leave, holiday or absence. */
+/** Month grid (Sunday first, like a wall calendar) of classified days; each cell shows hours worked, leave, holiday or absence. */
 export function MonthCalendar({ days, today }: { days: LogDay[]; today: string }) {
   if (days.length === 0) return null;
-  const lead = (weekday(days[0].date) + 6) % 7;
+  const lead = weekday(days[0].date);
   return (
     <div className="grid grid-cols-7 gap-1 sm:gap-1.5">
-      {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
+      {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
         <span key={d} className="py-1 text-center text-xs font-semibold text-muted">
           {d}
         </span>
