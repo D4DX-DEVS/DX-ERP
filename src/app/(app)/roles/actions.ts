@@ -13,8 +13,8 @@ import {
   DEFAULT_ROLE_PERMISSIONS,
   PERMISSION_LABELS,
   ROLE_KEYS,
-  SUPER_ADMIN_ONLY,
   isPermission,
+  reservedPermissions,
   type Permission,
   type RoleKey,
 } from "@/lib/rbac/permissions";
@@ -32,10 +32,11 @@ function clip(text: string, max = 300): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
-/** Catalogue-ordered, de-duplicated list of valid permissions (never the super-admin-only ones). */
-function cleanPermissions(input: unknown): Permission[] {
+/** Catalogue-ordered, de-duplicated list of valid permissions (never the ones reserved away from this role). */
+function cleanPermissions(roleKey: string, input: unknown): Permission[] {
   const wanted = new Set(Array.isArray(input) ? input.map(String) : []);
-  return ALL_PERMISSIONS.filter((p) => wanted.has(p) && !SUPER_ADMIN_ONLY.includes(p));
+  const reserved = reservedPermissions(roleKey);
+  return ALL_PERMISSIONS.filter((p) => wanted.has(p) && !reserved.includes(p));
 }
 
 function permissionChanges(before: string[], after: Permission[]) {
@@ -83,7 +84,7 @@ export async function saveRolePermissions(key: string, permissions: string[]): P
     if (key === "super_admin") throw new ActionError("The super admin role always has every permission and can't be edited.");
     const [role] = await db().select().from(Role).where(eq(Role.key, key)).limit(1);
     if (!role) throw new ActionError("Role not found");
-    const next = cleanPermissions(permissions);
+    const next = cleanPermissions(key, permissions);
     const { added, removed, changes } = permissionChanges(role.permissions, next);
     if (changes.length === 0) return { changed: 0 };
     assertCanGrant(user, key, added);
@@ -136,7 +137,7 @@ export async function createRole(input: Record<string, unknown>): Promise<Action
       if (data.copyFrom === "super_admin") fieldError("copyFrom", "Permissions can't be copied from the super admin role");
       const [source] = await db().select().from(Role).where(eq(Role.key, data.copyFrom)).limit(1);
       if (!source) fieldError("copyFrom", "Role not found");
-      permissions = cleanPermissions(source.permissions);
+      permissions = cleanPermissions(data.key, source.permissions);
       if (!user.isSuperAdmin && permissions.some((p) => !user.permissions.includes(p))) fieldError("copyFrom", "That role has permissions you don't hold, so you can't copy it");
       copiedFrom = source.name;
     }

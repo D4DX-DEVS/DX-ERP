@@ -75,9 +75,12 @@ function memberOfProject(userId: Id): SQL {
   return or(eq(Project.manager, userId), jsonHasField(Project.team, "user", userId))!;
 }
 
-/** Condition for the projects a user may see: all for the super admin (`projects.view_all`), otherwise the ones they lead or are on. */
+/**
+ * Condition for the projects a user may see: all for the super admin (`projects.view_all`) and QA engineers
+ * (`qa.projects`, who only get each project's overview and QA issues), otherwise the ones they lead or are on.
+ */
 export function projectFilter(user: CurrentUser): Filter {
-  if (can(user, "projects.view_all")) return undefined;
+  if (can(user, "projects.view_all") || can(user, "qa.projects")) return undefined;
   return memberOfProject(user._id);
 }
 
@@ -85,6 +88,8 @@ export interface ProjectCaps {
   isManager: boolean;
   isMember: boolean;
   view: boolean;
+  /** Every tab (tasks, milestones, team, files, secrets, activity). False for QA engineers, who get the overview and QA issues only. */
+  full: boolean;
   /** Edit the project, milestones and team: the project manager, or `projects.manage` on a project the user can see. */
   manage: boolean;
   /** Budget, billing and cost data. Never granted to interns / trainees. */
@@ -97,12 +102,15 @@ export function projectCaps(user: CurrentUser, project: { manager?: Id | null; t
   const isManager = sid(project.manager) === user.id;
   const isMember = (project.team ?? []).some((m) => m.user === user.id);
   const restricted = isInternLike(user);
-  const view = can(user, "projects.view_all") || isManager || isMember;
+  // QA engineers open every project but only its overview and QA issues, even on a team they're on.
+  const qa = can(user, "qa.projects") && !can(user, "projects.view_all");
+  const full = can(user, "projects.view_all") || isManager || (isMember && !qa);
   return {
     isManager,
     isMember,
-    view,
-    manage: isManager || (view && can(user, "projects.manage")),
+    view: full || qa,
+    full,
+    manage: isManager || (full && can(user, "projects.manage")),
     financials: can(user, "projects.financials") && !restricted,
     restricted,
   };
@@ -170,7 +178,7 @@ export function taskCaps(
   const isReporter = sid(task.reporter) === user.id;
   const isProjectManager = Boolean(project?.manager) && sid(project?.manager) === user.id;
   // A lead's `tasks.manage` stops at the projects they are on; other projects' tasks stay with those projects' leads.
-  const manage = isProjectManager || (can(user, "tasks.manage") && (!project || projectCaps(user, project).view));
+  const manage = isProjectManager || (can(user, "tasks.manage") && (!project || projectCaps(user, project).full));
   return {
     isAssignee,
     isReviewer,
@@ -208,7 +216,7 @@ export function projectMemberIds(project: { manager?: Id | null; team?: { user: 
 
 export function canCreateTask(user: CurrentUser, project?: { manager?: Id | null; team?: { user: Id }[] } | null): boolean {
   if (!project) return can(user, "tasks.manage");
-  return sid(project.manager) === user.id || (can(user, "tasks.manage") && projectCaps(user, project).view);
+  return sid(project.manager) === user.id || (can(user, "tasks.manage") && projectCaps(user, project).full);
 }
 
 /* ------------------------------------------------------------------ */

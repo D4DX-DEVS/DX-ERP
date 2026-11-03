@@ -9,7 +9,7 @@ import { getSettings } from "@/lib/settings";
 import { sendMail } from "@/lib/mailer";
 import { env } from "@/lib/env";
 import { inList, jsonHas, notInList } from "@/lib/sql";
-import { SUPER_ADMIN_ONLY, type Permission } from "@/lib/rbac/permissions";
+import { reservedPermissions, SUPER_ADMIN_ONLY, type Permission } from "@/lib/rbac/permissions";
 
 export interface NotifyInput {
   /** Category key — must match a key in NOTIFICATION_EVENTS so it can be toggled in settings. */
@@ -128,8 +128,10 @@ export async function notifyMany(items: NotifyItem[]): Promise<number> {
 
 /** Active users holding a permission (plus the super admin). */
 export async function usersWithPermission(permission: Permission): Promise<string[]> {
-  // Super-admin-only permissions may still be listed on old role rows; they don't count there.
-  const roles = SUPER_ADMIN_ONLY.includes(permission) ? [] : await db().select({ key: Role.key }).from(Role).where(jsonHas(Role.permissions, permission));
+  // Super-admin-only (and QA-Engineer-only) permissions may still be listed on old role rows; they don't count there.
+  const roles = SUPER_ADMIN_ONLY.includes(permission)
+    ? []
+    : (await db().select({ key: Role.key }).from(Role).where(jsonHas(Role.permissions, permission))).filter((r) => !reservedPermissions(r.key).includes(permission));
   const users = await db()
     .select({ id: User._id })
     .from(User)

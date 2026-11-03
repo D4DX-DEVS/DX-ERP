@@ -49,6 +49,7 @@ export const PERMISSION_GROUPS = [
       ["qa.view_all", "View all QA issues"],
       ["qa.manage", "Create and assign issues"],
       ["qa.verify", "Verify fixes, reopen and close issues"],
+      ["qa.projects", "Open every project's overview and QA issues (no tasks, files or secrets)"],
     ],
   },
   {
@@ -113,6 +114,18 @@ export const ALL_PERMISSIONS: Permission[] = PERMISSION_GROUPS.flatMap((g) => g.
  */
 export const SUPER_ADMIN_ONLY: Permission[] = ["projects.view_all", "projects.delete", "tasks.view_all"];
 
+/** The QA Engineer role: tests every project and is the one who signs off bug fixes. */
+export const QA_ROLE = "qa_engineer";
+
+/** Held only by the QA Engineer role (and the super admin): nobody else verifies or closes fixes. */
+export const QA_ROLE_ONLY: Permission[] = ["qa.verify", "qa.projects"];
+
+/** Permissions a role can never hold, whatever its stored list says. */
+export function reservedPermissions(roleKey: string): Permission[] {
+  if (roleKey === "super_admin") return [];
+  return roleKey === QA_ROLE ? SUPER_ADMIN_ONLY : [...SUPER_ADMIN_ONLY, ...QA_ROLE_ONLY];
+}
+
 export const PERMISSION_LABELS: Record<Permission, string> = Object.fromEntries(
   PERMISSION_GROUPS.flatMap((g) => g.items.map((i) => [i[0], i[1]])),
 ) as Record<Permission, string>;
@@ -126,6 +139,7 @@ export const ROLE_KEYS = [
   "bd",
   "pm",
   "team_lead",
+  "qa_engineer",
   "employee",
   "trainee",
   "intern",
@@ -141,6 +155,7 @@ export const ROLE_LABELS: Record<string, string> = {
   bd: "Business Development",
   pm: "Project Manager",
   team_lead: "Team Lead",
+  qa_engineer: "QA Engineer",
   employee: "Employee",
   trainee: "Trainee",
   intern: "Intern",
@@ -154,6 +169,7 @@ export const ROLE_DESCRIPTIONS: Record<string, string> = {
   bd: "Leads, enquiries, proposals, quotations and client follow-ups",
   pm: "Project planning, resource allocation, task assignments, milestones and delivery",
   team_lead: "Team coordination, task monitoring, timesheet review and assigned approvals",
+  qa_engineer: "Reports bugs on every project, verifies fixes and closes issues; sees each project's overview and QA issues only",
   employee: "Own profile, attendance, movements, leave, assigned tasks and timesheets",
   trainee: "Assigned tasks, attendance, training activities and permitted project information",
   intern: "Internship records, attendance, movements, tasks, learning, submissions and feedback",
@@ -163,7 +179,7 @@ const without = (list: Permission[], remove: Permission[]) => list.filter((p) =>
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<RoleKey, Permission[]> = {
   super_admin: ALL_PERMISSIONS,
-  management: without(ALL_PERMISSIONS, ["settings.manage", "roles.manage", "backup.manage", "users.manage", ...SUPER_ADMIN_ONLY]),
+  management: without(ALL_PERMISSIONS, ["settings.manage", "roles.manage", "backup.manage", "users.manage", ...SUPER_ADMIN_ONLY, ...QA_ROLE_ONLY]),
   hr: [
     "staff.view",
     "staff.create",
@@ -235,7 +251,6 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<RoleKey, Permission[]> = {
     "timesheets.approve",
     "qa.view_all",
     "qa.manage",
-    "qa.verify",
     "crm.view",
     "proposals.view",
     "contracts.view",
@@ -250,9 +265,9 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<RoleKey, Permission[]> = {
     "tasks.review",
     "timesheets.approve",
     "qa.manage",
-    "qa.verify",
     "reports.view",
   ],
+  qa_engineer: ["qa.view_all", "qa.manage", "qa.verify", "qa.projects"],
   employee: [],
   trainee: [],
   intern: [],

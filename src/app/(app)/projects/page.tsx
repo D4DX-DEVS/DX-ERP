@@ -1,6 +1,6 @@
 import { Plus } from "lucide-react";
 import { and, asc, count, desc, eq, sql, type SQL } from "drizzle-orm";
-import { can, requireUser } from "@/lib/auth/session";
+import { can, canAny, requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { Project } from "@/lib/models";
 import { pageParam, PAGE_SIZE, param, sortParam, withParams, type SearchParams, type SortChoices } from "@/lib/query";
@@ -108,7 +108,7 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Pro
     <PageBody>
       <PageHeader
         overline="Work"
-        title={can(user, "projects.manage") ? "Projects" : "My projects"}
+        title={canAny(user, ["projects.manage", "qa.projects"]) ? "Projects" : "My projects"}
         actions={
           <>
             <Segmented

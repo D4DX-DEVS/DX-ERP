@@ -11,7 +11,7 @@ import { Field, FormGrid, useServerAction } from "@/components/ui/form";
 import { Checkbox, Input, Select, Textarea } from "@/components/ui/input";
 import { Alert } from "@/components/ui/page";
 import { cn } from "@/lib/cn";
-import { PERMISSION_GROUPS, SUPER_ADMIN_ONLY } from "@/lib/rbac/permissions";
+import { PERMISSION_GROUPS, reservedPermissions, SUPER_ADMIN_ONLY } from "@/lib/rbac/permissions";
 import { plural } from "@/lib/format";
 import { FormDialog } from "../settings/ui";
 import { createRole, deleteRole, resetRolePermissions, saveRolePermissions, updateRoleDetails } from "./actions";
@@ -72,7 +72,7 @@ export function RoleEditor({ role }: { role: RoleView }) {
   const router = useRouter();
   const readOnly = role.key === "super_admin";
   const valid = PERMISSION_GROUPS.flatMap((g) => g.items.map((i) => i[0] as string));
-  const reserved = new Set<string>(readOnly ? [] : SUPER_ADMIN_ONLY);
+  const reserved = new Set<string>(reservedPermissions(role.key));
   const initial = valid.filter((p) => role.permissions.includes(p) && !reserved.has(p));
   const [selected, setSelected] = useState<string[]>(readOnly ? valid : initial);
   const { pending, run } = useServerAction();
@@ -173,7 +173,7 @@ export function RoleEditor({ role }: { role: RoleView }) {
                           {locked && (
                             <Tag tone="gray" className="ml-2 align-middle">
                               <Lock className="mr-1 inline size-3" aria-hidden />
-                              Super admin only
+                              {(SUPER_ADMIN_ONLY as string[]).includes(key) ? "Super admin only" : "QA Engineer only"}
                             </Tag>
                           )}
                         </span>

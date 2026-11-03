@@ -22,6 +22,8 @@ export type VaultRole = "owner" | "member" | "viewer";
 export function vaultRole(user: Pick<CurrentUser, "id" | "isSuperAdmin" | "permissions">, project: { manager?: Id | null; team?: { user: Id }[] }): VaultRole | null {
   if (user.isSuperAdmin) return "owner";
   if (project.manager === user.id) return "owner";
+  // QA engineers never see project secrets, even on a team they're on.
+  if (can(user, "qa.projects")) return null;
   if ((project.team ?? []).some((m) => m.user === user.id)) return can(user, "projects.manage") ? "member" : "viewer";
   return null;
 }

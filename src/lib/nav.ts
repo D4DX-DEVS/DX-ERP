@@ -82,8 +82,8 @@ export function buildNav({ user, isManager, isMentor, badges }: NavContext): Nav
 
   const work: NavItem[] = [];
   work.push(item("tasks", intern ? "My tasks" : "Tasks", "/tasks", "tasks"));
-  // Everyone without `projects.manage` (staff, interns, trainees) gets a read-only view of the projects they are on.
-  work.push(item("projects", can(user, "projects.manage") ? "Projects" : "My projects", "/projects", "projects"));
+  // Everyone without `projects.manage` (staff, interns, trainees) gets a read-only view of the projects they are on; QA engineers see every project.
+  work.push(item("projects", canAny(user, ["projects.manage", "qa.projects"]) ? "Projects" : "My projects", "/projects", "projects"));
   if (!intern || can(user, "qa.view_all")) work.push(item("qa", "QA & issues", "/qa", "qa"));
   if (intern || canAny(user, ["interns.manage"])) work.push(item("learning", intern ? "Learning & reviews" : "Learning", "/learning", "learning"));
   sections.push({ label: intern ? "Internship" : "Work", items: work });

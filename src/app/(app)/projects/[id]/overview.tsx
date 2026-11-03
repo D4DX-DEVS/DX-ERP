@@ -171,7 +171,7 @@ export async function Overview({
         <StatCard label="Progress" value={`${stats.progress}%`} sub={<Progress value={stats.progress} className="mt-1" />} />
         <StatCard
           label="Tasks done"
-          href={`/projects/${project._id}?tab=tasks`}
+          href={caps.full ? `/projects/${project._id}?tab=tasks` : undefined}
           value={
             <>
               {stats.done} <span className="text-sm font-medium text-muted">/ {stats.total}</span>
@@ -239,7 +239,7 @@ export async function Overview({
       <LinksPanel projectId={project._id} links={links} canManage={caps.manage} />
 
       <Card>
-        <CardHeader title="Milestones & delivery" href={`/projects/${project._id}?tab=milestones`} hrefLabel="Manage" />
+        <CardHeader title="Milestones & delivery" href={caps.full ? `/projects/${project._id}?tab=milestones` : undefined} hrefLabel="Manage" />
         <CardBody>
           {milestones.length === 0 ? (
             <p className="text-[13px] text-muted">No milestones yet.</p>

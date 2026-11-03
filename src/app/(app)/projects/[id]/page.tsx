@@ -76,7 +76,8 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
   // The vault follows team membership only — org-wide project viewers don't get the Secrets tab.
   const secretsRole = vaultRole(user, project);
   const tabParam = param(sp, "tab");
-  const tab: Tab = (TABS as readonly string[]).includes(tabParam) && (tabParam !== "secrets" || secretsRole) ? (tabParam as Tab) : "overview";
+  // QA engineers get the overview (and the QA issues link) only.
+  const tab: Tab = caps.full && (TABS as readonly string[]).includes(tabParam) && (tabParam !== "secrets" || secretsRole) ? (tabParam as Tab) : "overview";
   const closedTaskKeys = keysInCategories(settings.taskStatuses, TASK_CLOSED_CATEGORIES);
   const visibleTasks = await taskFilter(user);
   const category = categoryOf(settings.projectStatuses, project.status);
@@ -114,13 +115,15 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
     { key: "files", label: "Files", Icon: Paperclip, count: project.attachments.length || undefined },
     ...(secretsRole ? [{ key: "secrets", label: "Secrets", Icon: KeyRound, count: undefined }] : []),
     { key: "activity", label: "Activity", Icon: History },
-  ].map(({ Icon, ...t }) => ({
-    href: t.key === "overview" ? `/projects/${id}` : `/projects/${id}?tab=${t.key}`,
-    label: t.label,
-    icon: <Icon className={tabIcon} />,
-    count: t.count,
-    active: tab === t.key,
-  }));
+  ]
+    .filter((t) => caps.full || t.key === "overview")
+    .map(({ Icon, ...t }) => ({
+      href: t.key === "overview" ? `/projects/${id}` : `/projects/${id}?tab=${t.key}`,
+      label: t.label,
+      icon: <Icon className={tabIcon} />,
+      count: t.count,
+      active: tab === t.key,
+    }));
   tabItems.push({ href: `/qa?project=${id}`, label: "QA issues", icon: <Bug className={tabIcon} />, count: openIssues || undefined, active: false });
 
   const statusChoices = settings.projectStatuses

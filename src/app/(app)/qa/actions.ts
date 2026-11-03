@@ -10,7 +10,7 @@ import { ID_PREFIX, nextNumber } from "@/lib/counters";
 import { resolveFileRefs } from "@/lib/files";
 import { db } from "@/lib/db";
 import { Issue, newId, PRIORITIES, Project, StoredFile, Task, User, type Id } from "@/lib/models";
-import { notify } from "@/lib/notify";
+import { notify, notifyMany, usersWithPermission } from "@/lib/notify";
 import { EXITED_STATUSES } from "@/lib/people";
 import { increment, inList, jsonPush, notInList } from "@/lib/sql";
 import { statusLabel } from "@/lib/status";
@@ -220,8 +220,15 @@ async function transition(id: string, step: IssueStep, extra: { resolution?: str
   const body = extra.resolution ?? extra.note ?? undefined;
   const link = `/qa/${issue._id}`;
   const needsAssignee = step === "reopen" || step === "verify";
-  if (step === "fix" || step === "ready") {
-    await notify([issue.reporter, project?.manager], { type: "qa", title, body, link, actionable: step === "ready" }, [user._id]);
+  if (step === "ready") {
+    // QA engineers verify the fix; the reporter and project manager just follow along.
+    const testers = await usersWithPermission("qa.verify");
+    await notifyMany([
+      { recipients: testers, input: { type: "qa", title, body, link, actionable: true }, exclude: [user._id] },
+      { recipients: [issue.reporter, project?.manager], input: { type: "qa", title, body, link }, exclude: [user._id, ...testers] },
+    ]);
+  } else if (step === "fix") {
+    await notify([issue.reporter, project?.manager], { type: "qa", title, body, link }, [user._id]);
   } else {
     await notify([issue.assignee, issue.reporter, needsAssignee ? project?.manager : undefined], { type: "qa", title, body, link, actionable: step === "reopen", priority: step === "reopen" ? "high" : "normal" }, [user._id]);
   }
