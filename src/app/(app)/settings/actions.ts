@@ -81,6 +81,7 @@ const attendanceSchema = z.object({
     (v) => (Array.isArray(v) ? v : v ? [v] : []).map(Number),
     z.array(z.number().int().min(0).max(6)).min(1, "Select at least one working day"),
   ),
+  saturdaysOff: z.preprocess((v) => (Array.isArray(v) ? v : v ? [v] : []).map(Number), z.array(z.number().int().min(1).max(5))),
   officeStart: zs.time("Office start"),
   officeEnd: zs.time("Office end"),
   graceMinutes: zs.num("Grace period", { min: 0, max: 240 }),
@@ -101,7 +102,7 @@ export async function saveAttendance(input: Record<string, unknown>): Promise<Sa
     if (hmToMinutes(data.officeEnd) <= hmToMinutes(data.officeStart)) fieldError("officeEnd", "Office end must be after office start");
     if (data.halfDayMinutes >= data.fullDayMinutes) fieldError("halfDayMinutes", "Half day must be shorter than a full day");
     if (hmToMinutes(data.missingCheckoutAfter) <= hmToMinutes(data.officeEnd)) fieldError("missingCheckoutAfter", "Must be later than the office end time");
-    const next: AppSettings["attendance"] = { ...data, trackingStartDate: data.trackingStartDate ?? "", workingDays: [...new Set(data.workingDays)].sort((a, b) => a - b) };
+    const next: AppSettings["attendance"] = { ...data, trackingStartDate: data.trackingStartDate ?? "", workingDays: [...new Set(data.workingDays)].sort((a, b) => a - b), saturdaysOff: [...new Set(data.saturdaysOff)].sort((a, b) => a - b) };
     return saveConfig(user, "attendance", "Working days & attendance rules", next);
   }, "Attendance rules saved");
 }

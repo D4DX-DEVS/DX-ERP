@@ -87,6 +87,7 @@ export default async function MyAttendancePage({ searchParams }: { searchParams:
   ].sort((x, y) => (x < y ? 1 : -1));
   const a = settings.attendance;
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const saturdaysOff = a.workingDays.includes(6) ? a.saturdaysOff.map((n) => ["1st", "2nd", "3rd", "4th", "5th"][n - 1]).join(" & ") : "";
 
   return (
     <PageBody>
@@ -203,6 +204,7 @@ export default async function MyAttendancePage({ searchParams }: { searchParams:
             <strong>Your policy</strong>
             <span>
               Office hours {a.officeStart} – {a.officeEnd} · {a.workingDays.map((d) => dayNames[d]).join(", ")}
+              {saturdaysOff && ` (${saturdaysOff} Saturday off)`}
             </span>
             <span>
               Grace period {a.graceMinutes} min · full day {formatDuration(a.fullDayMinutes)} · half day {formatDuration(a.halfDayMinutes)}

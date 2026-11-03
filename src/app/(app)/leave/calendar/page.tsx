@@ -9,7 +9,7 @@ import type { SearchParams } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
 import { inList, notInList } from "@/lib/sql";
 import { cn } from "@/lib/cn";
-import { addDays, eachDay, fmtDate, monthKey, monthRange, todayKey, weekday } from "@/lib/time";
+import { addDays, eachDay, fmtDate, monthKey, monthRange, todayKey } from "@/lib/time";
 import { MonthNav } from "../../attendance/_components/month-nav";
 import { leaveDaysIn } from "../../attendance/_lib/leave-days";
 import { EXITED_STATUSES, STAFF_TYPES } from "../../attendance/_lib/access";
@@ -102,7 +102,7 @@ export default async function LeaveCalendarPage({ searchParams }: { searchParams
 
   // Fluid: the day columns share whatever width there is, so the grid never scrolls sideways.
   const cols = `minmax(88px, 176px) repeat(${days.length}, minmax(0, 1fr))`;
-  const dim = (d: string) => !settings.attendance.workingDays.includes(weekday(d)) || cal.isHoliday(d);
+  const dim = (d: string) => !cal.isWorkingDay(d);
   /** Phones: each person's leave as date ranges (weekends / holidays inside a range don't split it). */
   const rangesOf = (cells: Map<string, Cell> | undefined) => {
     const out: { start: string; end: string; cell: Cell }[] = [];

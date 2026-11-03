@@ -18,7 +18,7 @@ import { plain } from "@/lib/serialize";
 import { getSettings } from "@/lib/settings";
 import { inList, jsonHas } from "@/lib/sql";
 import { pageParam, PAGE_SIZE, param, sortParam, type SearchParams, type SortChoices } from "@/lib/query";
-import { addDays, fmtDate, formatDuration, timeAgo, todayKey, weekday } from "@/lib/time";
+import { addDays, fmtDate, formatDuration, isWorkingWeekday, timeAgo, todayKey } from "@/lib/time";
 import { cancelLeave } from "./actions";
 import { ApplyLeaveForm } from "./apply-form";
 import { withdrawCompOff } from "./comp-off-actions";
@@ -90,7 +90,7 @@ export default async function MyLeavePage({ searchParams }: { searchParams: Prom
   const upcoming = holidays.filter((h) => h.date >= today).slice(0, 6);
   // Optional holidays that can still be taken: today or later, on a working day, not already requested.
   const optionalDates = holidays
-    .filter((h) => h.optional && h.date >= today && settings.attendance.workingDays.includes(weekday(h.date)) && !busy.some((b) => b.start <= h.date && b.end >= h.date))
+    .filter((h) => h.optional && h.date >= today && isWorkingWeekday(h.date, settings.attendance) && !busy.some((b) => b.start <= h.date && b.end >= h.date))
     .map((h) => ({ date: h.date, name: h.name }));
   const optionalType = balances.find((b) => b.kind === "optional_holiday" && b.available > 0);
   const takeDate = param(sp, "oh");
@@ -155,6 +155,7 @@ export default async function MyLeavePage({ searchParams }: { searchParams: Prom
               <ApplyLeaveForm
                 types={options}
                 workingDays={settings.attendance.workingDays}
+                saturdaysOff={settings.attendance.saturdaysOff}
                 holidays={holidays.filter((h) => !h.optional).map((h) => h.date)}
                 countWeekends={settings.leave.countWeekendsInLeave}
                 allowNegative={settings.leave.allowNegativeBalance}

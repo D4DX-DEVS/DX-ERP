@@ -17,7 +17,7 @@ import {
   saveNotifications,
   saveNumbering,
 } from "./actions";
-import { CERTIFICATE_PLACEHOLDERS, invoicePreview, MONTH_NAMES, WEEKDAYS } from "./constants";
+import { CERTIFICATE_PLACEHOLDERS, invoicePreview, MONTH_NAMES, SATURDAY_WEEKS, WEEKDAYS } from "./constants";
 import { CGrid, PillCheck, SaveRow, SettingsCard } from "./ui";
 
 /* ───────────────────────────── Company ───────────────────────────── */
@@ -104,6 +104,15 @@ export function AttendanceForm({ attendance }: { attendance: AppSettings["attend
               <PillCheck key={d.value} name="workingDays[]" value={String(d.value)} label={d.label} defaultChecked={attendance.workingDays.includes(d.value)} />
             ))}
           </div>
+        </fieldset>
+        <fieldset className="flex flex-col gap-2">
+          <legend className="mb-1 text-[13px] font-semibold text-ink-2">Saturdays off</legend>
+          <div className="flex flex-wrap gap-2">
+            {SATURDAY_WEEKS.map((w) => (
+              <PillCheck key={w.value} name="saturdaysOff[]" value={String(w.value)} label={w.label} defaultChecked={attendance.saturdaysOff.includes(w.value)} />
+            ))}
+          </div>
+          <p className="text-xs text-muted">Saturdays of the month that are off even though Saturday is a working day (e.g. 2nd and 4th).</p>
         </fieldset>
         <CGrid cols={3}>
           <Field label="Office starts" name="officeStart" required>

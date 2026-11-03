@@ -3,7 +3,7 @@ import type { AppSettings, Tone } from "@/lib/config-defaults";
 import { computeAttendance } from "@/lib/domain/attendance-calc";
 import type { IAttendance } from "@/lib/models";
 import { statusLabel, statusTone } from "@/lib/status";
-import { minutesBetween, weekday, zonedDateTime } from "@/lib/time";
+import { isWorkingWeekday, minutesBetween, zonedDateTime } from "@/lib/time";
 
 /**
  * Display status of one calendar day for one person. The stored `Attendance.status` only knows
@@ -69,7 +69,7 @@ export function classifyDay({ date, today, now, att, leave, holiday, settings }:
   if (att?.status === "on_leave" || leave === "full") return { key: "on_leave", extras: none };
   if (leave === "half") return { key: "half_leave", extras: none };
   if (holiday) return { key: "holiday", extras: none };
-  if (!a.workingDays.includes(weekday(date))) return { key: "weekend", extras: none };
+  if (!isWorkingWeekday(date, a)) return { key: "weekend", extras: none };
   if (date > today) return { key: "upcoming", extras: none };
   if (date === today) {
     const cutoff = zonedDateTime(today, a.missingCheckoutAfter);

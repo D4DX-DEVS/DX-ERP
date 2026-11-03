@@ -6,7 +6,7 @@ import type { AppSettings } from "@/lib/config-defaults";
 import { runBatch } from "@/lib/domain/batch";
 import { getSettings } from "@/lib/settings";
 import { inList } from "@/lib/sql";
-import { hmToMinutes, minutesBetween, weekday, zonedDateTime } from "@/lib/time";
+import { hmToMinutes, isWorkingWeekday, minutesBetween, zonedDateTime } from "@/lib/time";
 
 export interface AttendanceMetrics {
   breakMinutes: number;
@@ -65,10 +65,10 @@ export function computeAttendance(
   const cutoff = zonedDateTime(input.date, a.missingCheckoutAfter);
   const missingCheckout = Boolean(input.checkIn && !input.checkOut && now.getTime() > cutoff.getTime());
 
-  const isWorkingWeekday = a.workingDays.includes(weekday(input.date));
+  const workingWeekday = isWorkingWeekday(input.date, a);
   let status: IAttendance["status"];
   if (input.onLeave === "full") status = "on_leave";
-  else if (!input.checkIn) status = input.isHoliday ? "holiday" : !isWorkingWeekday ? "weekend" : "absent";
+  else if (!input.checkIn) status = input.isHoliday ? "holiday" : !workingWeekday ? "weekend" : "absent";
   else if (!input.checkOut) status = "present";
   else if (workMinutes >= a.fullDayMinutes || (input.onLeave === "half" && workMinutes >= a.halfDayMinutes)) status = input.onLeave === "half" ? "half_day" : "present";
   else if (workMinutes >= a.halfDayMinutes) status = "half_day";

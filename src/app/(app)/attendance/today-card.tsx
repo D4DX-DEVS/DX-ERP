@@ -8,7 +8,7 @@ import { db } from "@/lib/db";
 import { Attendance, Holiday, LeaveRequest, Movement } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
 import { inList } from "@/lib/sql";
-import { addDays, fmtDate, fmtTime, formatDuration, hmToMinutes, minutesBetween, todayKey, weekStart, weekday } from "@/lib/time";
+import { addDays, fmtDate, fmtTime, formatDuration, hmToMinutes, isWorkingWeekday, minutesBetween, todayKey, weekStart } from "@/lib/time";
 import { LiveDuration } from "./_components/live-duration";
 import { TodayActions, type TodayState } from "./_components/today-actions";
 import { currentTime } from "./_lib/clock";
@@ -87,7 +87,7 @@ export async function TodayAttendanceCard({ userId }: { userId: string }) {
   ]);
 
   // Leave only counts on days that are leave days (working days, unless weekends count).
-  const countsAsLeaveDay = settings.leave.countWeekendsInLeave || (a.workingDays.includes(weekday(today)) && !holiday);
+  const countsAsLeaveDay = settings.leave.countWeekendsInLeave || (isWorkingWeekday(today, a) && !holiday);
   const leaveToday = leave && countsAsLeaveDay ? (leave.halfDay ? "half" : "full") : null;
   const cls = classifyDay({ date: today, today, now, att, leave: leaveToday, holiday: Boolean(holiday), settings });
 
@@ -131,7 +131,7 @@ export async function TodayAttendanceCard({ userId }: { userId: string }) {
   // This week: one row per working day, office hours vs official movement time.
   const weekAttByDate = new Map(weekAtt.map((r) => [r.date, r]));
   const week = Array.from({ length: 7 }, (_, i) => addDays(from, i))
-    .filter((d) => a.workingDays.includes(weekday(d)))
+    .filter((d) => isWorkingWeekday(d, a))
     .map((d) => {
       const rec = weekAttByDate.get(d);
       const dayMoves = weekMoves.filter((m) => m.date === d);

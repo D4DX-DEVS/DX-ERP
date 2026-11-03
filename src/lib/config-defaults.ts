@@ -69,6 +69,8 @@ export interface AppSettings {
   };
   attendance: {
     workingDays: number[];
+    /** Saturdays of the month that are off even though Saturday is a working day (1 = first … 5 = fifth), e.g. [2, 4]. */
+    saturdaysOff: number[];
     officeStart: string;
     officeEnd: string;
     graceMinutes: number;
@@ -182,6 +184,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   attendance: {
     workingDays: [1, 2, 3, 4, 5],
+    saturdaysOff: [],
     officeStart: "09:30",
     officeEnd: "18:30",
     graceMinutes: 15,

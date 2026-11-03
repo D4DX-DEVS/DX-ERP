@@ -3,7 +3,7 @@ import { and, eq, gte, lte } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { Holiday } from "@/lib/models";
 import type { AppSettings } from "@/lib/config-defaults";
-import { eachDay, weekday } from "@/lib/time";
+import { eachDay, isWorkingWeekday } from "@/lib/time";
 
 export interface WorkCalendar {
   /** Mandatory (non-optional) holidays in range, keyed by day. */
@@ -28,8 +28,8 @@ export async function workCalendar(settings: AppSettings, from: string, to: stri
     holidays,
     workingDays,
     isHoliday: (day) => holidays.has(day),
-    isWeekend: (day) => !workingDays.has(weekday(day)),
-    isWorkingDay: (day) => workingDays.has(weekday(day)) && !holidays.has(day),
+    isWeekend: (day) => !isWorkingWeekday(day, settings.attendance),
+    isWorkingDay: (day) => isWorkingWeekday(day, settings.attendance) && !holidays.has(day),
     workingDaysBetween: (a, b) => eachDay(a, b).filter((d) => cal.isWorkingDay(d)),
   };
   return cal;

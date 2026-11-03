@@ -36,6 +36,15 @@ export const WEEKDAYS = [
   { value: 0, label: "Sun" },
 ];
 
+/** Value = week of the month (1 = first Saturday … 5 = fifth), as stored in `attendance.saturdaysOff`. */
+export const SATURDAY_WEEKS = [
+  { value: 1, label: "1st" },
+  { value: 2, label: "2nd" },
+  { value: 3, label: "3rd" },
+  { value: 4, label: "4th" },
+  { value: 5, label: "5th" },
+];
+
 export const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 export const PERSON_TYPE_OPTIONS = [

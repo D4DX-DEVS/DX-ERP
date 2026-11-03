@@ -81,6 +81,13 @@ export function weekday(day: string): number {
   return new Date(`${day}T00:00:00Z`).getUTCDay();
 }
 
+/** Working day by the weekly pattern alone (holidays aside): a working weekday that is not one of the Saturdays off. */
+export function isWorkingWeekday(day: string, a: { workingDays: number[]; saturdaysOff: number[] }): boolean {
+  const wd = weekday(day);
+  if (!a.workingDays.includes(wd)) return false;
+  return wd !== 6 || !a.saturdaysOff.includes(Math.ceil(Number(day.slice(8)) / 7));
+}
+
 export function eachDay(from: string, to: string): string[] {
   const days: string[] = [];
   for (let d = from; d <= to; d = addDays(d, 1)) days.push(d);

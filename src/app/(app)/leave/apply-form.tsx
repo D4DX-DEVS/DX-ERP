@@ -5,7 +5,7 @@ import { Alert } from "@/components/ui/page";
 import { FileUpload } from "@/components/ui/file-upload";
 import { ActionForm, Field, FormActions, FormGrid, SubmitButton } from "@/components/ui/form";
 import { Input, Radio, Select, Switch, Textarea } from "@/components/ui/input";
-import { diffDays, eachDay, fmtDate, weekday } from "@/lib/time";
+import { diffDays, eachDay, fmtDate, isWorkingWeekday } from "@/lib/time";
 import { applyLeave } from "./actions";
 
 export interface LeaveTypeOption {
@@ -28,6 +28,7 @@ export interface BusyRange {
 interface Props {
   types: LeaveTypeOption[];
   workingDays: number[];
+  saturdaysOff: number[];
   /** Mandatory holiday dates (yyyy-MM-dd) around the selectable range. */
   holidays: string[];
   countWeekends: boolean;
@@ -42,7 +43,7 @@ interface Props {
 
 const STATUS_TEXT: Record<string, string> = { pending_manager: "pending", pending_hr: "pending", approved: "approved" };
 
-function Fields({ types, workingDays, holidays, countWeekends, allowNegative, busy, approvalNote, optionalHolidays, initial, onDone }: Props & { onDone: () => void }) {
+function Fields({ types, workingDays, saturdaysOff, holidays, countWeekends, allowNegative, busy, approvalNote, optionalHolidays, initial, onDone }: Props & { onDone: () => void }) {
   const [typeId, setTypeId] = useState(initial?.typeId ?? types[0]?.id ?? "");
   const [start, setStart] = useState(initial?.date ?? "");
   const [end, setEnd] = useState(initial?.date ?? "");
@@ -57,10 +58,9 @@ function Fields({ types, workingDays, holidays, countWeekends, allowNegative, bu
     if (!start || !end || end < start || diffDays(start, end) > 400) return null;
     const days = eachDay(start, end);
     if (countWeekends) return days.length;
-    const wd = new Set(workingDays);
     const hol = new Set(holidays);
-    return days.filter((d) => wd.has(weekday(d)) && !hol.has(d)).length;
-  }, [start, end, countWeekends, workingDays, holidays]);
+    return days.filter((d) => isWorkingWeekday(d, { workingDays, saturdaysOff }) && !hol.has(d)).length;
+  }, [start, end, countWeekends, workingDays, saturdaysOff, holidays]);
   const days = counted === null ? null : halfOn ? (counted ? 0.5 : 0) : counted;
 
   const clash = start && end && end >= start ? busy.find((b) => b.start <= end && b.end >= start) : undefined;

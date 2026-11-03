@@ -10,7 +10,7 @@ import { directReportIds } from "@/lib/people";
 import { displayStatus, isOverdue, movementScope, overdueCutoff, scopeFilter, type MovementScope } from "@/lib/movement/access";
 import { dateParam, idParam, PAGE_SIZE, pageParam, param, sortParam, type SearchParams, type SortChoices, withParams } from "@/lib/query";
 import { inList, searchAny } from "@/lib/sql";
-import { addDays, eachDay, fmtDate, fmtTime, formatDuration, todayKey, weekStart, weekday } from "@/lib/time";
+import { addDays, eachDay, fmtDate, fmtTime, formatDuration, isWorkingWeekday, todayKey, weekStart } from "@/lib/time";
 import type { AppSettings } from "@/lib/config-defaults";
 import { PageBody, PageHeader, EmptyState, StatCard } from "@/components/ui/page";
 import { Card, CardHeader, CardBody } from "@/components/ui/card";
@@ -203,7 +203,7 @@ async function RegisterView({ ctx, scope, sp }: { ctx: Ctx; scope: MovementScope
     db().$count(Movement, and(base, eq(Movement.approvalStatus, "correction_requested"))),
   ]);
 
-  const workDays = eachDay(monday, addDays(monday, 6)).filter((d) => settings.attendance.workingDays.includes(weekday(d)) || weekRows.some((w) => w.date === d));
+  const workDays = eachDay(monday, addDays(monday, 6)).filter((d) => isWorkingWeekday(d, settings.attendance) || weekRows.some((w) => w.date === d));
   const week = workDays.map((d) => {
     const rowsForDay = weekRows.filter((w) => w.date === d);
     return {
