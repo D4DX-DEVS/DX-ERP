@@ -19,6 +19,8 @@ export interface PersonAccess {
   /** Date of birth, personal email, address and emergency contact. */
   canSeePersonal: boolean;
   canEdit: boolean;
+  /** Documents and change history: the person and HR / admin only, not leads who just hold `staff.view`. */
+  canSeeRecords: boolean;
   canConfidential: boolean;
   canManageUsers: boolean;
 }
@@ -42,6 +44,7 @@ export function personAccess(user: CurrentUser, target: AccessTarget): PersonAcc
     canView: listed && (isSelf || can(user, "staff.view") || isManager || isMentor || (internLike && can(user, "interns.manage"))),
     canSeePersonal: listed && (isSelf || canEdit || can(user, "staff.confidential") || isManager || isMentor),
     canEdit,
+    canSeeRecords: listed && (isSelf || canEdit || can(user, "staff.confidential")),
     canConfidential: listed && can(user, "staff.confidential"),
     canManageUsers: listed && can(user, "users.manage"),
   };

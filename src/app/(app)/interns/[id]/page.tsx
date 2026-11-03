@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
-import Link from "next/link";
 import { forbidden, notFound } from "next/navigation";
 import { Award, CheckSquare, LayoutDashboard, Star } from "lucide-react";
 import { eq } from "drizzle-orm";
@@ -13,6 +12,7 @@ import { getSettings } from "@/lib/settings";
 import { statusTone } from "@/lib/status";
 import { fmtDate, todayKey } from "@/lib/time";
 import { isObjectId } from "@/lib/validation";
+import { BackLink } from "@/components/ui/back-link";
 import { Avatar } from "@/components/ui/avatar";
 import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -76,16 +76,7 @@ export default async function InternPage({ params, searchParams }: { params: Pro
 
   return (
     <PageBody>
-      <nav aria-label="Breadcrumb" className="text-[13px] text-muted">
-        {access.isSelf ? (
-          <span>My internship</span>
-        ) : (
-          <Link href="/interns" className="hover:text-brand-600">
-            Interns &amp; trainees
-          </Link>
-        )}{" "}
-        <span aria-hidden>/</span> {target.name}
-      </nav>
+      <BackLink href={access.isSelf ? "/dashboard" : "/interns"} label={access.isSelf ? "Dashboard" : "Interns & trainees"} />
 
       <Card className="p-5 sm:p-6">
         <div className="flex flex-wrap items-center gap-5">

@@ -201,6 +201,11 @@ export function allowedTaskStatuses(settings: { taskStatuses: StatusOption[] }, 
 }
 
 /** True when the user may create tasks in this project (its manager, or `tasks.manage` on a project they can see), or outside projects (`tasks.manage`). */
+/** The project manager and team members — the people a project's tasks may be assigned to or reviewed by. */
+export function projectMemberIds(project: { manager?: Id | null; team?: { user: Id }[] | null }): Id[] {
+  return [...new Set([project.manager, ...(project.team ?? []).map((m) => m.user)].filter((x): x is Id => Boolean(x)))];
+}
+
 export function canCreateTask(user: CurrentUser, project?: { manager?: Id | null; team?: { user: Id }[] } | null): boolean {
   if (!project) return can(user, "tasks.manage");
   return sid(project.manager) === user.id || (can(user, "tasks.manage") && projectCaps(user, project).view);

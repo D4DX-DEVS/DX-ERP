@@ -2,12 +2,12 @@ import { notFound } from "next/navigation";
 import { and, asc, count, desc, eq } from "drizzle-orm";
 import { ShieldCheck } from "lucide-react";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { ClearFilters, FilterBar, SearchInput, SelectFilter } from "@/components/ui/filters";
+import { ClearFilters, FilterBar, Pagination, SearchInput, SelectFilter } from "@/components/ui/filters";
 import { Alert, PageBody, PageHeader } from "@/components/ui/page";
 import { requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { CREDENTIAL_CATEGORIES, Credential, VaultEvent, type CredentialCategory } from "@/lib/models";
-import { param, type SearchParams } from "@/lib/query";
+import { pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
 import { searchAny } from "@/lib/sql";
 import { fmtDateTime } from "@/lib/time";
 import { COMPANY_VAULT } from "@/lib/vault/credentials";
@@ -27,14 +27,17 @@ export default async function CredentialsPage({ searchParams }: { searchParams: 
   const categoryParam = param(sp, "category");
   const category = (CREDENTIAL_CATEGORIES as readonly string[]).includes(categoryParam) ? (categoryParam as CredentialCategory) : undefined;
   const filter = and(searchAny(q, Credential.platform, Credential.url), category ? eq(Credential.category, category) : undefined);
+  const page = pageParam(sp);
 
-  const [rows, counts, events] = await Promise.all([
+  const [rows, matching, counts, events] = await Promise.all([
     db()
       .select({ _id: Credential._id, platform: Credential.platform, category: Credential.category, url: Credential.url, valuesUpdatedAt: Credential.valuesUpdatedAt })
       .from(Credential)
       .where(filter)
       .orderBy(asc(Credential.platform))
-      .limit(1000),
+      .limit(PAGE_SIZE)
+      .offset((page - 1) * PAGE_SIZE),
+    db().$count(Credential, filter),
     db().select({ category: Credential.category, n: count() }).from(Credential).groupBy(Credential.category),
     db()
       .select({ _id: VaultEvent._id, itemName: VaultEvent.itemName, action: VaultEvent.action, userName: VaultEvent.userName, ip: VaultEvent.ip, at: VaultEvent.at })
@@ -86,6 +89,7 @@ export default async function CredentialsPage({ searchParams }: { searchParams: 
           filtered={Boolean(q || category)}
           rows={rows.map((r) => ({ id: r._id, platform: r.platform, category: r.category, url: r.url ?? undefined, valuesUpdatedAt: r.valuesUpdatedAt.toISOString() }))}
         />
+        <Pagination page={page} pageSize={PAGE_SIZE} total={matching} />
       </Card>
 
       <Card>

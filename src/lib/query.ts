@@ -3,7 +3,7 @@ import { isObjectId } from "@/lib/validation";
 /** Next.js page `searchParams` after awaiting. */
 export type SearchParams = Record<string, string | string[] | undefined>;
 
-export const PAGE_SIZE = 25;
+export const PAGE_SIZE = 20;
 
 /** First value of a search param as a trimmed string ("" when absent). */
 export function param(sp: SearchParams, key: string): string {

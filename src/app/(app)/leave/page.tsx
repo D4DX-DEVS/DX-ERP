@@ -5,6 +5,7 @@ import { ActionButton, ReasonAction } from "@/components/ui/actions";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { StatusChip, Tag } from "@/components/ui/chip";
+import { Pagination } from "@/components/ui/filters";
 import { EmptyState, PageBody, PageHeader, Progress } from "@/components/ui/page";
 import { Timeline, type TimelineItem } from "@/components/ui/timeline";
 import { AttachmentList } from "@/components/ui/file-upload";
@@ -16,7 +17,7 @@ import { namesFor } from "@/lib/people";
 import { plain } from "@/lib/serialize";
 import { getSettings } from "@/lib/settings";
 import { inList, jsonHas } from "@/lib/sql";
-import { param, type SearchParams } from "@/lib/query";
+import { pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
 import { addDays, fmtDate, formatDuration, timeAgo, todayKey, weekday } from "@/lib/time";
 import { cancelLeave } from "./actions";
 import { ApplyLeaveForm } from "./apply-form";
@@ -37,14 +38,22 @@ export default async function MyLeavePage({ searchParams }: { searchParams: Prom
   const today = todayKey();
   const year = leaveYearOf(today, settings);
   const range = leaveYearRange(year, settings);
+  const page = pageParam(sp);
+  const mine = eq(LeaveRequest.user, user._id);
 
-  const [balances, types, requests, holidays, pendingForMe, claims] = await Promise.all([
+  const [balances, types, requests, requestTotal, busy, holidays, pendingForMe, claims] = await Promise.all([
     leaveBalances(user._id, user.personType, year, settings, today),
     db()
       .select()
       .from(LeaveType)
       .where(and(eq(LeaveType.active, true), jsonHas(LeaveType.applicableTo, user.personType))),
-    db().select().from(LeaveRequest).where(eq(LeaveRequest.user, user._id)).orderBy(desc(LeaveRequest.createdAt)).limit(25),
+    db().select().from(LeaveRequest).where(mine).orderBy(desc(LeaveRequest.createdAt)).limit(PAGE_SIZE).offset((page - 1) * PAGE_SIZE),
+    db().$count(LeaveRequest, mine),
+    // Live requests the date picker warns about overlapping, independent of the page shown below.
+    db()
+      .select({ start: LeaveRequest.startDate, end: LeaveRequest.endDate, status: LeaveRequest.status })
+      .from(LeaveRequest)
+      .where(and(mine, inList(LeaveRequest.status, ["pending_manager", "pending_hr", "approved"]), gte(LeaveRequest.endDate, addDays(today, -60)))),
     db()
       .select({ date: Holiday.date, name: Holiday.name, optional: Holiday.optional })
       .from(Holiday)
@@ -64,7 +73,6 @@ export default async function MyLeavePage({ searchParams }: { searchParams: Prom
   const names = await namesFor([user.reportingManagerId, ...requests.map((r) => r.manager)]);
   const managerName = user.reportingManagerId ? names.get(user.reportingManagerId) : undefined;
 
-  const busy = requests.filter((r) => r.status === "pending_manager" || r.status === "pending_hr" || r.status === "approved").map((r) => ({ start: r.startDate, end: r.endDate, status: r.status }));
   const options = balances.map((b) => {
     const t = typeById.get(b.leaveTypeId);
     return { id: b.leaveTypeId, name: b.name, kind: b.kind, allowHalfDay: t?.allowHalfDay ?? false, unlimited: b.unlimited, available: b.available, requiresAttachmentAfterDays: t?.requiresAttachmentAfterDays ?? undefined };
@@ -292,6 +300,7 @@ export default async function MyLeavePage({ searchParams }: { searchParams: Prom
             })}
           </ul>
         )}
+        <Pagination page={page} pageSize={PAGE_SIZE} total={requestTotal} />
       </Card>
       {balances.length > 0 && (
         <p className="text-xs text-muted">

@@ -5,7 +5,7 @@ import { desc, eq } from "drizzle-orm";
 import { requirePagePermission } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { Invoice, Payment } from "@/lib/models";
-import { idParam, type SearchParams } from "@/lib/query";
+import { idParam, pageParam, PAGE_SIZE, type SearchParams } from "@/lib/query";
 import { inr, plural } from "@/lib/format";
 import { fmtDate, todayKey } from "@/lib/time";
 import { PageBody, PageHeader, StatCard } from "@/components/ui/page";
@@ -13,6 +13,7 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { buttonClass } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/chip";
 import { EmptyRow, TableWrap, THead, Th, Td, Tr } from "@/components/ui/table";
+import { Pagination } from "@/components/ui/filters";
 import { LinkTabs } from "@/components/ui/tabs";
 import { Menu } from "@/components/ui/menu";
 import { cn } from "@/lib/cn";
@@ -43,6 +44,9 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
     byClient.set(r.client, row);
   }
   const rows = [...byClient.values()].sort((a, b) => b.total - a.total);
+  // The totals row and the tiles cover every client; the table shows one page of them.
+  const page = pageParam(sp);
+  const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const totals = AGING_BUCKETS.map((b) => ({ ...b, amount: receivables.filter((r) => r.bucket === b.key).reduce((s, r) => s + r.balance, 0) }));
   const outstanding = receivables.reduce((s, r) => s + r.balance, 0);
   const overdue = receivables.filter((r) => r.daysPastDue > 0);
@@ -101,10 +105,10 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
           </THead>
           <tbody>
             {rows.length === 0 && <EmptyRow colSpan={8}>No outstanding invoices. Everything issued has been paid.</EmptyRow>}
-            {rows.map((r) => (
+            {pageRows.map((r) => (
               <Tr key={r.client} className={cn(selected === r.client && "bg-brand-50 hover:bg-brand-50")}>
                 <Td>
-                  <Link href={`/invoices/receivables?client=${r.client}`} scroll={false} className="font-semibold text-ink hover:text-brand-600" aria-current={selected === r.client ? "true" : undefined}>
+                  <Link href={`/invoices/receivables?client=${r.client}${page > 1 ? `&page=${page}` : ""}`} scroll={false} className="font-semibold text-ink hover:text-brand-600" aria-current={selected === r.client ? "true" : undefined}>
                     {names.get(r.client)?.name ?? "Unknown client"}
                   </Link>
                   {names.get(r.client) && <div className="text-xs text-muted">{names.get(r.client)?.clientNo}</div>}
@@ -134,6 +138,7 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
             )}
           </tbody>
         </TableWrap>
+        <Pagination page={page} pageSize={PAGE_SIZE} total={rows.length} />
       </Card>
 
       {selected && (

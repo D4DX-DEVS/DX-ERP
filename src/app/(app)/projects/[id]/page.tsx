@@ -1,7 +1,6 @@
-import Link from "next/link";
 import { forbidden, notFound } from "next/navigation";
 import { Bug, CheckSquare, Flag, History, KeyRound, LayoutDashboard, Paperclip, Pencil, Plus, Users } from "lucide-react";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { can, requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { Client, Contract, Invoice, Issue, Project, Proposal, Task, TimesheetEntry, type FileRef, type IProject } from "@/lib/models";
@@ -27,6 +26,7 @@ import {
   type ProjectCaps,
   TASK_CLOSED_CATEGORIES,
 } from "@/lib/work-access";
+import { BackLink } from "@/components/ui/back-link";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { OptionChip, StatusChip } from "@/components/ui/chip";
@@ -89,7 +89,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
       : undefined,
     project.contract && can(user, "contracts.view") ? db().select({ contractNo: Contract.contractNo }).from(Contract).where(eq(Contract._id, project.contract)).limit(1).then((r) => r[0]) : undefined,
     project.proposal && can(user, "proposals.view") ? db().select({ proposalNo: Proposal.proposalNo }).from(Proposal).where(eq(Proposal._id, project.proposal)).limit(1).then((r) => r[0]) : undefined,
-    db().$count(Task, and(eq(Task.project, project._id), visibleTasks)),
+    db().$count(Task, and(eq(Task.project, project._id), isNull(Task.parent), visibleTasks)),
     (async () => db().$count(Issue, and(eq(Issue.project, project._id), caps.restricted ? await issueFilter(user) : undefined, notInList(Issue.status, ISSUE_RESOLVED_STATUSES))))(),
     canDeleteProject
       ? Promise.all([
@@ -130,12 +130,10 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
   return (
     <PageBody>
       <div className="flex flex-col gap-3">
-        <nav aria-label="Breadcrumb" className="text-[13px] text-muted">
-          <Link href="/projects" className="hover:text-brand-600">
-            Projects
-          </Link>{" "}
-          / {project.projectNo}
-        </nav>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <BackLink href="/projects" label="Projects" />
+          <span className="font-mono text-xs text-muted">{project.projectNo}</span>
+        </div>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex min-w-0 flex-col gap-2">
             <div className="flex flex-wrap items-center gap-2.5">

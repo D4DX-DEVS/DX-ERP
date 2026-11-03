@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, Info, XCircle } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { BackLink } from "./back-link";
 
 /** Page title block: overline (section), H1, optional description and actions. */
 export function PageHeader({
@@ -22,11 +23,7 @@ export function PageHeader({
   return (
     <div className={cn("flex flex-wrap items-end justify-between gap-3 sm:gap-4", className)}>
       <div className="min-w-0">
-        {back && (
-          <Link href={back.href} className="mb-1 inline-flex items-center gap-1 text-xs font-medium text-muted hover:text-brand-600 sm:text-[13px]">
-            ← {back.label}
-          </Link>
-        )}
+        {back && <BackLink href={back.href} label={back.label} className="mb-1" />}
         {overline && !back && <div className="text-xs text-muted sm:text-[13px]">{overline}</div>}
         <h1 className="mt-0.5 font-display text-lg leading-tight font-semibold text-ink sm:text-[26px]">{title}</h1>
         {description && <p className="mt-1 max-w-3xl text-[13px] text-muted sm:text-sm">{description}</p>}

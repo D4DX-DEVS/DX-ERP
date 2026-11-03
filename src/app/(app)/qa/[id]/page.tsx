@@ -10,6 +10,7 @@ import { diffDays, fmtDate, fmtDateTime, todayKey } from "@/lib/time";
 import { isObjectId } from "@/lib/validation";
 import { allowedIssueSteps, issueCaps, issueFilter, peopleMap, projectCaps, taskFilter } from "@/lib/work-access";
 import { cn } from "@/lib/cn";
+import { BackLink } from "@/components/ui/back-link";
 import { Card, CardBody } from "@/components/ui/card";
 import { StatusChip } from "@/components/ui/chip";
 import { AttachmentList } from "@/components/ui/file-upload";
@@ -72,9 +73,7 @@ export default async function IssuePage({ params, searchParams }: { params: Prom
   return (
     <PageBody>
       <div className="flex flex-col gap-1">
-        <Link href="/qa" className="inline-flex items-center gap-1 text-[13px] font-medium text-muted hover:text-brand-600">
-          ← QA &amp; issues
-        </Link>
+        <BackLink href="/qa" label="QA & issues" />
         <div className="mt-1 flex flex-wrap items-center gap-2">
           <span className="font-mono text-xs text-muted">{issue.issueNo}</span>
           <StatusChip domain="issue" value={issue.status} />

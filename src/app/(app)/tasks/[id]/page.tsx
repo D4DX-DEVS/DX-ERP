@@ -12,6 +12,7 @@ import { optionLabel } from "@/lib/status";
 import { diffDays, fmtDate, fmtDateTime, formatDuration, todayKey } from "@/lib/time";
 import { isObjectId } from "@/lib/validation";
 import { allowedTaskStatuses, categoryOf, keysInCategories, peopleMap, projectCaps, taskCaps, taskFilter, TASK_CLOSED_CATEGORIES } from "@/lib/work-access";
+import { BackLink } from "@/components/ui/back-link";
 import { Avatar } from "@/components/ui/avatar";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -129,9 +130,11 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
     <PageBody>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <Link href={project && canOpenProject ? `/projects/${project._id}?tab=tasks` : "/tasks"} className="mb-1 inline-flex items-center gap-1 text-[13px] font-medium text-muted hover:text-brand-600">
-            ← {project && canOpenProject ? project.title : "Tasks"}
-          </Link>
+          <BackLink
+            href={parentTask ? `/tasks/${parentTask._id}` : project && canOpenProject ? `/projects/${project._id}?tab=tasks` : "/tasks"}
+            label={parentTask ? parentTask.title : project && canOpenProject ? project.title : "Tasks"}
+            className="mb-1"
+          />
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <span className="font-mono text-xs text-muted">{task.taskNo}</span>
             <OptionChip options={statuses} value={task.status} />

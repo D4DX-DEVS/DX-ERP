@@ -15,6 +15,7 @@ import { jsonPath } from "@/lib/sql";
 import { statusTone } from "@/lib/status";
 import { diffDays, fmtDate, monthKey, todayKey } from "@/lib/time";
 import { isObjectId } from "@/lib/validation";
+import { BackLink } from "@/components/ui/back-link";
 import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Chip, OptionChip, StatusChip, Tag } from "@/components/ui/chip";
@@ -72,7 +73,14 @@ export default async function StaffProfilePage({ params, searchParams }: { param
 
   // Attendance & leave: the person, their manager / mentor, and people with org-wide attendance or leave access.
   const canSeeAttendance = access.isSelf || access.isManager || access.isMentor || can(user, "attendance.view_all") || can(user, "leave.view_all");
-  const tabKeys = ["overview", ...(canSeeAttendance ? ["attendance"] : []), "documents", ...(access.canConfidential ? ["salary"] : []), "history", ...(access.canManageUsers ? ["access"] : [])];
+  const tabKeys = [
+    "overview",
+    ...(canSeeAttendance ? ["attendance"] : []),
+    ...(access.canSeeRecords ? ["documents"] : []),
+    ...(access.canConfidential ? ["salary"] : []),
+    ...(access.canSeeRecords ? ["history"] : []),
+    ...(access.canManageUsers ? ["access"] : []),
+  ];
   const requested = param(sp, "tab");
   const tab = tabKeys.includes(requested) ? requested : "overview";
   const tabIcon = "size-[18px]";
@@ -125,16 +133,7 @@ export default async function StaffProfilePage({ params, searchParams }: { param
 
   const page = (
     <PageBody>
-      <nav aria-label="Breadcrumb" className="text-[13px] text-muted">
-        {can(user, "staff.view") ? (
-          <Link href="/staff" className="hover:text-brand-600">
-            Staff
-          </Link>
-        ) : (
-          <span>Staff</span>
-        )}{" "}
-        <span aria-hidden>/</span> {person.name}
-      </nav>
+      <BackLink href={can(user, "staff.view") ? "/staff" : "/dashboard"} label={can(user, "staff.view") ? "Staff" : "Dashboard"} />
 
       <Card className="p-5 sm:p-6">
         <div className="flex flex-wrap items-center gap-5">

@@ -213,11 +213,15 @@ export async function OverviewTab({
         {completion && (
           <ProfileCompletionCard
             completion={completion}
-            links={{
-              documents: `/staff/${id}?tab=documents`,
-              education: `/staff/${id}?tab=documents#education`,
-              ...(access.canConfidential || access.isSelf ? { bank: `/staff/${id}?tab=documents#bank` } : {}),
-            }}
+            links={
+              access.canSeeRecords
+                ? {
+                    documents: `/staff/${id}?tab=documents`,
+                    education: `/staff/${id}?tab=documents#education`,
+                    ...(access.canConfidential || access.isSelf ? { bank: `/staff/${id}?tab=documents#bank` } : {}),
+                  }
+                : {}
+            }
           />
         )}
         {internship && progress && (

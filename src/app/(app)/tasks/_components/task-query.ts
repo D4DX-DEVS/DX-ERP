@@ -1,13 +1,24 @@
 import "server-only";
-import { and, asc, count, desc, eq, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, isNull, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { Task } from "@/lib/models";
+import { Task, type Id } from "@/lib/models";
 import type { CurrentUser } from "@/lib/auth/session";
 import type { AppSettings } from "@/lib/config-defaults";
-import { inList } from "@/lib/sql";
+import { inList, jsonHas } from "@/lib/sql";
 import type { Filter } from "@/lib/work-access";
 import { TASK_ROW_FIELDS, toTaskRows, type TaskLean } from "./task-rows";
 import type { BoardColumn } from "./task-board";
+
+/** Task lists and boards show top-level tasks only; subtasks are listed on their parent's page. */
+export const topLevelTask = (): SQL => isNull(Task.parent);
+
+/** Assigned to `userId` directly, or through one of its subtasks (so subtask-only assignees still find their work). */
+export function assignedToTaskOrSubtask(userId: Id): SQL {
+  return or(
+    jsonHas(Task.assignees, userId),
+    sql`exists (select 1 from ${Task} as sub where sub.parent = ${Task._id} and exists (select 1 from json_each(sub.assignees) where value = ${userId}))`,
+  )!;
+}
 
 /**
  * One page of tasks: open work first, soonest due date first (tasks without a due date last).

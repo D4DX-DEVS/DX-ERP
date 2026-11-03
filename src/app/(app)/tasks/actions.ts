@@ -24,6 +24,7 @@ import {
   historyEntry,
   keysInCategories,
   projectFilter,
+  projectMemberIds,
   taskCaps,
   taskFilter,
   TASK_CLOSED_CATEGORIES,
@@ -97,8 +98,20 @@ async function validateTaskInput(data: TaskInput, projectId: string | undefined,
   await assertStaff(added(data.assignees, existing?.assignees), "assignees");
   await assertStaff(added(data.sharedWith, existing?.sharedWith), "sharedWith");
   if (data.reviewer && data.reviewer !== existing?.reviewer) await assertStaff([data.reviewer], "reviewer");
+  const [project] = projectId
+    ? await db().select({ milestones: Project.milestones, manager: Project.manager, team: Project.team }).from(Project).where(eq(Project._id, projectId)).limit(1)
+    : [];
+  if (project) {
+    // A project's tasks go to its manager and team only.
+    const members = projectMemberIds(project);
+    if (added(data.assignees, existing?.assignees).some((a) => !members.includes(a))) {
+      throw new ActionError("Assign the task to the project manager or team members.", { assignees: "Only the project manager and team members" });
+    }
+    if (data.reviewer && data.reviewer !== existing?.reviewer && !members.includes(data.reviewer)) {
+      throw new ActionError("The reviewer must be the project manager or a team member.", { reviewer: "Only the project manager and team members" });
+    }
+  }
   if (data.milestone) {
-    const [project] = projectId ? await db().select({ milestones: Project.milestones }).from(Project).where(eq(Project._id, projectId)).limit(1) : [];
     if (!project?.milestones.some((m) => m._id === data.milestone)) {
       throw new ActionError("That milestone doesn't belong to the project.", { milestone: "Choose a milestone of this project" });
     }

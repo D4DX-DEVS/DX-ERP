@@ -14,6 +14,8 @@ export interface TaskFormProject {
   id: string;
   label: string;
   milestones: { id: string; title: string }[];
+  /** Project manager + team: the only people its tasks may be assigned to or reviewed by. */
+  members: string[];
 }
 
 export interface TaskFormDependency {
@@ -109,6 +111,14 @@ export function TaskForm({
   const project = projects.find((p) => p.id === projectId);
   const deps = useMemo(() => dependencies.filter((d) => d.project === projectId && d.id !== initial.id), [dependencies, projectId, initial.id]);
   const parents = deps.filter((d) => d.topLevel);
+  // People already on the task stay selectable when editing, so a member who left the team can still be removed.
+  const team = useMemo(() => {
+    if (!project) return people;
+    const allowed = new Set(project.members);
+    if (projectId === (initial.project ?? "")) [...initial.assignees, initial.reviewer].forEach((x) => x && allowed.add(x));
+    return people.filter((p) => allowed.has(p.id));
+  }, [people, project, projectId, initial.project, initial.assignees, initial.reviewer]);
+  const teamHint = project ? "Only the project manager and team members" : undefined;
 
   const action = (input: Record<string, unknown>) => (editing ? updateTask(initial.id!, input) : createTask(input));
 
@@ -177,11 +187,11 @@ export function TaskForm({
 
       <FormSection title="People">
         <FormGrid>
-          <Field label="Assignees" name="assignees" hint="Employees, trainees and interns who work on this task">
-            <PeoplePicker name="assignees" options={people} multiple defaultValue={initial.assignees} placeholder="Select assignees" />
+          <Field label="Assignees" name="assignees" hint={teamHint ?? "Employees, trainees and interns who work on this task"}>
+            <PeoplePicker key={projectId} name="assignees" options={team} multiple defaultValue={initial.assignees.filter((a) => team.some((p) => p.id === a))} placeholder="Select assignees" />
           </Field>
-          <Field label="Reviewer" name="reviewer" hint="Approves submitted work. Leave empty if no approval is needed.">
-            <PeoplePicker name="reviewer" options={people} defaultValue={initial.reviewer} placeholder="Select reviewer" />
+          <Field label="Reviewer" name="reviewer" hint={teamHint ? `${teamHint} · approves submitted work` : "Approves submitted work. Leave empty if no approval is needed."}>
+            <PeoplePicker key={projectId} name="reviewer" options={team} defaultValue={initial.reviewer && team.some((p) => p.id === initial.reviewer) ? initial.reviewer : undefined} placeholder="Select reviewer" />
           </Field>
           <Field label="Shared with" name="sharedWith" hint="Can see the task without being assigned (e.g. interns observing)" className="sm:col-span-2">
             <PeoplePicker name="sharedWith" options={people} multiple defaultValue={initial.sharedWith} placeholder="Select people" />

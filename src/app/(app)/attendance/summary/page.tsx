@@ -11,7 +11,7 @@ import { PageBody, PageHeader } from "@/components/ui/page";
 import { requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { AttendanceCorrection } from "@/lib/models";
-import { idParam, pageParam, param, type SearchParams } from "@/lib/query";
+import { idParam, pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
 import { fmtDate, formatDuration, monthKey } from "@/lib/time";
 import { MonthNav } from "../_components/month-nav";
 import { AttendanceTabs } from "../_components/tabs";
@@ -23,7 +23,6 @@ import { loadSummary } from "../_lib/register";
 
 export const metadata = { title: "Attendance summary" };
 
-const PAGE = 50;
 
 const num = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 
@@ -43,7 +42,7 @@ export default async function AttendanceSummaryPage({ searchParams }: { searchPa
     loadSummary(access, { month, q, dept }),
     access.canDecide ? db().$count(AttendanceCorrection, and(eq(AttendanceCorrection.status, "pending"), decidableFilter(user, access))) : Promise.resolve(0),
   ]);
-  const pageRows = rows.slice((page - 1) * PAGE, page * PAGE);
+  const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const total = rows.reduce(
     (t, r) => ({
       present: t.present + r.summary.present,
@@ -153,7 +152,7 @@ export default async function AttendanceSummaryPage({ searchParams }: { searchPa
             </tfoot>
           )}
         </TableWrap>
-        <Pagination page={page} pageSize={PAGE} total={rows.length} />
+        <Pagination page={page} pageSize={PAGE_SIZE} total={rows.length} />
       </Card>
     </PageBody>
   );

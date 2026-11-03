@@ -12,7 +12,7 @@ import { requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { peopleOptions } from "@/lib/people";
 import { AttendanceCorrection } from "@/lib/models";
-import { idParam, pageParam, param, type SearchParams } from "@/lib/query";
+import { idParam, pageParam, PAGE_SIZE, param, type SearchParams } from "@/lib/query";
 import { fmtDate, fmtTime, formatDuration, timeOf, todayKey } from "@/lib/time";
 import { cn } from "@/lib/cn";
 import { DayChips } from "../_components/day-chip";
@@ -25,7 +25,6 @@ import { isEarly, isLate, isPresent, loadRegister, matchesStatus, REGISTER_STATU
 
 export const metadata = { title: "Daily attendance" };
 
-const PAGE = 50;
 
 function RightNow({ row, isToday }: { row: RegisterRow; isToday: boolean }) {
   if (!isToday) return <span className="text-muted">—</span>;
@@ -85,7 +84,7 @@ export default async function TeamAttendancePage({ searchParams }: { searchParam
     missing: rows.filter((r) => r.key === "missing_checkout").length,
   };
   const filtered = rows.filter((r) => matchesStatus(r, status));
-  const pageRows = filtered.slice((page - 1) * PAGE, page * PAGE);
+  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const exportHref = (format: string) => {
     const p = new URLSearchParams({ format, date });
@@ -230,7 +229,7 @@ export default async function TeamAttendancePage({ searchParams }: { searchParam
                 ))}
               </tbody>
             </TableWrap>
-            <Pagination page={page} pageSize={PAGE} total={filtered.length} />
+            <Pagination page={page} pageSize={PAGE_SIZE} total={filtered.length} />
           </>
         )}
       </Card>

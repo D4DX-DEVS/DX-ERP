@@ -32,8 +32,9 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Pro
   const statusParam = param(sp, "status");
 
   const base: Filter = and(visible, searchAny(param(sp, "q"), Project.title, Project.projectNo));
+  // Every project by default; "active" hides closed ones, a status key narrows to that status.
   const statusFilter: Filter =
-    statusParam === "all" ? undefined : statuses.some((s) => s.key === statusParam) ? eq(Project.status, statusParam) : notInList(Project.status, closedKeys);
+    statusParam === "active" ? notInList(Project.status, closedKeys) : statuses.some((s) => s.key === statusParam) ? eq(Project.status, statusParam) : undefined;
   const filter: Filter = and(base, statusFilter);
 
   const counts = await db().select({ status: Project.status, n: count() }).from(Project).where(visible).groupBy(Project.status);
@@ -56,7 +57,7 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Pro
       </Card>
     );
   } else if (view === "board") {
-    const shown = statusParam === "all" ? statuses : statuses.filter((s) => (statuses.some((x) => x.key === statusParam) ? s.key === statusParam : !closedKeys.includes(s.key)));
+    const shown = statuses.filter((s) => (statuses.some((x) => x.key === statusParam) ? s.key === statusParam : statusParam !== "active" || !closedKeys.includes(s.key)));
     // One query per column plus one grouped count; the rows of every column are built together.
     const [perStatus, totalRows] = await Promise.all([
       Promise.all(
@@ -88,8 +89,8 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Pro
 
   const link = (v: string | null) => withParams("/projects", sp, { view: v });
   const chipOptions = [
-    { value: "", label: "Active", count: activeCount },
-    { value: "all", label: "All", count: total },
+    { value: "", label: "All", count: total },
+    { value: "active", label: "Active", count: activeCount },
     ...statuses.filter((s) => (countOf.get(s.key) ?? 0) > 0 || s.key === statusParam).map((s) => ({ value: s.key, label: s.label, count: countOf.get(s.key) ?? 0 })),
   ];
 

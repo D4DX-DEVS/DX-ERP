@@ -1,7 +1,7 @@
 import "server-only";
 import { asc, desc, eq } from "drizzle-orm";
 import { Client, Contract, Proposal, type Id } from "@/lib/models";
-import { can, type CurrentUser } from "@/lib/auth/session";
+import { can, canAny, type CurrentUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { peopleOptions } from "@/lib/people";
 import { getSettings } from "@/lib/settings";
@@ -11,9 +11,10 @@ import type { Reference } from "./project-form";
 /** Select options for the project form: clients the user may see, proposals / contracts they may view, staff. */
 export async function loadProjectFormOptions(user: CurrentUser, existing?: { client?: Id | null }) {
   const settings = await getSettings();
-  // Without CRM access only the project's current client is offered, never the client list.
+  // Project managers (e.g. team leads) pick from the client names without CRM access; anyone else only sees the
+  // project's current client. Restricted clients stay hidden unless the user may see them.
   const clientCols = { _id: Client._id, name: Client.name, confidential: Client.confidential, owner: Client.owner };
-  const clientDocs = can(user, "crm.view")
+  const clientDocs = canAny(user, ["crm.view", "projects.manage"])
     ? await db().select(clientCols).from(Client).orderBy(asc(Client.name)).limit(1000)
     : existing?.client
       ? await db().select(clientCols).from(Client).where(eq(Client._id, existing.client))

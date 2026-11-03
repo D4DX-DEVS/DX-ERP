@@ -10,6 +10,7 @@ import { inList, jsonHas, jsonPath, notInList } from "@/lib/sql";
 import { Sidebar, Rail } from "@/components/shell/sidebar";
 import { Topbar } from "@/components/shell/topbar";
 import { TabBar } from "@/components/shell/tab-bar";
+import { NavigationTracker } from "@/components/ui/back-link";
 import type { Presence, ShellUser } from "@/components/shell/types";
 
 /** Scalar `select count(*)` subquery, so every shell count comes back in a single D1 round trip. */
@@ -78,6 +79,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </main>
       </div>
       <TabBar sections={sections} user={shellUser} unread={unread} />
+      <NavigationTracker />
     </div>
   );
 }
