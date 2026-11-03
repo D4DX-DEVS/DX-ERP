@@ -572,7 +572,7 @@ export async function addProjectComment(projectId: string, input: Record<string,
   return runAction(async () => {
     const user = await actionUser();
     const data = parse(z.object({ text: zs.text("Comment", 5000), attachments: zs.ids() }), input);
-    const { project } = await loadProject(user, projectId, "view");
+    const { project } = await loadProject(user, projectId, "manage");
     const attachments = await resolveFileRefs(user, data.attachments);
     await db()
       .update(Project)
@@ -587,7 +587,7 @@ export async function addProjectFiles(projectId: string, input: Record<string, u
   return runAction(async () => {
     const user = await actionUser();
     const data = parse(z.object({ attachments: zs.ids() }), input);
-    const { project } = await loadProject(user, projectId, "view");
+    const { project } = await loadProject(user, projectId, "manage");
     const files = await resolveFileRefs(user, data.attachments);
     if (files.length === 0) throw new ActionError("Choose at least one file to attach.");
     await db()
@@ -604,10 +604,9 @@ export async function addProjectFiles(projectId: string, input: Record<string, u
 export async function removeProjectFile(projectId: string, refId: string): Promise<ActionResult<null>> {
   return runAction(async () => {
     const user = await actionUser();
-    const { project, caps } = await loadProject(user, projectId, "view");
+    const { project } = await loadProject(user, projectId, "manage");
     const ref = project.attachments.find((a) => a._id === refId);
     if (!ref) throw new ActionError("That file no longer exists.");
-    if (!caps.manage && ref.uploadedBy !== user.id) throw new ActionError("You can only remove files you uploaded.");
     const name = ref.name;
     await db()
       .update(Project)

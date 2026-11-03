@@ -198,7 +198,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
 
       {tab === "team" && <TeamTab project={project} caps={caps} closedTaskKeys={closedTaskKeys} people={people} />}
 
-      {tab === "files" && <FilesPanel projectId={id} files={await projectFiles(project.attachments, caps.manage, user.id)} />}
+      {tab === "files" && <FilesPanel projectId={id} files={await projectFiles(project.attachments, caps.manage)} canUpload={caps.manage} />}
 
       {tab === "secrets" && secretsRole && <VaultTab user={user} role={secretsRole} project={project} />}
 
@@ -208,7 +208,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
             <CardHeader title="Comments" />
             <CardBody className="flex flex-col gap-5">
               <CommentList comments={project.comments} />
-              <CommentBox action={addProjectComment.bind(null, id)} entityType="project" entityId={id} />
+              {caps.manage && <CommentBox action={addProjectComment.bind(null, id)} entityType="project" entityId={id} />}
             </CardBody>
           </Card>
           <Card>
@@ -223,7 +223,8 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
   );
 }
 
-async function projectFiles(attachments: FileRef[], canManage: boolean, userId: string): Promise<ProjectFileView[]> {
+/** Only people who can manage the project change its files; other team members just download them. */
+async function projectFiles(attachments: FileRef[], canManage: boolean): Promise<ProjectFileView[]> {
   const people = await peopleMap(attachments.map((a) => a.uploadedBy));
   return [...attachments].reverse().map((a, i) => ({
     refId: a._id ?? String(i),
@@ -232,7 +233,7 @@ async function projectFiles(attachments: FileRef[], canManage: boolean, userId: 
     size: a.size,
     by: (a.uploadedBy && people.get(a.uploadedBy)?.name) || "Unknown",
     when: fmtDate(a.uploadedAt),
-    canRemove: canManage || a.uploadedBy === userId,
+    canRemove: canManage,
   }));
 }
 

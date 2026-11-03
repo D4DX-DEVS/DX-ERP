@@ -1,7 +1,7 @@
 import "server-only";
 import { and, eq, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { requestMeta, type CurrentUser } from "@/lib/auth/session";
+import { can, requestMeta, type CurrentUser } from "@/lib/auth/session";
 import { Project, ProjectVault, VaultEvent, VaultItem, type Id, type IVaultItem, type VaultEventAction, type VaultKind } from "@/lib/models";
 import { inList, isUniqueViolation, jsonHasAny, jsonHasField } from "@/lib/sql";
 import { currentMasterKey, itemAad, newDataKey, previousMasterKey, seal, unseal, unwrapDataKey, VaultKeyError, wrapDataKey } from "./crypto";
@@ -13,14 +13,16 @@ import type { EnvEntry } from "./dotenv";
  * (single env-configured owner account) keeps break-glass access to every vault.
  *
  *   owner  — the project manager and the super admin: see and manage every item, see the access log
- *   member — team members: see items shared with the whole team or with them; manage items they created
+ *   member — team members who can manage the project (`projects.manage`, e.g. team leads): see items shared with
+ *            the whole team or with them; add items and manage the ones they created
+ *   viewer — every other team member (normal staff): see items shared with the whole team or with them; read-only
  */
-export type VaultRole = "owner" | "member";
+export type VaultRole = "owner" | "member" | "viewer";
 
-export function vaultRole(user: Pick<CurrentUser, "id" | "isSuperAdmin">, project: { manager?: Id | null; team?: { user: Id }[] }): VaultRole | null {
+export function vaultRole(user: Pick<CurrentUser, "id" | "isSuperAdmin" | "permissions">, project: { manager?: Id | null; team?: { user: Id }[] }): VaultRole | null {
   if (user.isSuperAdmin) return "owner";
   if (project.manager === user.id) return "owner";
-  if ((project.team ?? []).some((m) => m.user === user.id)) return "member";
+  if ((project.team ?? []).some((m) => m.user === user.id)) return can(user, "projects.manage") ? "member" : "viewer";
   return null;
 }
 
@@ -33,7 +35,7 @@ export function canSeeItem(user: Pick<CurrentUser, "id">, role: VaultRole | null
 
 export function canManageItem(user: Pick<CurrentUser, "id">, role: VaultRole | null, item: Pick<IVaultItem, "createdBy">): boolean {
   if (!role) return false;
-  return role === "owner" || item.createdBy === user.id;
+  return role === "owner" || (role === "member" && item.createdBy === user.id);
 }
 
 /* ------------------------------------------------------------------ */

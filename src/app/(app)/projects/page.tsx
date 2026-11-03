@@ -98,7 +98,7 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Pro
     <PageBody>
       <PageHeader
         overline="Work"
-        title="Projects"
+        title={can(user, "projects.manage") ? "Projects" : "My projects"}
         actions={
           <>
             <Segmented

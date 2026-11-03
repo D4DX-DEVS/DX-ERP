@@ -19,8 +19,8 @@ export interface ProjectFileView {
   canRemove: boolean;
 }
 
-/** Project documents: download, upload and remove. */
-export function FilesPanel({ projectId, files }: { projectId: string; files: ProjectFileView[] }) {
+/** Project documents: download, upload and remove (upload only for people who can manage the project). */
+export function FilesPanel({ projectId, files, canUpload }: { projectId: string; files: ProjectFileView[]; canUpload: boolean }) {
   const [version, setVersion] = useState(0);
   return (
     <Card>
@@ -46,12 +46,14 @@ export function FilesPanel({ projectId, files }: { projectId: string; files: Pro
             </li>
           ))}
         </ul>
-        <ActionForm key={version} action={(input) => addProjectFiles(projectId, input)} successMessage="Files attached" onSuccess={() => setVersion((v) => v + 1)} className="gap-3 border-t border-line-soft pt-4">
-          <FileUpload context={{ entityType: "project", entityId: projectId }} label="Upload files" />
-          <FormActions className="pt-0">
-            <SubmitButton variant="secondary">Attach to project</SubmitButton>
-          </FormActions>
-        </ActionForm>
+        {canUpload && (
+          <ActionForm key={version} action={(input) => addProjectFiles(projectId, input)} successMessage="Files attached" onSuccess={() => setVersion((v) => v + 1)} className="gap-3 border-t border-line-soft pt-4">
+            <FileUpload context={{ entityType: "project", entityId: projectId }} label="Upload files" />
+            <FormActions className="pt-0">
+              <SubmitButton variant="secondary">Attach to project</SubmitButton>
+            </FormActions>
+          </ActionForm>
+        )}
       </CardBody>
     </Card>
   );

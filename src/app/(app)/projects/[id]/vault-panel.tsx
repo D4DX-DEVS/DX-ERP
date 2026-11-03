@@ -188,7 +188,7 @@ export function VaultPanel({
   empty,
 }: {
   projectId: string;
-  role: "owner" | "member";
+  role: "owner" | "member" | "viewer";
   items: VaultItemView[];
   events: VaultEventView[];
   teamOptions: PickerOption[];
@@ -200,7 +200,8 @@ export function VaultPanel({
   const shown = filter === "all" ? items : items.filter((i) => i.kind === filter);
   const attention = items.filter((i) => i.rotationAdvised || i.rotationOverdue).length;
 
-  const addMenu = (
+  // Viewers (team members without `projects.manage`) only read and copy secrets.
+  const addMenu = role !== "viewer" && (
     <Menu
       label="Add secret"
       trigger={

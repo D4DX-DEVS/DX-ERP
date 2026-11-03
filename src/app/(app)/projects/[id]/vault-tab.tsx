@@ -25,7 +25,7 @@ const EVENT_LABELS: Record<string, string> = {
 };
 
 /**
- * Secrets tab. Only rendered for the project manager, team members and the super admin (see `vaultRole`).
+ * Secrets tab. Only rendered for the project manager, team members and the super admin (see `vaultRole`); viewers get it read-only.
  * Values never leave the server here — the page gets names, variable names, URLs and usernames only;
  * values are fetched one reveal at a time through `revealVaultItem`.
  */
@@ -138,11 +138,15 @@ export async function VaultTab({ user, role, project }: { user: CurrentUser; rol
       teamOptions={teamOptions}
       whoCanSee={`${manager ? `${manager} (project manager)` : "The project manager"}, ${teamSize} team ${teamSize === 1 ? "member" : "members"} and the super admin`}
       empty={
-        <EmptyState
-          icon={<KeyRound className="size-5" aria-hidden />}
-          title="No secrets yet"
-          description="Store .env files, logins and secure notes for this project. Values are encrypted at rest and only the project team can open them."
-        />
+        role === "viewer" ? (
+          <EmptyState icon={<KeyRound className="size-5" aria-hidden />} title="No secrets shared with you" description="The project manager adds .env files, logins and secure notes here. You can view them once they are shared with you." />
+        ) : (
+          <EmptyState
+            icon={<KeyRound className="size-5" aria-hidden />}
+            title="No secrets yet"
+            description="Store .env files, logins and secure notes for this project. Values are encrypted at rest and only the project team can open them."
+          />
+        )
       }
     />
   );

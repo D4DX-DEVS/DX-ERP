@@ -146,7 +146,8 @@ function cleanMembers(project: { team: { user: Id }[] }, ids: string[]): Id[] {
 export async function createVaultItem(projectId: string, input: Record<string, unknown>): Promise<ActionResult<{ id: string }>> {
   return runAction(async () => {
     const user = await actionUser();
-    const { project } = await loadVaultProject(user, projectId);
+    const { project, role } = await loadVaultProject(user, projectId);
+    if (role === "viewer") throw new ActionError("You can view this project's secrets but not add them. Ask the project manager.");
     const kind = parse(z.object({ kind: z.enum(VAULT_KINDS, { error: "Choose a type" }) }), input).kind;
     const meta = parse(metaSchema, input);
     const access = parse(accessSchema, input);
