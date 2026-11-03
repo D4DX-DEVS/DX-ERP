@@ -28,6 +28,19 @@ export interface TeamMember {
   allocation: number;
 }
 
+export type ProjectLinkKind = "repository" | "live" | "staging" | "backend" | "admin" | "design" | "docs" | "other";
+export const PROJECT_LINK_KINDS: ProjectLinkKind[] = ["repository", "live", "staging", "backend", "admin", "design", "docs", "other"];
+
+/** A URL related to the project: code repository, live site, API base URL, design file, … (http/https only). */
+export interface ProjectLink {
+  _id: Id;
+  kind: ProjectLinkKind;
+  label?: string;
+  url: string;
+  addedBy?: Id;
+  addedAt?: Date;
+}
+
 /** Writes must trim `title`. Team membership is queried with `jsonHasField(Project.team, "user", id)`. */
 export const Project = sqliteTable(
   "projects",
@@ -62,6 +75,9 @@ export const Project = sqliteTable(
       .notNull()
       .$defaultFn(() => []),
     attachments: json<FileRef[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    links: json<ProjectLink[]>()
       .notNull()
       .$defaultFn(() => []),
     comments: json<CommentEntry[]>()

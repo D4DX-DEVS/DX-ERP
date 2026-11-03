@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { and, asc, count, desc, eq, gte, isNotNull, isNull, lt, lte, ne, sql } from "drizzle-orm";
-import { Expense, Invoice, Issue, Payment, Task, TimesheetEntry, type IProject } from "@/lib/models";
+import { Expense, Invoice, Issue, Payment, PROJECT_LINK_KINDS, Task, TimesheetEntry, type IProject } from "@/lib/models";
 import { can, type CurrentUser } from "@/lib/auth/session";
 import type { AppSettings } from "@/lib/config-defaults";
 import { db } from "@/lib/db";
@@ -17,8 +17,9 @@ import { cn } from "@/lib/cn";
 import { EffortBar, hoursLabel } from "../../tasks/_components/effort";
 import { milestoneOverdue } from "../health";
 import type { ProjectTaskStats } from "../stats";
+import { LinksPanel, type ProjectLinkView } from "./links-panel";
 
-type ProjectDoc = Pick<IProject, "_id" | "projectNo" | "title" | "manager" | "team" | "milestones" | "budget" | "estimatedHours" | "description" | "scope" | "deliverables">;
+type ProjectDoc = Pick<IProject, "_id" | "projectNo" | "title" | "manager" | "team" | "milestones" | "budget" | "estimatedHours" | "description" | "scope" | "deliverables" | "links">;
 
 function Dot({ done, now, overdue }: { done: boolean; now: boolean; overdue: boolean }) {
   return (
@@ -159,6 +160,9 @@ export async function Overview({
 
   const milestones = [...project.milestones].sort((a, b) => (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999"));
   const currentIndex = milestones.findIndex((m) => m.status !== "delivered");
+  const links: ProjectLinkView[] = [...project.links]
+    .sort((a, b) => PROJECT_LINK_KINDS.indexOf(a.kind) - PROJECT_LINK_KINDS.indexOf(b.kind))
+    .map((l) => ({ id: l._id, kind: l.kind, label: l.label ?? "", url: l.url }));
   const elapsedNote = estimate > 0 && stats.progress > 0 ? `${Math.round((totalHours / estimate) * 100)}% used at ${stats.progress}% done` : estimate > 0 ? `${Math.round((totalHours / estimate) * 100)}% of estimate used` : "No estimate set";
 
   return (
@@ -231,6 +235,8 @@ export async function Overview({
           </CardBody>
         </Card>
       )}
+
+      <LinksPanel projectId={project._id} links={links} canManage={caps.manage} />
 
       <Card>
         <CardHeader title="Milestones & delivery" href={`/projects/${project._id}?tab=milestones`} hrefLabel="Manage" />

@@ -9,7 +9,7 @@ import { audit, diff } from "@/lib/audit";
 import { ID_PREFIX, nextNumber } from "@/lib/counters";
 import { resolveFileRefs } from "@/lib/files";
 import { db } from "@/lib/db";
-import { Client, Contract, Expense, Invoice, Issue, newId, PRIORITIES, Project, Proposal, Task, TimesheetEntry, User, type HistoryEntry, type Id, type Milestone } from "@/lib/models";
+import { Client, Contract, Expense, Invoice, Issue, newId, PRIORITIES, Project, PROJECT_LINK_KINDS, Proposal, Task, TimesheetEntry, User, type HistoryEntry, type Id, type Milestone, type ProjectLink } from "@/lib/models";
 import { notify } from "@/lib/notify";
 import { EXITED_STATUSES } from "@/lib/people";
 import { getSettings } from "@/lib/settings";
@@ -495,6 +495,75 @@ export async function deleteMilestone(projectId: string, milestoneId: string): P
     await audit(user, { action: "delete", entity: "project", entityId: project._id, ref: project.projectNo, summary: `Removed milestone “${title}” from ${project.projectNo}` });
     return null;
   }, "Milestone removed");
+}
+
+/* ------------------------------------------------------------------ */
+/* Links                                                               */
+/* ------------------------------------------------------------------ */
+
+const MAX_LINKS = 50;
+
+const linkSchema = z.object({
+  kind: z.enum(PROJECT_LINK_KINDS, { error: "Choose a type" }),
+  label: zs.optText(100),
+  // "github.com/org/repo" is saved as https://…; only http(s) links are stored, so they are safe to render as hrefs.
+  url: z.preprocess(
+    (v) => {
+      const s = typeof v === "string" ? v.trim() : v;
+      return typeof s === "string" && s && !/^[a-z][a-z0-9+.-]*:/i.test(s) ? `https://${s}` : s;
+    },
+    z.url({ protocol: /^https?$/, error: "Enter a valid http(s) link" }).max(2000, "Link is too long"),
+  ),
+});
+
+const linkName = (l: Pick<ProjectLink, "label" | "url">) => l.label ?? l.url;
+
+/** Adds (no `linkId`) or edits a project link: repository, live site, backend URL, … */
+export async function saveProjectLink(projectId: string, linkId: string | undefined, input: Record<string, unknown>): Promise<ActionResult<null>> {
+  return runAction(async () => {
+    const user = await actionUser();
+    const { project } = await loadProject(user, projectId, "manage");
+    const data = parse(linkSchema, input);
+    const existing = linkId ? project.links.find((l) => l._id === linkId) : undefined;
+    if (linkId && !existing) throw new ActionError("That link no longer exists.");
+    if (project.links.some((l) => l._id !== linkId && l.url === data.url)) throw new ActionError("This link is already listed.", { url: "Already listed" });
+    const fields = { kind: data.kind, label: data.label, url: data.url };
+
+    if (existing) {
+      await db()
+        .update(Project)
+        .set({
+          links: project.links.map((l) => (l._id === existing._id ? { ...existing, ...fields } : l)),
+          history: jsonPush(Project.history, historyEntry(user, `Link “${linkName(fields)}” updated`)),
+        })
+        .where(eq(Project._id, project._id));
+      await audit(user, { action: "update", entity: "project", entityId: project._id, ref: project.projectNo, summary: `Updated link “${linkName(fields)}” on ${project.projectNo}` });
+    } else {
+      if (project.links.length >= MAX_LINKS) throw new ActionError(`A project can list up to ${MAX_LINKS} links.`);
+      const link: ProjectLink = { _id: newId(), ...fields, addedBy: user._id, addedAt: new Date() };
+      await db()
+        .update(Project)
+        .set({ links: jsonPush(Project.links, link), history: jsonPush(Project.history, historyEntry(user, `Link “${linkName(fields)}” added`)) })
+        .where(eq(Project._id, project._id));
+      await audit(user, { action: "create", entity: "project", entityId: project._id, ref: project.projectNo, summary: `Added link “${linkName(fields)}” to ${project.projectNo}` });
+    }
+    return null;
+  }, "Link saved");
+}
+
+export async function deleteProjectLink(projectId: string, linkId: string): Promise<ActionResult<null>> {
+  return runAction(async () => {
+    const user = await actionUser();
+    const { project } = await loadProject(user, projectId, "manage");
+    const link = project.links.find((l) => l._id === linkId);
+    if (!link) throw new ActionError("That link no longer exists.");
+    await db()
+      .update(Project)
+      .set({ links: project.links.filter((l) => l._id !== linkId), history: jsonPush(Project.history, historyEntry(user, `Link “${linkName(link)}” removed`)) })
+      .where(eq(Project._id, project._id));
+    await audit(user, { action: "delete", entity: "project", entityId: project._id, ref: project.projectNo, summary: `Removed link “${linkName(link)}” from ${project.projectNo}` });
+    return null;
+  }, "Link removed");
 }
 
 /* ------------------------------------------------------------------ */
