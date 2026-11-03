@@ -28,6 +28,7 @@ export function ProjectStatusControl({
   choices,
   canCancel,
   canDelete,
+  hideStatus = false,
 }: {
   projectId: string;
   current: ProjectStatusChoice;
@@ -35,6 +36,8 @@ export function ProjectStatusControl({
   choices: ProjectStatusChoice[];
   canCancel: boolean;
   canDelete: boolean;
+  /** Closed projects: the title chip already shows the status, so only cancel / delete remain here. */
+  hideStatus?: boolean;
 }) {
   const { pending, run } = useServerAction();
   const router = useRouter();
@@ -70,7 +73,7 @@ export function ProjectStatusControl({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {menu}
+      {!hideStatus && menu}
       {canCancel && (
         <ReasonAction
           action={(reason) => cancelProject(projectId, reason)}

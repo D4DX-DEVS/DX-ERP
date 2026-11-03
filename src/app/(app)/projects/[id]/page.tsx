@@ -22,6 +22,7 @@ import {
   keysInCategories,
   peopleMap,
   projectCaps,
+  PROJECT_CLOSED_CATEGORIES,
   taskFilter,
   type ProjectCaps,
   TASK_CLOSED_CATEGORIES,
@@ -126,6 +127,8 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
     .filter((s) => s.category !== "cancelled" || canDeleteProject)
     .map((s) => ({ key: s.key, label: s.label, tone: s.tone }));
   const isCancelled = category === "cancelled";
+  // Completed / cancelled projects don't repeat their status as a menu next to the actions (reopen via Edit).
+  const isClosed = PROJECT_CLOSED_CATEGORIES.includes(category ?? "");
 
   return (
     <PageBody>
@@ -168,6 +171,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
                 choices={statusChoices}
                 canCancel={canDeleteProject && hasWork === true && !isCancelled}
                 canDelete={canDeleteProject && hasWork === false}
+                hideStatus={isClosed}
               />
             )}
             {caps.manage && (
