@@ -1,12 +1,12 @@
 "use server";
 
-import { and, count, eq, isNull } from "drizzle-orm";
+import { and, count, eq, isNotNull, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { actionPermission, ActionError, parse, runAction, type ActionResult } from "@/lib/actions";
 import { can } from "@/lib/auth/session";
 import { NOTIFICATION_EVENTS, type AppSettings, type PayrollComponent } from "@/lib/config-defaults";
 import { db } from "@/lib/db";
-import { Movement, StoredFile } from "@/lib/models";
+import { AttendanceKiosk, Movement, StoredFile } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
 import { inList } from "@/lib/sql";
 import { hmToMinutes } from "@/lib/time";
@@ -92,6 +92,8 @@ const attendanceSchema = z.object({
   officialMovementCountsAsWork: zs.bool(),
   personalMovementDeducted: zs.bool(),
   allowSelfCheckIn: zs.bool(),
+  qrCheckIn: zs.bool(),
+  qrSameNetwork: zs.bool(),
   trackingStartDate: zs.optDate(),
 });
 
@@ -102,6 +104,10 @@ export async function saveAttendance(input: Record<string, unknown>): Promise<Sa
     if (hmToMinutes(data.officeEnd) <= hmToMinutes(data.officeStart)) fieldError("officeEnd", "Office end must be after office start");
     if (data.halfDayMinutes >= data.fullDayMinutes) fieldError("halfDayMinutes", "Half day must be shorter than a full day");
     if (hmToMinutes(data.missingCheckoutAfter) <= hmToMinutes(data.officeEnd)) fieldError("missingCheckoutAfter", "Must be later than the office end time");
+    if (data.qrCheckIn) {
+      const [screen] = await db().select({ id: AttendanceKiosk._id }).from(AttendanceKiosk).where(isNotNull(AttendanceKiosk.deviceId)).limit(1);
+      if (!screen) fieldError("qrCheckIn", "Set up a QR screen first: add one under QR check-in screens and open its link on the office computer.");
+    }
     const next: AppSettings["attendance"] = { ...data, trackingStartDate: data.trackingStartDate ?? "", workingDays: [...new Set(data.workingDays)].sort((a, b) => a - b), saturdaysOff: [...new Set(data.saturdaysOff)].sort((a, b) => a - b) };
     return saveConfig(user, "attendance", "Working days & attendance rules", next);
   }, "Attendance rules saved");

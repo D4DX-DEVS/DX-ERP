@@ -188,7 +188,7 @@ export async function TodayAttendanceCard({ userId }: { userId: string }) {
           </div>
         )}
 
-        <TodayActions state={state} openMovementId={openMovement?._id} unavailableNote={note} />
+        <TodayActions state={state} openMovementId={openMovement?._id} unavailableNote={note} qr={a.qrCheckIn} />
         {state === "can_check_in" && (holiday || cls.key === "weekend") && <p className="text-xs text-muted">Today is a {holiday ? "holiday" : "weekend"}. Check in only if you are working.</p>}
       </div>
 

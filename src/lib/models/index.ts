@@ -7,7 +7,7 @@ import { Education } from "./education";
 import { BankAccount } from "./bank";
 import { Department, Designation, Role, Holiday } from "./org";
 import { Settings, Counter, AuditLog, StoredFile, Backup } from "./system";
-import { Attendance, AttendanceCorrection } from "./attendance";
+import { Attendance, AttendanceCorrection, AttendanceKiosk } from "./attendance";
 import { Movement } from "./movement";
 import { LeaveType, LeaveBalance, LeaveRequest } from "./leave";
 import { PayrollRun, Payslip, SalaryAdvance } from "./payroll";
@@ -37,6 +37,7 @@ export const BACKUP_TABLES = {
   StoredFile,
   Attendance,
   AttendanceCorrection,
+  AttendanceKiosk,
   Movement,
   LeaveType,
   LeaveBalance,

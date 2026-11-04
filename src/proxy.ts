@@ -61,7 +61,8 @@ export async function proxy(request: NextRequest) {
     return response;
   };
 
-  if (pathname === "/login" || pathname.startsWith("/login/")) {
+  // Sign-in, and the office QR attendance screen (authenticated by its own link token + device cookie).
+  if (pathname === "/login" || pathname.startsWith("/login/") || pathname.startsWith("/kiosk/")) {
     return withCsp(NextResponse.next({ request: { headers: requestHeaders } }));
   }
   const claims = await verifyToken(request.cookies.get(SESSION_COOKIE)?.value).catch(() => null);

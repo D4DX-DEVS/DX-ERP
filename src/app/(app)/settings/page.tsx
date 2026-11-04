@@ -8,13 +8,15 @@ import { db } from "@/lib/db";
 import { fiscalYear } from "@/lib/counters";
 import { env } from "@/lib/env";
 import { cn } from "@/lib/cn";
-import { Asset, Backup, Department, Designation, Expense, Holiday, Lead, LeaveBalance, LeaveRequest, LeaveType, StoredFile, User } from "@/lib/models";
+import { clientNetwork, kioskStatus } from "@/lib/domain/kiosk";
+import { Asset, AttendanceKiosk, Backup, Department, Designation, Expense, Holiday, Lead, LeaveBalance, LeaveRequest, LeaveType, StoredFile, User } from "@/lib/models";
 import { namesFor, peopleOptions } from "@/lib/people";
 import { param, type SearchParams } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
 import { jsonLength } from "@/lib/sql";
-import { todayKey } from "@/lib/time";
+import { timeAgo, todayKey } from "@/lib/time";
 import { BackupPanel, type BackupRow } from "./backup-panel";
+import { KioskCard } from "./kiosk-card";
 import { EMPLOYMENT_CATEGORIES, PIPELINE_CATEGORIES, PROJECT_CATEGORIES, SECTIONS, TASK_CATEGORIES } from "./constants";
 import { statusUsage } from "./helpers";
 import { saveEmploymentStatuses, savePipelineStages, saveProjectStatuses, saveTaskStatuses } from "./actions";
@@ -127,8 +129,27 @@ async function SectionBody({ section, sp, user }: { section: string; sp: SearchP
       );
     }
 
-    case "attendance":
-      return <AttendanceForm key={stamp(settings.attendance)} attendance={settings.attendance} />;
+    case "attendance": {
+      const screens = await db()
+        .select({ _id: AttendanceKiosk._id, name: AttendanceKiosk.name, deviceId: AttendanceKiosk.deviceId, lastSeenAt: AttendanceKiosk.lastSeenAt, networks: AttendanceKiosk.networks })
+        .from(AttendanceKiosk)
+        .orderBy(asc(AttendanceKiosk.createdAt));
+      return (
+        <>
+          <AttendanceForm key={stamp(settings.attendance)} attendance={settings.attendance} />
+          <KioskCard
+            screens={screens.map((s) => ({
+              id: s._id,
+              name: s.name,
+              status: kioskStatus(s),
+              lastSeen: s.deviceId ? `Last seen ${timeAgo(s.lastSeenAt)}` : "Link not opened yet",
+              networks: s.networks.map((n) => n.net),
+            }))}
+            yourNetwork={await clientNetwork()}
+          />
+        </>
+      );
+    }
 
     case "holidays": {
       const current = todayKey().slice(0, 4);

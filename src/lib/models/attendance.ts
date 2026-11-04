@@ -71,3 +71,35 @@ export const AttendanceCorrection = sqliteTable(
   (t) => [index("attendancecorrections_user").on(t.user), index("attendancecorrections_status").on(t.status)],
 );
 export type IAttendanceCorrection = typeof AttendanceCorrection.$inferSelect;
+
+/** A network (IPv4 address or IPv6 /64) a QR attendance screen was seen from. */
+export interface KioskNetwork {
+  net: string;
+  at: Date;
+}
+
+/**
+ * Office computer that shows the rotating attendance QR. The link token is stored only as a SHA-256 hash;
+ * the first browser that opens the link binds itself (`deviceId`, kept in a signed cookie).
+ */
+export const AttendanceKiosk = sqliteTable(
+  "attendance_kiosks",
+  {
+    _id: pk(),
+    name: text().notNull(),
+    tokenHash: text().notNull(),
+    /** Mixed into every QR signature; replaced with the link, so old codes stop working. */
+    codeSalt: text().notNull(),
+    deviceId: text(),
+    boundAt: date(),
+    lastSeenAt: date(),
+    /** Most recent networks the screen polled from (newest first, at most 5). */
+    networks: json<KioskNetwork[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    createdBy: ref(),
+    ...timestamps(),
+  },
+  (t) => [uniqueIndex("attendance_kiosks_token").on(t.tokenHash)],
+);
+export type IAttendanceKiosk = typeof AttendanceKiosk.$inferSelect;

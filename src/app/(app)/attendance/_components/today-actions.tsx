@@ -4,6 +4,7 @@ import { Coffee, LogIn, LogOut, MoveUpRight } from "lucide-react";
 import { ActionButton } from "@/components/ui/actions";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { checkIn, checkOut, endBreak, startBreak } from "../actions";
+import { ScanDialog } from "./scan-dialog";
 
 export type TodayState = "can_check_in" | "working" | "on_break" | "done" | "unavailable";
 
@@ -12,11 +13,14 @@ export function TodayActions({
   state,
   openMovementId,
   unavailableNote,
+  qr = false,
 }: {
   state: TodayState;
   /** Id of the person's open movement (status "out"), if any. */
   openMovementId?: string;
   unavailableNote?: string;
+  /** Check-in / check-out by scanning the office QR screen (Settings → Attendance). */
+  qr?: boolean;
 }) {
   if (state === "unavailable") return unavailableNote ? <p className="text-[13px] text-muted">{unavailableNote}</p> : null;
   if (state === "done") return <p className="text-[13px] text-muted">You&apos;re checked out for today. Use a correction request if a time is wrong.</p>;
@@ -24,9 +28,13 @@ export function TodayActions({
   if (state === "can_check_in") {
     return (
       <div className="flex flex-wrap gap-2.5">
-        <ActionButton action={checkIn} icon={<LogIn className="size-4" />} successMessage={false}>
-          Check in
-        </ActionButton>
+        {qr ? (
+          <ScanDialog mode="in" />
+        ) : (
+          <ActionButton action={checkIn} icon={<LogIn className="size-4" />} successMessage={false}>
+            Check in
+          </ActionButton>
+        )}
       </div>
     );
   }
@@ -56,6 +64,8 @@ export function TodayActions({
           <Button variant="secondary" disabled title="Record your return from the movement first" icon={<LogOut className="size-4" />}>
             Check out
           </Button>
+        ) : qr ? (
+          <ScanDialog mode="out" />
         ) : (
           <ActionButton action={checkOut} variant="secondary" icon={<LogOut className="size-4" />} confirm="Check out for today? Your working day ends now." successMessage={false}>
             Check out

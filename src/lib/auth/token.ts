@@ -6,6 +6,8 @@ const HOST_PREFIX = process.env.NODE_ENV === "production" ? "__Host-" : "";
 export const SESSION_COOKIE = `${HOST_PREFIX}dx_session`;
 export const PENDING_2FA_COOKIE = `${HOST_PREFIX}dx_2fa`;
 export const OAUTH_STATE_COOKIE = "dx_oauth";
+/** Binds an office QR attendance screen to one browser. */
+export const KIOSK_COOKIE = `${HOST_PREFIX}dx_kiosk`;
 
 export interface SessionClaims {
   sid: string;

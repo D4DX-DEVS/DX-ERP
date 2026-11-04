@@ -8,6 +8,7 @@ import { audit, diff } from "@/lib/audit";
 import { can, isStaff, type CurrentUser } from "@/lib/auth/session";
 import { recalcAttendanceDay } from "@/lib/domain/attendance-calc";
 import { workCalendar } from "@/lib/domain/calendar";
+import { requireKioskScan } from "@/lib/domain/kiosk";
 import { db } from "@/lib/db";
 import { Attendance, AttendanceCorrection, LeaveRequest, Movement, User, newId, type IAttendance, type IAttendanceCorrection } from "@/lib/models";
 import { managerOf, notify, usersWithPermission } from "@/lib/notify";
@@ -67,11 +68,13 @@ function span(checkIn?: Date | null, checkOut?: Date | null): string {
 /* Self service: check-in / check-out / breaks (FRS §7.1)              */
 /* ------------------------------------------------------------------ */
 
-export async function checkIn(): Promise<ActionResult<null>> {
+/** `code`: the QR scanned from an office screen — required while QR check-in is on (Settings → Attendance). */
+export async function checkIn(code?: unknown): Promise<ActionResult<null>> {
   return runAction(async () => {
     const user = await staffUser();
     const settings = await getSettings();
     if (!settings.attendance.allowSelfCheckIn) throw new ActionError("Self check-in is turned off. Ask HR to record your attendance.");
+    const screen = await requireKioskScan(settings, code, "check in");
     const today = todayKey();
     const [leave] = await db()
       .select({ startDate: LeaveRequest.startDate, endDate: LeaveRequest.endDate })
@@ -86,7 +89,7 @@ export async function checkIn(): Promise<ActionResult<null>> {
     // Race-safe: insert the day, and when a row already exists claim it with a guarded update
     // (only while it has no check-in and is not locked) — never read-then-write.
     const now = new Date();
-    const entry = historyEntry(user, "check_in");
+    const entry = historyEntry(user, "check_in", screen ? `Scanned at ${screen}` : undefined);
     const [created] = await db()
       .insert(Attendance)
       .values({ user: user._id, date: today, checkIn: now, source: "self", history: [entry] })
@@ -114,9 +117,10 @@ export async function checkIn(): Promise<ActionResult<null>> {
   }, "Checked in");
 }
 
-export async function checkOut(): Promise<ActionResult<null>> {
+export async function checkOut(code?: unknown): Promise<ActionResult<null>> {
   return runAction(async () => {
     const user = await staffUser();
+    const screen = await requireKioskScan(await getSettings(), code, "check out");
     const today = todayKey();
     const att = await dayOf(user._id, today);
     if (!att?.checkIn) {
@@ -143,10 +147,11 @@ export async function checkOut(): Promise<ActionResult<null>> {
     const now = new Date();
     const openIdx = att.breaks.findIndex((b) => !b.end);
     const breaks = att.breaks.map((b, i) => (i === openIdx ? { ...b, end: now } : b));
+    const note = [screen && `Scanned at ${screen}`, openIdx >= 0 && "Open break closed automatically"].filter(Boolean).join(" · ") || undefined;
     await saveDay(att, {
       checkOut: now,
       breaks,
-      history: jsonPush(Attendance.history, historyEntry(user, "check_out", openIdx >= 0 ? "Open break closed automatically" : undefined)),
+      history: jsonPush(Attendance.history, historyEntry(user, "check_out", note)),
     });
     await recalcAttendanceDay(user._id, today);
     return null;
