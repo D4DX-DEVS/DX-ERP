@@ -34,6 +34,8 @@ function contentSecurityPolicy(nonce: string): string {
     "style-src 'self' 'unsafe-inline'",
     `img-src 'self' blob: data: ${imageOrigins()}`,
     "font-src 'self' data:",
+    // The service worker (/sw.js); 'strict-dynamic' above would otherwise ignore 'self' for it.
+    "worker-src 'self'",
     `connect-src 'self'${isDev ? " ws: wss:" : ""}`,
     "object-src 'none'",
     "base-uri 'self'",
@@ -77,5 +79,6 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   // Pages only — API routes authenticate themselves and return data, not documents; static assets are excluded.
-  matcher: ["/((?!api|_next/static|_next/image|brand|icon.png|apple-icon.png|favicon.ico|manifest.webmanifest|robots.txt).*)"],
+  // The service worker script and its offline page must load without a session (no redirect to /login).
+  matcher: ["/((?!api|_next/static|_next/image|brand|icon.png|apple-icon.png|favicon.ico|manifest.webmanifest|robots.txt|sw.js|offline.html).*)"],
 };

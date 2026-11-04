@@ -13,6 +13,8 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // New on every build: the service worker (/sw.js) embeds it, so browsers see each deploy as an update.
+  env: { APP_BUILD_ID: process.env.APP_BUILD_ID || new Date().toISOString() },
   // Every ERP screen is per-user and request-time; Cache Components / PPR are not used.
   cacheComponents: false,
   poweredByHeader: false,

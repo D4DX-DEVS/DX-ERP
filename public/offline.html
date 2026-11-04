@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en-IN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0A1450" />
+    <title>Offline · D4DX ERP</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        box-sizing: border-box;
+        background: #f4f6fb;
+        color: #10183a;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      main {
+        width: 100%;
+        max-width: 420px;
+        padding: 32px 28px;
+        box-sizing: border-box;
+        border: 1px solid #e2e6f0;
+        border-radius: 20px;
+        background: #fff;
+        box-shadow: 0 6px 20px rgba(16, 24, 58, 0.1);
+      }
+      img {
+        height: 48px;
+        width: auto;
+      }
+      h1 {
+        margin: 24px 0 8px;
+        font-size: 24px;
+      }
+      p {
+        margin: 0;
+        color: #5e6583;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+      a {
+        display: inline-block;
+        margin-top: 24px;
+        padding: 12px 20px;
+        border-radius: 12px;
+        background: #284cc7;
+        color: #fff;
+        font-size: 14px;
+        font-weight: 600;
+        text-decoration: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="/brand/d4dx-logo.png" alt="D4DX" />
+      <h1>You're offline</h1>
+      <p>D4DX ERP needs an internet connection. Check your Wi-Fi or mobile data, then try again.</p>
+      <!-- The offline page stands in for the page that failed: an empty href reloads it. -->
+      <a href="">Try again</a>
+    </main>
+  </body>
+</html>
