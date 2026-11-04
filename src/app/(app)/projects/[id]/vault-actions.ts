@@ -8,11 +8,13 @@ import type { CurrentUser } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { notify } from "@/lib/notify";
 import { db } from "@/lib/db";
+import { fileSize } from "@/lib/format";
 import { newId, Project, VAULT_ENVIRONMENTS, VAULT_KINDS, VaultEvent, VaultItem, type Id, type IVaultItem, type VaultKind } from "@/lib/models";
 import { increment, inList } from "@/lib/sql";
 import { isObjectId, zs } from "@/lib/validation";
 import { VaultKeyError } from "@/lib/vault/crypto";
 import { parseDotenv, type EnvEntry } from "@/lib/vault/dotenv";
+import { MAX_VAULT_FILE_BYTES, MAX_VAULT_FILES } from "@/lib/vault/limits";
 import {
   canManageItem,
   canSeeItem,
@@ -23,6 +25,7 @@ import {
   REVEAL_ACTIONS,
   sealPayload,
   vaultRole,
+  type VaultFile,
   type VaultPayload,
 } from "@/lib/vault/service";
 
@@ -98,7 +101,41 @@ const credentialSchema = z.object({
   notes: zs.optText(5000),
 });
 
+const fileSchema = z.object({
+  environment: z.enum(VAULT_ENVIRONMENTS, { error: "Choose an environment" }),
+  /** New files, read in the browser as base64. */
+  uploads: z
+    .array(z.object({ name: z.string().max(200, "File name is too long"), data: z.string().max(Math.ceil(MAX_VAULT_FILE_BYTES / 3) * 4, "The file is too large") }))
+    .max(MAX_VAULT_FILES)
+    .default([]),
+  /** Names of the item's current files to keep (editing). */
+  keep: z.array(z.string()).max(MAX_VAULT_FILES).default([]),
+  notes: zs.optText(5000),
+});
+
 const noteSchema = z.object({ content: raw(20_000, "The note is too long (20,000 characters max)") });
+
+const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+/** UTF-8 without NUL bytes — key.properties, .json, .plist, PEM keys. Keystores and .p12 files are binary. */
+function isText(bytes: Uint8Array): boolean {
+  if (bytes.includes(0)) return false;
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function decodeUpload(upload: { name: string; data: string }): VaultFile {
+  const name = (upload.name.split(/[\\/]/).pop() ?? "").trim();
+  if (!name || [...name].some((c) => c.charCodeAt(0) < 32)) throw new ActionError("A file has an invalid name.", { files: "Rename the file and try again" });
+  if (!BASE64.test(upload.data)) throw new ActionError(`${name} could not be read.`, { files: "Choose the file again" });
+  const bytes = Buffer.from(upload.data, "base64");
+  if (bytes.length === 0) throw new ActionError(`${name} is empty.`, { files: `${name} is empty` });
+  return { name, size: bytes.length, text: isText(bytes), data: upload.data };
+}
 
 const accessSchema = z.object({
   audience: z.enum(["team", "selected"], { error: "Choose who can see it" }),
@@ -125,6 +162,23 @@ function buildPayload(kind: VaultKind, input: Record<string, unknown>, existing:
       if (u.username || u.password || u.search) throw new ActionError("Keep credentials and tokens out of the URL — put them in the password or notes field.", { url: "Remove the user:password@ and ?query parts" });
     }
     return { payload: { kind, url: data.url, username: data.username, password, notes: data.notes }, entryCount: 0 };
+  }
+  if (kind === "file") {
+    const data = parse(fileSchema, input);
+    const kept = existing?.kind === "file" ? existing.files.filter((f) => data.keep.includes(f.name)) : [];
+    const files = [...kept, ...data.uploads.map(decodeUpload)];
+    if (files.length === 0) throw new ActionError("Add at least one file.", { files: "Choose a keystore, certificate or key file" });
+    if (files.length > MAX_VAULT_FILES) throw new ActionError(`An item can hold at most ${MAX_VAULT_FILES} files.`, { files: `${MAX_VAULT_FILES} files max` });
+    const names = new Set<string>();
+    for (const f of files) {
+      // "notes" is the key of the notes field when revealing.
+      if (f.name === "notes") throw new ActionError(`A file can't be named "notes".`, { files: "Rename the file" });
+      if (names.has(f.name)) throw new ActionError(`Two files are named "${f.name}".`, { files: "Rename one of them" });
+      names.add(f.name);
+    }
+    const total = files.reduce((sum, f) => sum + f.size, 0);
+    if (total > MAX_VAULT_FILE_BYTES) throw new ActionError(`The files add up to ${fileSize(total)}; the limit is ${fileSize(MAX_VAULT_FILE_BYTES)}.`, { files: "Remove a file" });
+    return { payload: { kind, files, notes: data.notes }, environment: data.environment, entryCount: files.length };
   }
   const data = parse(noteSchema, input);
   if (!data.content.trim()) throw new ActionError("Write the note.", { content: "Required" });

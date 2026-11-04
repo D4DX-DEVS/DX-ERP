@@ -44,15 +44,29 @@ export function canManageItem(user: Pick<CurrentUser, "id">, role: VaultRole | n
 /* Payloads                                                            */
 /* ------------------------------------------------------------------ */
 
+/** A stored key file (keystore, key.properties, certificate…). `data` is the file's bytes, base64; `text` marks UTF-8 text files that can be shown inline. */
+export interface VaultFile {
+  name: string;
+  size: number;
+  text: boolean;
+  data: string;
+}
+
 export type VaultPayload =
   | { kind: "env"; entries: EnvEntry[] }
   | { kind: "credential"; url?: string; username?: string; password: string; notes?: string }
+  | { kind: "file"; files: VaultFile[]; notes?: string }
   | { kind: "note"; content: string };
 
-/** The payload as ordered key / value fields (env variables, or url / username / password / notes, or content). */
+/** The payload as ordered key / value fields (env variables, or url / username / password / notes, or file name / base64 bytes + notes, or content). */
 export function payloadFields(payload: VaultPayload): EnvEntry[] {
   if (payload.kind === "env") return payload.entries;
   if (payload.kind === "note") return [{ key: "content", value: payload.content }];
+  if (payload.kind === "file") {
+    const out = payload.files.map((f) => ({ key: f.name, value: f.data }));
+    if (payload.notes) out.push({ key: "notes", value: payload.notes });
+    return out;
+  }
   const out: EnvEntry[] = [];
   if (payload.url) out.push({ key: "url", value: payload.url });
   if (payload.username) out.push({ key: "username", value: payload.username });

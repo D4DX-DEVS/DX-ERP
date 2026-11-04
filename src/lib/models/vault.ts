@@ -5,7 +5,8 @@ import { bool, date, int, json, pk, ref, text, timestamps, type Id } from "./_ba
  * Project secrets vault. Secret values are only ever stored encrypted (see lib/vault/crypto.ts):
  * `ProjectVault` holds the project's data key wrapped by the server master key, `VaultItem.ciphertext`
  * holds the item's payload sealed with that data key. Names, environments and access settings are
- * plain metadata; variable names, URLs, usernames, passwords and notes live inside the ciphertext.
+ * plain metadata; variable names, URLs, usernames, passwords, notes and key files (signing keystores,
+ * certificates — bytes and file names) live inside the ciphertext.
  */
 
 export const ProjectVault = sqliteTable(
@@ -22,7 +23,7 @@ export const ProjectVault = sqliteTable(
 );
 export type IProjectVault = typeof ProjectVault.$inferSelect;
 
-export const VAULT_KINDS = ["env", "credential", "note"] as const;
+export const VAULT_KINDS = ["env", "credential", "file", "note"] as const;
 export type VaultKind = (typeof VAULT_KINDS)[number];
 
 export const VAULT_ENVIRONMENTS = ["development", "staging", "testing", "production", "other"] as const;
@@ -42,7 +43,7 @@ export const VaultItem = sqliteTable(
     description: text(),
     environment: text().$type<VaultEnvironment>(),
     ciphertext: text().notNull(),
-    /** Number of variables (env files) — shown without decrypting. */
+    /** Number of variables (env files) or files (key files) — shown without decrypting. */
     entryCount: int().notNull().default(0),
     audience: text().$type<VaultAudience>().notNull().default("team"),
     members: json<Id[]>()

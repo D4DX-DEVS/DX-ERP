@@ -11,6 +11,7 @@ import {
   Eye,
   EyeOff,
   FileCode2,
+  FileKey2,
   KeyRound,
   Lock,
   NotebookPen,
@@ -22,10 +23,13 @@ import {
   Upload,
   Users,
   Wand2,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { Tone } from "@/lib/config-defaults";
+import { fileSize } from "@/lib/format";
 import { serializeDotenv, type EnvEntry } from "@/lib/vault/dotenv";
+import { MAX_VAULT_FILE_BYTES, MAX_VAULT_FILES } from "@/lib/vault/limits";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Chip } from "@/components/ui/chip";
@@ -37,7 +41,14 @@ import { Menu, type MenuItem } from "@/components/ui/menu";
 import { PeoplePicker, type PickerOption } from "@/components/ui/people-picker";
 import { createVaultItem, deleteVaultItem, dismissRotationAdvice, revealVaultItem, updateVaultAccess, updateVaultItem } from "./vault-actions";
 
-type Kind = "env" | "credential" | "note";
+type Kind = "env" | "credential" | "file" | "note";
+
+export interface VaultFileView {
+  name: string;
+  size: number;
+  /** UTF-8 text (key.properties, .json, .plist) — can be revealed and copied; binary files are download-only. */
+  text: boolean;
+}
 
 export interface VaultItemView {
   id: string;
@@ -48,6 +59,8 @@ export interface VaultItemView {
   environmentLabel?: string;
   /** Variable names of an env file (values are never sent until revealed). */
   keys: string[];
+  /** Key files (names and sizes only; bytes are fetched on download). */
+  files: VaultFileView[];
   url?: string;
   username?: string;
   hasNotes: boolean;
@@ -97,6 +110,7 @@ const ENV_TONE: Record<string, Tone> = { production: "red", staging: "amber", te
 const KIND_META: Record<Kind, { label: string; plural: string; icon: typeof FileCode2 }> = {
   env: { label: "Environment file", plural: "Env files", icon: FileCode2 },
   credential: { label: "Login / API credential", plural: "Credentials", icon: KeyRound },
+  file: { label: "Key / certificate file", plural: "Key files", icon: FileKey2 },
   note: { label: "Secure note", plural: "Notes", icon: NotebookPen },
 };
 
@@ -151,13 +165,32 @@ function fileNameFor(name: string): string {
   return clean.startsWith(".env") || clean.endsWith(".env") ? clean : `${clean || "secrets"}.env`;
 }
 
-function downloadText(text: string, filename: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
+  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+}
+
+/** A key file's text, or the notes as-is (every other field of a file item is base64 bytes). */
+function fileFieldText(entry: EnvEntry): EnvEntry {
+  return entry.key === "notes" ? entry : { key: entry.key, value: new TextDecoder().decode(base64ToBytes(entry.value)) };
+}
+
+/** The file's bytes as base64 (the data-URL prefix stripped). */
+function readBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ""));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
 }
 
 function generatePassword(length = 24): string {
@@ -219,7 +252,7 @@ export function VaultPanel({
   return (
     <div className="flex flex-col gap-5">
       <Card>
-        <CardHeader title="Secrets vault" subtitle="Environment files, logins and notes shared with the project team" action={addMenu} />
+        <CardHeader title="Secrets vault" subtitle="Environment files, logins, key files and notes shared with the project team" action={addMenu} />
         <CardBody className="flex flex-col gap-4 pt-0">
           <div className="flex flex-wrap items-start gap-3 rounded-xl border border-brand-100 bg-brand-50 px-4 py-3 text-[13px] text-ink-2">
             <ShieldCheck className="mt-0.5 size-[18px] shrink-0 text-brand-600" aria-hidden />
@@ -239,7 +272,7 @@ export function VaultPanel({
 
           {items.length > 0 && (
             <div className="flex flex-wrap gap-2" role="group" aria-label="Filter secrets">
-              {(["all", "env", "credential", "note"] as const).map((k) => {
+              {(["all", "env", "credential", "file", "note"] as const).map((k) => {
                 const count = k === "all" ? items.length : items.filter((i) => i.kind === k).length;
                 if (k !== "all" && count === 0) return null;
                 const on = filter === k;
@@ -319,14 +352,16 @@ function VaultItemCard({ projectId, item, teamOptions }: { projectId: string; it
     setBusy(field ?? "*");
     const entries = await fetchEntries(projectId, item.id, "reveal", field);
     setBusy(null);
-    if (entries) merge(entries);
+    if (entries) merge(item.kind === "file" ? entries.map(fileFieldText) : entries);
   };
 
   const copy = async (field?: string) => {
     setBusy(`copy:${field ?? "*"}`);
-    const value = fetchEntries(projectId, item.id, "copy", field).then((entries) =>
-      entries ? (field ? (entries[0]?.value ?? "") : item.kind === "env" ? serializeDotenv(entries) : entries.map((e) => `${e.key}: ${e.value}`).join("\n")) : null,
-    );
+    const value = fetchEntries(projectId, item.id, "copy", field).then((entries) => {
+      if (!entries) return null;
+      if (item.kind === "file") entries = entries.map(fileFieldText);
+      return field ? (entries[0]?.value ?? "") : item.kind === "env" ? serializeDotenv(entries) : entries.map((e) => `${e.key}: ${e.value}`).join("\n");
+    });
     const ok = await copyPending(value);
     setBusy(null);
     if (ok) toast.success(field ? `${field} copied` : "Copied to clipboard");
@@ -337,7 +372,16 @@ function VaultItemCard({ projectId, item, teamOptions }: { projectId: string; it
     const entries = await fetchEntries(projectId, item.id, "download");
     setBusy(null);
     if (!entries) return;
-    downloadText(serializeDotenv(entries), fileNameFor(item.name));
+    downloadBlob(new Blob([serializeDotenv(entries)], { type: "text/plain;charset=utf-8" }), fileNameFor(item.name));
+    toast.success("Downloaded — delete the file when you no longer need it");
+  };
+
+  const downloadFile = async (name: string) => {
+    setBusy(`download:${name}`);
+    const entries = await fetchEntries(projectId, item.id, "download", name);
+    setBusy(null);
+    if (!entries?.[0]) return;
+    downloadBlob(new Blob([base64ToBytes(entries[0].value)], { type: "application/octet-stream" }), name);
     toast.success("Downloaded — delete the file when you no longer need it");
   };
 
@@ -395,9 +439,9 @@ function VaultItemCard({ projectId, item, teamOptions }: { projectId: string; it
                 {item.environmentLabel}
               </Chip>
             )}
-            {item.kind === "env" && (
+            {(item.kind === "env" || item.kind === "file") && (
               <Chip tone="gray" size="sm" dot={false}>
-                {item.entryCount} {item.entryCount === 1 ? "variable" : "variables"}
+                {item.entryCount} {item.kind === "file" ? (item.entryCount === 1 ? "file" : "files") : item.entryCount === 1 ? "variable" : "variables"}
               </Chip>
             )}
             <Chip tone={item.audience === "team" ? "blue" : "purple"} size="sm" dot={false}>
@@ -422,7 +466,7 @@ function VaultItemCard({ projectId, item, teamOptions }: { projectId: string; it
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          {!item.broken && (
+          {!item.broken && item.kind !== "file" && (
             <>
               {allShown ? (
                 <Button size="sm" variant="secondary" icon={<EyeOff className="size-4" aria-hidden />} onClick={() => setRevealed(null)}>
@@ -471,6 +515,21 @@ function VaultItemCard({ projectId, item, teamOptions }: { projectId: string; it
             </button>
           )}
         </div>
+      ) : item.kind === "file" ? (
+        <dl className="divide-y divide-line-soft border-t border-line-soft">
+          {item.files.map((f) => (
+            <FileRow
+              key={f.name}
+              file={f}
+              value={values[f.name]}
+              busy={busy}
+              onReveal={() => reveal(f.name)}
+              onCopy={() => copy(f.name)}
+              onDownload={() => downloadFile(f.name)}
+            />
+          ))}
+          {item.hasNotes && <SecretRow label="Notes" value={values.notes} busy={busy} field="notes" onReveal={() => reveal("notes")} onCopy={() => copy("notes")} multiline />}
+        </dl>
       ) : item.kind === "credential" ? (
         <dl className="divide-y divide-line-soft border-t border-line-soft">
           {item.url && (
@@ -567,6 +626,57 @@ function SecretRow({
   );
 }
 
+function FileRow({
+  file,
+  value,
+  busy,
+  onReveal,
+  onCopy,
+  onDownload,
+}: {
+  file: VaultFileView;
+  value: string | undefined;
+  busy: string | null;
+  onReveal: () => void;
+  onCopy: () => void;
+  onDownload: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-start gap-x-4 gap-y-1 px-4 py-2.5">
+      <dt className="w-full shrink-0 pt-1 font-mono text-[12.5px] font-semibold break-all text-ink sm:w-64">
+        {file.name} <span className="font-sans text-xs font-normal text-subtle">· {fileSize(file.size)}</span>
+      </dt>
+      <dd className="flex min-w-0 flex-1 items-start gap-1">
+        {file.text ? (
+          <span
+            className={cn(
+              "min-w-0 flex-1 rounded-md px-2 py-1 font-mono text-[12.5px]",
+              value === undefined ? "tracking-[0.15em] text-subtle select-none" : "max-h-72 overflow-auto bg-warning-bg/60 break-words whitespace-pre-wrap text-ink",
+            )}
+          >
+            {value === undefined ? MASK : value}
+          </span>
+        ) : (
+          <span className="min-w-0 flex-1 px-2 py-1 text-[13px] text-muted">Binary file — download to use it</span>
+        )}
+        {file.text && value === undefined && (
+          <IconButton label={`Reveal ${file.name}`} loading={busy === file.name} onClick={onReveal}>
+            <Eye className="size-4" aria-hidden />
+          </IconButton>
+        )}
+        {file.text && (
+          <IconButton label={`Copy ${file.name}`} loading={busy === `copy:${file.name}`} onClick={onCopy}>
+            <Copy className="size-4" aria-hidden />
+          </IconButton>
+        )}
+        <IconButton label={`Download ${file.name}`} loading={busy === `download:${file.name}`} onClick={onDownload}>
+          <Download className="size-4" aria-hidden />
+        </IconButton>
+      </dd>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* Create / edit dialog                                                */
 /* ------------------------------------------------------------------ */
@@ -587,22 +697,24 @@ function ItemDialog({
   teamOptions: PickerOption[];
 }) {
   const editing = Boolean(item);
+  // Key files stay on the server when editing — only their notes are decrypted (null: nothing to fetch).
+  const field = kind === "file" ? (item?.hasNotes ? "notes" : null) : undefined;
   // When editing, current values are fetched (and logged) once the dialog opens.
-  const [current, setCurrent] = useState<Record<string, string> | null>(editing ? null : {});
+  const [current, setCurrent] = useState<Record<string, string> | null>(editing && field !== null ? null : {});
   const [failed, setFailed] = useState(false);
   const loading = useRef(false);
 
   useEffect(() => {
-    if (!item || loading.current) return;
+    if (!item || field === null || loading.current) return;
     loading.current = true;
-    fetchEntries(projectId, item.id, "edit_open").then((entries) => {
+    fetchEntries(projectId, item.id, "edit_open", field).then((entries) => {
       if (!entries) {
         setFailed(true);
         return;
       }
       setCurrent(kind === "env" ? { content: serializeDotenv(entries) } : Object.fromEntries(entries.map((e) => [e.key, e.value])));
     });
-  }, [item, projectId, kind]);
+  }, [item, projectId, kind, field]);
 
   const title = `${editing ? "Edit" : "Add"} ${KIND_META[kind].label.toLowerCase()}`;
   return (
@@ -636,8 +748,46 @@ function ItemForm({
   const contentRef = useRef<HTMLTextAreaElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const keyFilesRef = useRef<HTMLInputElement>(null);
   const [showPassword, setShowPassword] = useState(false);
+  // Key files: names of the current files to keep, and newly chosen files read as base64.
+  const [kept, setKept] = useState<string[]>(item?.files.map((f) => f.name) ?? []);
+  const [uploads, setUploads] = useState<{ name: string; size: number; data: string }[]>([]);
   const action = item ? updateVaultItem.bind(null, projectId, item.id) : createVaultItem.bind(null, projectId);
+  const listed = [
+    ...kept.map((name) => ({ name, size: item?.files.find((f) => f.name === name)?.size ?? 0, isNew: false })),
+    ...uploads.map((u) => ({ name: u.name, size: u.size, isNew: true })),
+  ];
+
+  const addKeyFiles = async (list: FileList | null) => {
+    const picked = [...(list ?? [])];
+    if (keyFilesRef.current) keyFilesRef.current.value = "";
+    const next = [...uploads];
+    let total = listed.reduce((sum, f) => sum + f.size, 0);
+    for (const file of picked) {
+      if (listed.some((f) => f.name === file.name) || next.some((f) => f.name === file.name)) {
+        toast.error(`${file.name} is already added.`);
+        continue;
+      }
+      if (listed.length - uploads.length + next.length >= MAX_VAULT_FILES) {
+        toast.error(`An item can hold at most ${MAX_VAULT_FILES} files.`);
+        break;
+      }
+      if (total + file.size > MAX_VAULT_FILE_BYTES) {
+        toast.error(`${file.name} would take the item over ${fileSize(MAX_VAULT_FILE_BYTES)}.`);
+        continue;
+      }
+      try {
+        next.push({ name: file.name, size: file.size, data: await readBase64(file) });
+        total += file.size;
+      } catch {
+        toast.error(`${file.name} could not be read.`);
+      }
+    }
+    setUploads(next);
+    if (nameRef.current && !nameRef.current.value.trim() && next[0]) nameRef.current.value = next[0].name;
+  };
 
   const importFile = (file: File | undefined) => {
     if (!file) return;
@@ -651,14 +801,30 @@ function ItemForm({
   };
 
   return (
-    <ActionForm action={action} values={{ kind }} successMessage={item ? "Secret updated" : "Secret saved"} onSuccess={onDone} autoComplete="off">
+    <ActionForm
+      action={action}
+      values={kind === "file" ? { kind, keep: kept, uploads: uploads.map(({ name, data }) => ({ name, data })) } : { kind }}
+      successMessage={item ? "Secret updated" : "Secret saved"} onSuccess={onDone} autoComplete="off">
       <FormGrid>
-        <Field label="Name" name="name" required hint={kind === "env" ? "e.g. .env.production, api/.env.local" : kind === "credential" ? "e.g. AWS console, Stripe live key" : "e.g. Server SSH access"}>
-          <Input id="name" name="name" defaultValue={item?.name ?? (kind === "env" ? ".env" : "")} maxLength={120} autoComplete="off" />
+        <Field
+          label="Name"
+          name="name"
+          required
+          hint={
+            kind === "env"
+              ? "e.g. .env.production, api/.env.local"
+              : kind === "credential"
+                ? "e.g. AWS console, Stripe live key"
+                : kind === "file"
+                  ? "e.g. Android release keystore, iOS distribution certificate"
+                  : "e.g. Server SSH access"
+          }
+        >
+          <Input id="name" name="name" ref={nameRef} defaultValue={item?.name ?? (kind === "env" ? ".env" : "")} maxLength={120} autoComplete="off" />
         </Field>
-        {kind === "env" ? (
+        {kind === "env" || kind === "file" ? (
           <Field label="Environment" name="environment" required>
-            <Select id="environment" name="environment" defaultValue={item?.environment ?? "development"}>
+            <Select id="environment" name="environment" defaultValue={item?.environment ?? (kind === "file" ? "production" : "development")}>
               {ENVIRONMENTS.map((e) => (
                 <option key={e.value} value={e.value}>
                   {e.label}
@@ -748,6 +914,49 @@ function ItemForm({
         </>
       )}
 
+      {kind === "file" && (
+        <>
+          <Field
+            label="Files"
+            name="files"
+            required
+            hint={`Keystores (.jks, .keystore), key.properties, .p12, .p8, .mobileprovision, google-services.json… Up to ${MAX_VAULT_FILES} files, ${fileSize(MAX_VAULT_FILE_BYTES)} in total.`}
+          >
+            <div className="flex flex-col gap-2">
+              {listed.length > 0 && (
+                <ul className="flex flex-col divide-y divide-line-soft rounded-lg border border-line">
+                  {listed.map((f) => (
+                    <li key={f.name} className="flex items-center gap-2 py-1.5 pr-1.5 pl-3">
+                      <FileKey2 className="size-4 shrink-0 text-muted" aria-hidden />
+                      <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-ink">{f.name}</span>
+                      <span className="shrink-0 text-xs text-subtle">
+                        {fileSize(f.size)}
+                        {f.isNew && " · new"}
+                      </span>
+                      <IconButton
+                        label={`Remove ${f.name}`}
+                        onClick={() => (f.isNew ? setUploads((u) => u.filter((x) => x.name !== f.name)) : setKept((k) => k.filter((n) => n !== f.name)))}
+                      >
+                        <X className="size-4" aria-hidden />
+                      </IconButton>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div>
+                <input id="files" ref={keyFilesRef} type="file" multiple className="sr-only" tabIndex={-1} onChange={(e) => addKeyFiles(e.target.files)} />
+                <Button size="sm" variant="secondary" icon={<Upload className="size-4" aria-hidden />} onClick={() => keyFilesRef.current?.click()}>
+                  {listed.length ? "Add more files" : "Choose files"}
+                </Button>
+              </div>
+            </div>
+          </Field>
+          <Field label="Notes" name="notes" hint="Keystore password, key alias, key password — encrypted with the files.">
+            <Textarea id="notes" name="notes" rows={3} spellCheck={false} defaultValue={current.notes ?? ""} className="font-mono text-[13px] sm:text-[13px]" />
+          </Field>
+        </>
+      )}
+
       {kind === "note" && (
         <Field label="Note" name="content" required>
           <Textarea id="content" name="content" rows={8} spellCheck={false} defaultValue={current.content ?? ""} className="font-mono text-[13px] sm:text-[13px]" />
@@ -758,7 +967,7 @@ function ItemForm({
         <Field label="Description" name="description" hint="Optional, not encrypted — don't put secrets here.">
           <Input id="description" name="description" defaultValue={item?.description ?? ""} maxLength={300} />
         </Field>
-        {kind === "env" && (
+        {(kind === "env" || kind === "file") && (
           <Field label="Rotate by" name="rotateBy" hint="Optional reminder date">
             <Input id="rotateBy" name="rotateBy" type="date" defaultValue={item?.rotateBy ?? ""} />
           </Field>

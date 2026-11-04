@@ -9,7 +9,7 @@ import { vaultConfigured, VaultKeyError } from "@/lib/vault/crypto";
 import { canManageItem, canSeeItem, openPayload, projectDataKey, type VaultRole } from "@/lib/vault/service";
 import { Card, CardBody } from "@/components/ui/card";
 import { Alert, EmptyState } from "@/components/ui/page";
-import { VaultPanel, type VaultEventView, type VaultItemView } from "./vault-panel";
+import { VaultPanel, type VaultEventView, type VaultFileView, type VaultItemView } from "./vault-panel";
 
 const ENV_LABELS: Record<string, string> = { development: "Development", staging: "Staging", testing: "Testing", production: "Production", other: "Other" };
 
@@ -26,7 +26,7 @@ const EVENT_LABELS: Record<string, string> = {
 
 /**
  * Secrets tab. Only rendered for the project manager, team members and the super admin (see `vaultRole`); viewers get it read-only.
- * Values never leave the server here — the page gets names, variable names, URLs and usernames only;
+ * Values never leave the server here — the page gets names, variable names, file names, URLs and usernames only;
  * values are fetched one reveal at a time through `revealVaultItem`.
  */
 export async function VaultTab({ user, role, project }: { user: CurrentUser; role: VaultRole; project: Pick<IProject, "_id" | "manager" | "team"> }) {
@@ -64,6 +64,7 @@ export async function VaultTab({ user, role, project }: { user: CurrentUser; rol
   const audienceSize = new Set([project.manager, ...project.team.map((m) => m.user)].filter(Boolean)).size;
   const views: VaultItemView[] = items.map((i) => {
     let keys: string[] = [];
+    let files: VaultFileView[] = [];
     let url: string | undefined;
     let username: string | undefined;
     let hasNotes = false;
@@ -75,6 +76,10 @@ export async function VaultTab({ user, role, project }: { user: CurrentUser; rol
         if (payload.kind === "credential") {
           url = payload.url;
           username = payload.username;
+          hasNotes = Boolean(payload.notes);
+        }
+        if (payload.kind === "file") {
+          files = payload.files.map((f) => ({ name: f.name, size: f.size, text: f.text }));
           hasNotes = Boolean(payload.notes);
         }
       } catch (error) {
@@ -91,6 +96,7 @@ export async function VaultTab({ user, role, project }: { user: CurrentUser; rol
       environment: i.environment ?? undefined,
       environmentLabel: i.environment ? ENV_LABELS[i.environment] : undefined,
       keys,
+      files,
       url,
       username,
       hasNotes,
@@ -139,12 +145,12 @@ export async function VaultTab({ user, role, project }: { user: CurrentUser; rol
       whoCanSee={`${manager ? `${manager} (project manager)` : "The project manager"}, ${teamSize} team ${teamSize === 1 ? "member" : "members"} and the super admin`}
       empty={
         role === "viewer" ? (
-          <EmptyState icon={<KeyRound className="size-5" aria-hidden />} title="No secrets shared with you" description="The project manager adds .env files, logins and secure notes here. You can view them once they are shared with you." />
+          <EmptyState icon={<KeyRound className="size-5" aria-hidden />} title="No secrets shared with you" description="The project manager adds .env files, logins, signing keys and secure notes here. You can view them once they are shared with you." />
         ) : (
           <EmptyState
             icon={<KeyRound className="size-5" aria-hidden />}
             title="No secrets yet"
-            description="Store .env files, logins and secure notes for this project. Values are encrypted at rest and only the project team can open them."
+            description="Store .env files, logins, signing keys (keystores, certificates) and secure notes for this project. Values are encrypted at rest and only the project team can open them."
           />
         )
       }
