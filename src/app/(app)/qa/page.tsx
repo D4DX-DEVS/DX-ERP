@@ -205,7 +205,7 @@ export default async function QaPage({ searchParams }: { searchParams: Promise<S
             {rows.map((r) => {
               const late = r.targetDate && r.targetDate < today && WORKING.includes(r.status);
               return (
-                <Tr key={r._id}>
+                <Tr key={r._id} href={`/qa/${r._id}`}>
                   <Td className="max-w-[420px]">
                     <Link href={`/qa/${r._id}`} className="block min-w-0 hover:text-brand-600">
                       <span className="block truncate font-semibold">{r.title}</span>

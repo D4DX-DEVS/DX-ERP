@@ -8,6 +8,7 @@ import { ActionForm, Field, FormActions, FormGrid, SubmitButton, useFormState } 
 import { Input, Select, Textarea } from "@/components/ui/input";
 import { Button, buttonClass } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import type { TaxRate } from "@/lib/config-defaults";
 import { inr } from "@/lib/format";
 import { addDays, fmtDate } from "@/lib/time";
 import { saveInvoice } from "./actions";
@@ -53,14 +54,34 @@ export interface InvoiceFormInitial {
   placeOfSupply: string;
   notes: string;
   terms: string;
-  items: { description: string; quantity: string; rate: string; taxRate: string }[];
+  /** `tax` is the Settings tax name ("" on lines saved before names were kept: `taxRate` / `taxSplit` then describe it). */
+  items: { description: string; quantity: string; rate: string; tax: string; taxRate?: number; taxSplit?: boolean }[];
 }
 
 interface Line {
   description: string;
   quantity: string;
   rate: string;
-  taxRate: string;
+  /** Name of the chosen tax option. */
+  tax: string;
+}
+
+/** A tax a draft line was saved with that Settings no longer offers; `legacy` when it predates tax names. */
+type TaxOption = TaxRate & { legacy?: boolean };
+
+/** Tax choices for the line selects: Settings → Taxes plus any tax a saved line still uses, so editing never changes it silently. */
+function taxChoices(taxes: TaxRate[], items: InvoiceFormInitial["items"]): { options: TaxOption[]; keys: string[] } {
+  const options: TaxOption[] = [...taxes];
+  const keys = items.map((it) => {
+    if (it.tax && taxes.some((t) => t.name === it.tax)) return it.tax;
+    const rate = it.taxRate ?? 0;
+    const none = taxes.find((t) => t.rate === 0);
+    if (!it.tax && rate === 0 && none) return none.name;
+    const name = it.tax || `${rate}%`;
+    if (!options.some((o) => o.name === name)) options.push({ name, rate, split: it.taxSplit, legacy: !it.tax });
+    return name;
+  });
+  return { options, keys };
 }
 
 export function InvoiceForm({
@@ -76,11 +97,17 @@ export function InvoiceForm({
   projects: ProjectOption[];
   /** null when the user cannot see contracts. */
   contracts: ContractOption[] | null;
-  taxes: { name: string; rate: number }[];
+  taxes: TaxRate[];
   paymentTerms: { label: string; days: number }[];
 }) {
   const router = useRouter();
-  const defaultTax = String(taxes.find((t) => t.rate > 0)?.rate ?? 0);
+  const defaultTax = (taxes.find((t) => t.rate > 0) ?? taxes[0]).name;
+  const [choices] = useState(() => taxChoices(taxes, initial.items));
+  const taxOf = (name: string): TaxOption => choices.options.find((o) => o.name === name) ?? choices.options[0];
+  const lineItem = (l: Line) => {
+    const t = taxOf(l.tax);
+    return { description: l.description, quantity: Number(l.quantity) || 0, rate: Number(l.rate) || 0, taxRate: t.rate, taxName: t.legacy ? undefined : t.name, taxSplit: Boolean(t.split) };
+  };
   const [client, setClient] = useState(initial.client);
   const [project, setProject] = useState(initial.project);
   const [contract, setContract] = useState(initial.contract);
@@ -90,17 +117,16 @@ export function InvoiceForm({
   const [dueDate, setDueDate] = useState(initial.dueDate);
   const [discount, setDiscount] = useState(initial.discount);
   const [placeOfSupply, setPlaceOfSupply] = useState(initial.placeOfSupply);
-  const [lines, setLines] = useState<Line[]>(initial.items.length ? initial.items : [{ description: "", quantity: "1", rate: "", taxRate: defaultTax }]);
+  const [lines, setLines] = useState<Line[]>(() =>
+    initial.items.length ? initial.items.map((it, i) => ({ description: it.description, quantity: it.quantity, rate: it.rate, tax: choices.keys[i] })) : [{ description: "", quantity: "1", rate: "", tax: defaultTax }],
+  );
 
   const clientProjects = projects.filter((p) => p.client === client);
   const clientContracts = (contracts ?? []).filter((c) => c.client === client);
   const selectedProject = clientProjects.find((p) => p.id === project);
   const milestones = selectedProject?.milestones ?? [];
 
-  const totals = computeTotals(
-    lines.map((l) => ({ description: l.description, quantity: Number(l.quantity) || 0, rate: Number(l.rate) || 0, taxRate: Number(l.taxRate) || 0 })),
-    Number(discount) || 0,
-  );
+  const totals = computeTotals(lines.map(lineItem), Number(discount) || 0);
   const termDays = term === CUSTOM_TERM ? null : Number(term);
   const computedDue = termDays !== null && issueDate ? addDays(issueDate, termDays) : null;
 
@@ -125,18 +151,16 @@ export function InvoiceForm({
     setMilestone(id);
     const m = milestones.find((x) => x.id === id);
     if (!m) return;
-    const line: Line = { description: m.title, quantity: "1", rate: m.amount ? String(m.amount) : "", taxRate: defaultTax };
+    const line: Line = { description: m.title, quantity: "1", rate: m.amount ? String(m.amount) : "", tax: defaultTax };
     setLines((ls) => (ls.length === 1 && !ls[0].description && !ls[0].rate ? [line] : [...ls, line]));
   }
-
-  const taxOptionsFor = (rate: string) => (taxes.some((t) => String(t.rate) === rate) ? taxes : [...taxes, { name: `${rate}%`, rate: Number(rate) }]);
 
   return (
     <ActionForm
       action={saveInvoice}
       values={{
         id: initial.id,
-        items: lines.map((l) => ({ description: l.description, quantity: Number(l.quantity) || 0, rate: Number(l.rate) || 0, taxRate: Number(l.taxRate) || 0 })),
+        items: lines.map(lineItem),
       }}
       onSuccess={(d) => router.push(`/invoices/${d.id}`)}
       successMessage="Draft saved"
@@ -225,13 +249,13 @@ export function InvoiceForm({
           title="Line items"
           subtitle="Amounts are before tax. Totals are recalculated on the server when you save."
           action={
-            <Button variant="secondary" size="sm" icon={<Plus className="size-4" />} onClick={() => setLines((ls) => [...ls, { description: "", quantity: "1", rate: "", taxRate: defaultTax }])}>
+            <Button variant="secondary" size="sm" icon={<Plus className="size-4" />} onClick={() => setLines((ls) => [...ls, { description: "", quantity: "1", rate: "", tax: defaultTax }])}>
               Add line
             </Button>
           }
         />
         <CardBody className="flex flex-col gap-4">
-          <LineEditor lines={lines} computed={totals.items.map((i) => i.amount)} onChange={updateLine} onRemove={(i) => setLines((ls) => (ls.length > 1 ? ls.filter((_, idx) => idx !== i) : ls))} taxes={taxOptionsFor} />
+          <LineEditor lines={lines} computed={totals.items.map((i) => i.amount)} onChange={updateLine} onRemove={(i) => setLines((ls) => (ls.length > 1 ? ls.filter((_, idx) => idx !== i) : ls))} taxes={choices.options} />
 
           <div className="grid gap-5 border-t border-line-soft pt-4 xl:grid-cols-[1fr_320px]">
             <div className="flex flex-col gap-4">
@@ -255,13 +279,13 @@ export function InvoiceForm({
                   <DiscountInput value={discount} onChange={setDiscount} />
                 </dd>
               </div>
-              {totals.taxByRate.map((t) => (
-                <div key={t.rate} className="flex justify-between">
-                  <dt className="text-muted">Tax @ {t.rate}%</dt>
+              {totals.taxLines.map((t) => (
+                <div key={t.label} className="flex justify-between">
+                  <dt className="text-muted">{t.label}</dt>
                   <dd className="tabular">{inr(t.amount, true)}</dd>
                 </div>
               ))}
-              {totals.taxByRate.length === 0 && (
+              {totals.taxLines.length === 0 && (
                 <div className="flex justify-between">
                   <dt className="text-muted">Tax</dt>
                   <dd className="tabular">{inr(0, true)}</dd>
@@ -307,14 +331,14 @@ function LineEditor({
   computed: number[];
   onChange: (index: number, patch: Partial<Line>) => void;
   onRemove: (index: number) => void;
-  taxes: (rate: string) => { name: string; rate: number }[];
+  taxes: TaxOption[];
 }) {
   const { errors } = useFormState();
   const err = (i: number, key: string) => errors[`items.${i}.${key}`];
   return (
     <div className="flex flex-col gap-3">
       {errors.items && <p className="text-xs font-medium text-danger">{errors.items}</p>}
-      <div className="hidden grid-cols-[minmax(0,1fr)_88px_120px_150px_120px_36px] gap-2 px-1 text-xs font-semibold text-muted md:grid">
+      <div className="hidden grid-cols-[minmax(0,1fr)_76px_112px_180px_110px_36px] gap-2 px-1 text-xs font-semibold text-muted md:grid">
         <span>Description</span>
         <span>Qty</span>
         <span>Rate (₹)</span>
@@ -323,7 +347,7 @@ function LineEditor({
         <span />
       </div>
       {lines.map((l, i) => (
-        <div key={i} className="grid grid-cols-2 gap-2 rounded-xl border border-line-soft p-3 md:grid-cols-[minmax(0,1fr)_88px_120px_150px_120px_36px] md:items-start md:border-0 md:p-0">
+        <div key={i} className="grid grid-cols-2 gap-2 rounded-xl border border-line-soft p-3 md:grid-cols-[minmax(0,1fr)_76px_112px_180px_110px_36px] md:items-start md:border-0 md:p-0">
           <div className="col-span-2 md:col-span-1">
             <Input aria-label={`Line ${i + 1} description`} placeholder="Description" value={l.description} onChange={(e) => onChange(i, { description: e.target.value })} maxLength={500} aria-invalid={Boolean(err(i, "description"))} />
             {err(i, "description") && <p className="mt-1 text-xs font-medium text-danger">{err(i, "description")}</p>}
@@ -337,9 +361,9 @@ function LineEditor({
             {err(i, "rate") && <p className="mt-1 text-xs font-medium text-danger">{err(i, "rate")}</p>}
           </div>
           <div>
-            <Select aria-label={`Line ${i + 1} tax`} value={l.taxRate} onChange={(e) => onChange(i, { taxRate: e.target.value })}>
-              {taxes(l.taxRate).map((t, ti) => (
-                <option key={ti} value={String(t.rate)}>
+            <Select aria-label={`Line ${i + 1} tax`} value={l.tax} onChange={(e) => onChange(i, { tax: e.target.value })}>
+              {taxes.map((t) => (
+                <option key={t.name} value={t.name}>
                   {t.name}
                 </option>
               ))}

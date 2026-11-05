@@ -7,7 +7,7 @@ import { isObjectId } from "@/lib/validation";
 import { fmtDate } from "@/lib/time";
 import { createDoc, finalize, heading, paragraph, pdfMoney, pdfResponse, pdfText, PDF_COLORS, table } from "@/lib/pdf/base";
 import { rupeesInWords } from "@/lib/payroll/words";
-import { computeTotals } from "@/app/(app)/invoices/totals";
+import { computeTotals, lineTaxLabel } from "@/app/(app)/invoices/totals";
 import { canSeeClient } from "@/app/(app)/crm/_lib/access";
 
 function addressLines(a?: { line1?: string; line2?: string; city?: string; state?: string; postalCode?: string; country?: string }): string[] {
@@ -87,14 +87,14 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
   y = table(b, {
     startY: y,
     head: [["Description", "Qty", "Rate", "Tax", "Amount"]],
-    body: inv.items.map((i) => [i.description, String(i.quantity), pdfMoney(i.rate), i.taxRate ? `${i.taxRate}%` : "-", pdfMoney(i.amount)]),
-    columnStyles: { 1: { halign: "right", cellWidth: 16 }, 2: { halign: "right", cellWidth: 30 }, 3: { halign: "right", cellWidth: 16 }, 4: { halign: "right", cellWidth: 32 } },
+    body: inv.items.map((i) => [i.description, String(i.quantity), pdfMoney(i.rate), lineTaxLabel(i) ?? "-", pdfMoney(i.amount)]),
+    columnStyles: { 1: { halign: "right", cellWidth: 16 }, 2: { halign: "right", cellWidth: 30 }, 3: { halign: "right", cellWidth: 22 }, 4: { halign: "right", cellWidth: 32 } },
   }) + 6;
 
   // --- totals ----------------------------------------------------------------------------------------------
   const rows: [string, string, boolean?][] = [["Subtotal", pdfMoney(inv.subtotal)]];
   if (inv.discount > 0) rows.push(["Discount", `-${pdfMoney(inv.discount)}`]);
-  for (const t of totals.taxByRate) rows.push([`Tax @ ${t.rate}%`, pdfMoney(t.amount)]);
+  for (const t of totals.taxLines) rows.push([t.label, pdfMoney(t.amount)]);
   rows.push(["Total", pdfMoney(inv.total), true]);
   if (!isDraft && inv.status !== "cancelled") {
     rows.push(["Received", pdfMoney(inv.amountPaid)]);

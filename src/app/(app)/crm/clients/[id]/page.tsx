@@ -169,7 +169,7 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
           <tbody>
             {leads.length === 0 && <EmptyRow colSpan={4}>No leads for this client yet.</EmptyRow>}
             {leads.map((l) => (
-              <Tr key={l._id}>
+              <Tr key={l._id} href={`/crm/leads/${l._id}`}>
                 <Td>
                   <Link href={`/crm/leads/${l._id}`} className="font-semibold text-ink hover:text-brand-600">
                     {l.title}
@@ -208,7 +208,7 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
           <tbody>
             {rows.length === 0 && <EmptyRow colSpan={4}>No proposals for this client yet.</EmptyRow>}
             {rows.map((p) => (
-              <Tr key={p._id}>
+              <Tr key={p._id} href={`/proposals/${p._id}`}>
                 <Td>
                   <Link href={`/proposals/${p._id}`} className="font-semibold text-ink hover:text-brand-600">
                     {p.title}
@@ -260,7 +260,7 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
             {rows.map((c) => {
               const secrets = canSeeContractSecrets(user, c);
               return (
-                <Tr key={c._id}>
+                <Tr key={c._id} href={`/contracts/${c._id}`}>
                   <Td>
                     <Link href={`/contracts/${c._id}`} className="flex items-center gap-1.5 font-semibold text-ink hover:text-brand-600">
                       {c.title}
@@ -305,7 +305,7 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
           <tbody>
             {rows.length === 0 && <EmptyRow colSpan={showBudget ? 4 : 3}>No projects for this client yet.</EmptyRow>}
             {rows.map((p) => (
-              <Tr key={p._id}>
+              <Tr key={p._id} href={`/projects/${p._id}`}>
                 <Td>
                   <Link href={`/projects/${p._id}`} className="font-semibold text-ink hover:text-brand-600">
                     {p.title}
@@ -365,7 +365,7 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
           <tbody>
             {rows.length === 0 && <EmptyRow colSpan={6}>No invoices issued to this client yet.</EmptyRow>}
             {rows.map((i) => (
-              <Tr key={i._id}>
+              <Tr key={i._id} href={`/invoices/${i._id}`}>
                 <Td>
                   <Link href={`/invoices/${i._id}`} className="font-semibold text-ink hover:text-brand-600">
                     {i.invoiceNo ?? i.draftNo}

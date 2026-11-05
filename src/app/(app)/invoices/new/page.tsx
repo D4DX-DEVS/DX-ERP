@@ -17,7 +17,7 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: P
   const project = options.projects.find((p) => p.id === projectId);
   const milestone = project?.milestones.find((m) => m.id === idParam(sp, "milestone"));
   const clientId = project?.client ?? idParam(sp, "client") ?? "";
-  const defaultTax = String(options.taxes.find((t) => t.rate > 0)?.rate ?? 0);
+  const defaultTax = (options.taxes.find((t) => t.rate > 0) ?? options.taxes[0]).name;
   const net15 = options.paymentTerms.find((t) => t.days === 15) ?? options.paymentTerms[0];
 
   const initial: InvoiceFormInitial = {
@@ -33,8 +33,8 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: P
     notes: options.defaults.notes,
     terms: options.defaults.terms,
     items: milestone
-      ? [{ description: milestone.title, quantity: "1", rate: milestone.amount ? String(milestone.amount) : "", taxRate: defaultTax }]
-      : [{ description: "", quantity: "1", rate: "", taxRate: defaultTax }],
+      ? [{ description: milestone.title, quantity: "1", rate: milestone.amount ? String(milestone.amount) : "", tax: defaultTax }]
+      : [{ description: "", quantity: "1", rate: "", tax: defaultTax }],
   };
 
   return (

@@ -186,7 +186,7 @@ export default async function PayrollRunPage({ params, searchParams }: { params:
             <tbody>
               {shown.length === 0 && <EmptyRow colSpan={8}>{rows.length === 0 ? "This run has no payslips." : "No payslips match these filters."}</EmptyRow>}
               {shown.map(({ p, flags }) => (
-                <Tr key={p._id}>
+                <Tr key={p._id} href={`/payslips/${p._id}`}>
                   <Td>
                     <div className="font-semibold">{p.snapshot.name}</div>
                     <div className="text-xs text-muted">

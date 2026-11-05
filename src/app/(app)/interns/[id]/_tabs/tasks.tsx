@@ -53,7 +53,7 @@ export async function TasksTab({ target, settings, today }: InternTabProps) {
             const latest = [...(t.submissions ?? [])].reverse().find((s) => s.submittedBy === id);
             const overdue = t.dueDate && t.dueDate < today && !closed.has(t.status);
             return (
-              <Tr key={t._id}>
+              <Tr key={t._id} href={`/tasks/${t._id}`}>
                 <Td>
                   <Link href={`/tasks/${t._id}`} className="block font-semibold text-ink hover:text-brand-600">
                     {t.title}

@@ -168,7 +168,7 @@ export default async function ContractsPage({ searchParams }: { searchParams: Pr
                 const secrets = canSeeContractSecrets(user, c);
                 const link = [c.project && projectNo.get(c.project), c.proposal && proposalNo.get(c.proposal)].filter(Boolean).join(" · ");
                 return (
-                  <Tr key={c._id}>
+                  <Tr key={c._id} href={`/contracts/${c._id}`}>
                     <Td>
                       <Link href={`/contracts/${c._id}`} className="flex items-center gap-1.5 font-semibold text-ink hover:text-brand-600">
                         {c.title}

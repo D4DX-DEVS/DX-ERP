@@ -215,6 +215,9 @@ Tables live in `TableWrap`, which clips instead of scrolling and shows only the 
 numbers to keep (`"last"` = the last column, usually actions), `"auto"` (first six + last) or `"all"`.
 Defaults: `phone={[1, "last"]} tablet={[1, 2, 3, "last"]} laptop="auto" desktop="all"`. Pick the columns that
 identify the row plus its status/amount; everything hidden must still be visible on the detail page.
+Rows and list cards that have a detail page open it when clicked anywhere: `<Tr href={`/x/${id}`}>` for table rows,
+`data-href={url}` + `cursor-pointer` on a card's outer element (handled by `RowLinks` in the app shell; links, buttons and
+form controls inside keep their own click). Keep the record's own `<Link>` in the row for keyboard users.
 `truncate` text inside a table wraps instead (a no-wrap cell would push the last columns out of view); outside
 tables, prefer `break-words` over `truncate` for titles so the full label shows.
 

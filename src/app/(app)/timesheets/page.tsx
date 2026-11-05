@@ -304,7 +304,7 @@ export default async function TimesheetPage({ searchParams }: { searchParams: Pr
               if (!t) return null;
               const actual = r.minutes / 60;
               return (
-                <div key={r.task} className="flex flex-col gap-1.5">
+                <div key={r.task} data-href={`/tasks/${t._id}`} className="flex cursor-pointer flex-col gap-1.5">
                   <div className="flex items-center justify-between gap-3 text-[13px]">
                     <Link href={`/tasks/${t._id}`} className="min-w-0 truncate font-semibold hover:text-brand-600">
                       {t.taskNo} · {t.title}

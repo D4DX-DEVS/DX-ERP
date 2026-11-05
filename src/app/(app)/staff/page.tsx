@@ -261,7 +261,7 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
               const categories = categoriesFor(settings.documentCategories, r.personType).length;
               const contract = contractStatus(r.contractStart, r.contractEnd, today);
               return (
-                <Tr key={id}>
+                <Tr key={id} href={`/staff/${id}`}>
                   <Td>
                     <PersonCell name={r.name} sub={r.employeeId} photo={r.photo} href={`/staff/${id}`} />
                   </Td>

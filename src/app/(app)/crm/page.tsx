@@ -192,7 +192,7 @@ export default async function PipelinePage({ searchParams }: { searchParams: Pro
                 const fu = l.status === "open" ? followUpView(l.nextFollowUp) : undefined;
                 const o = l.assignedTo ? owners.get(l.assignedTo) : undefined;
                 return (
-                  <Tr key={l._id}>
+                  <Tr key={l._id} href={`/crm/leads/${l._id}`}>
                     <Td>
                       <Link href={`/crm/leads/${l._id}`} className="font-semibold text-ink hover:text-brand-600">
                         {l.title}

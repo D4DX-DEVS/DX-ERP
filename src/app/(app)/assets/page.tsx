@@ -241,7 +241,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
                 const dept = a.department ? deptNames.get(a.department) : undefined;
                 const warn = a.status === "retired" || a.status === "lost" ? null : warrantyState(a.warrantyUntil ?? undefined, today);
                 return (
-                  <Tr key={id}>
+                  <Tr key={id} href={`/assets/${id}`}>
                     <Td>
                       <Link href={`/assets/${id}`} className="font-semibold text-ink hover:text-brand-600">
                         {a.name}

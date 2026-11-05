@@ -177,7 +177,7 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
               <tbody>
                 {clientInvoices.length === 0 && <EmptyRow colSpan={4}>No open invoices for this client.</EmptyRow>}
                 {clientInvoices.map((r) => (
-                  <Tr key={r.id}>
+                  <Tr key={r.id} href={`/invoices/${r.id}`}>
                     <Td>
                       <Link href={`/invoices/${r.id}`} className="font-mono text-xs font-semibold text-brand-600 hover:text-brand-800">
                         {r.invoiceNo}
@@ -210,7 +210,7 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
               <tbody>
                 {history.length === 0 && <EmptyRow colSpan={4}>No payments recorded for this client yet.</EmptyRow>}
                 {history.map((p) => (
-                  <Tr key={p._id}>
+                  <Tr key={p._id} href={`/invoices/${p.invoice}`}>
                     <Td className="whitespace-nowrap">{fmtDate(p.date)}</Td>
                     <Td>
                       <StatusChip domain="payment" value={p.type} size="sm" />

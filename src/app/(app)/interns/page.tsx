@@ -197,7 +197,7 @@ export default async function InternsPage({ searchParams }: { searchParams: Prom
               const achieved = objectives.filter((o) => o.status === "achieved").length;
               const mentorName = i?.mentor ? mentors.get(i.mentor) : undefined;
               return (
-                <Tr key={id}>
+                <Tr key={id} href={`/interns/${id}`}>
                   <Td>
                     <PersonCell name={r.name} sub={r.employeeId} photo={r.photo} href={`/interns/${id}`} />
                   </Td>

@@ -267,7 +267,7 @@ export async function InternTasksCard({ user }: { user: CurrentUser }) {
               const due = dueLabel(t.dueDate, today);
               const action = !mine ? "Submit" : mine.reviewStatus === "changes_requested" ? "Resubmit" : "View";
               return (
-                <Tr key={t.id}>
+                <Tr key={t.id} href={`/tasks/${t.id}`}>
                   <Td className="max-w-72">
                     <Link href={`/tasks/${t.id}`} className="block truncate font-semibold text-ink hover:text-brand-600">
                       {t.title}

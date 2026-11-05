@@ -22,6 +22,8 @@ const itemSchema = z.object({
   quantity: zs.num("Quantity", { min: 0.01 }),
   rate: zs.num("Rate", { min: 0 }),
   taxRate: zs.num("Tax rate", { min: 0, max: 100 }),
+  taxName: zs.optText(40),
+  taxSplit: zs.bool(),
 });
 
 const draftSchema = z.object({
@@ -149,7 +151,7 @@ export async function saveInvoice(input: Record<string, unknown>): Promise<Actio
       issueDate: data.issueDate,
       dueDate,
       paymentTermDays,
-      items: totals.items.map((i) => ({ description: i.description, quantity: i.quantity, rate: i.rate, taxRate: i.taxRate, amount: i.amount })),
+      items: totals.items.map((i) => ({ description: i.description, quantity: i.quantity, rate: i.rate, taxRate: i.taxRate, taxName: i.taxName, taxSplit: i.taxSplit || undefined, amount: i.amount })),
       subtotal: totals.subtotal,
       discount: totals.discount,
       taxTotal: totals.taxTotal,

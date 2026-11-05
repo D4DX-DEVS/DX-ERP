@@ -30,6 +30,8 @@ export interface LogDay {
   leaveLabel?: string;
   moves: LogMovement[];
   worked: number | null;
+  /** Today while the clock runs (checked in, not on a break or a movement that stops it): `worked` was measured at this epoch ms and keeps counting. */
+  runningAt: number | null;
 }
 
 export interface MonthLog {
@@ -102,9 +104,15 @@ export async function loadMonthLog(userId: string, month: string, settings: AppS
     const cls = classifyDay({ date, today, now, att, leave: l ? (l.half ? "half" : "full") : null, holiday: cal.isHoliday(date), settings });
     const dayMoves = movesByDate.get(date) ?? [];
     let worked: number | null = null;
+    let runningAt: number | null = null;
     if (att?.checkIn) {
       if (att.checkOut) worked = att.workMinutes;
-      else if (date === today && cls.key === "in_progress") worked = provisionalWork({ date, checkIn: att.checkIn, checkOut: null, breaks: att.breaks }, dayMoves, settings, now);
+      else if (date === today && cls.key === "in_progress") {
+        worked = provisionalWork({ date, checkIn: att.checkIn, checkOut: null, breaks: att.breaks }, dayMoves, settings, now);
+        const a = settings.attendance;
+        const stopped = att.breaks.some((b) => !b.end) || dayMoves.some((m) => m.status === "out" && (m.official ? !a.officialMovementCountsAsWork : a.personalMovementDeducted));
+        if (!stopped) runningAt = now.getTime();
+      }
     }
     return {
       date,
@@ -113,6 +121,7 @@ export async function loadMonthLog(userId: string, month: string, settings: AppS
       holidayName: cal.holidays.get(date),
       leaveLabel: l?.typeName,
       worked,
+      runningAt,
       moves: dayMoves.map((m) => ({ id: m._id, no: m.movementNo, minutes: m.durationMinutes ?? 0, official: m.official, open: m.status === "out" })),
     };
   });

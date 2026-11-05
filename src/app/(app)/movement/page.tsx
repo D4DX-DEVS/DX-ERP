@@ -325,7 +325,7 @@ async function RegisterView({ ctx, scope, sp }: { ctx: Ctx; scope: MovementScope
                 const ref = (m.project && projectNo.get(m.project)) || (m.client && clientNo.get(m.client)) || "—";
                 const lateMins = m.inTime && m.expectedReturn && m.inTime > m.expectedReturn ? Math.round((m.inTime.getTime() - m.expectedReturn.getTime()) / 60_000) : 0;
                 return (
-                  <Tr key={m._id}>
+                  <Tr key={m._id} href={`/movement/${m._id}`}>
                     <Td className="font-mono text-xs whitespace-nowrap">
                       <Link href={`/movement/${m._id}`} className="text-brand-600 hover:underline">
                         {m.movementNo}
@@ -397,7 +397,7 @@ async function RegisterView({ ctx, scope, sp }: { ctx: Ctx; scope: MovementScope
                 const show = detailsVisible(ctx, m);
                 const corr = m.approvalStatus === "correction_requested";
                 return (
-                  <div key={m._id} className="flex items-center gap-3 rounded-xl border border-line p-3">
+                  <div key={m._id} data-href={`/movement/${m._id}`} className="flex cursor-pointer items-center gap-3 rounded-xl border border-line p-3">
                     <Link href={`/movement/${m._id}`} className="min-w-0 flex-1">
                       <div className="truncate text-[13px] font-semibold text-ink">
                         {p?.name ?? "—"} · {corr ? "correction" : show ? m.categoryLabel.toLowerCase() : "personal"}
@@ -491,7 +491,7 @@ async function MineView({ ctx, sp }: { ctx: Ctx; sp: SearchParams }) {
           <tbody>
             {rows.length === 0 && <EmptyRow colSpan={6}>No movements in this period.</EmptyRow>}
             {rows.map((m) => (
-              <Tr key={m._id}>
+              <Tr key={m._id} href={`/movement/${m._id}`}>
                 <Td className="whitespace-nowrap">
                   <Link href={`/movement/${m._id}`} className="font-semibold text-brand-600 hover:underline">
                     {fmtDate(m.date, "EEE d MMM")}
@@ -548,7 +548,7 @@ async function ApprovalsView({ ctx }: { ctx: Ctx }) {
             const c = m.corrections.find((x) => x.status === "pending");
             const show = detailsVisible(ctx, m);
             return (
-              <div key={m._id} className="flex flex-col gap-3 rounded-[14px] border border-line p-4 sm:flex-row sm:items-center">
+              <div key={m._id} data-href={`/movement/${m._id}`} className="flex cursor-pointer flex-col gap-3 rounded-[14px] border border-line p-4 sm:flex-row sm:items-center">
                 <Avatar name={p?.name ?? "?"} src={p?.photo} size="md" />
                 <Link href={`/movement/${m._id}`} className="min-w-0 flex-1">
                   <div className="text-sm font-semibold text-ink">

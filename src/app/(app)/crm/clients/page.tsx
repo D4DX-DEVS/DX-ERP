@@ -138,7 +138,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
               const o = c.owner ? owners.get(c.owner) : undefined;
               const due = balanceBy.get(id) ?? 0;
               return (
-                <Tr key={id}>
+                <Tr key={id} href={`/crm/clients/${id}`}>
                   <Td>
                     <Link href={`/crm/clients/${id}`} className="flex items-center gap-1.5 font-semibold text-ink hover:text-brand-600">
                       {c.name}

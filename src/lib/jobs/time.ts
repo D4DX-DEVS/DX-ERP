@@ -1,4 +1,4 @@
-import { and, eq, gte, isNotNull, isNull, lt, lte } from "drizzle-orm";
+import { and, eq, gte, isNotNull, isNull, lt, lte, or } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { recalcAttendanceDays } from "@/lib/domain/attendance-calc";
 import { leaveYearOf, leaveYearRange } from "@/lib/domain/leave-balance";
@@ -80,6 +80,19 @@ async function missingCheckout(): Promise<string> {
   for (const [userId, dates] of toRecalc) await recalcAttendanceDays(userId, dates);
   await notifyBatch(items);
   return `${open.length} open days, ${flagged} newly flagged, ${reminded} reminders`;
+}
+
+/**
+ * Flexible hours: a closed day whose work reached the full-day target is neither late nor early. New days get this
+ * from `computeAttendance`; this clears flags stored before the rule existed (or before the target was lowered).
+ */
+async function flexibleHours(): Promise<string> {
+  const { fullDayMinutes } = (await getSettings()).attendance;
+  const res = await db()
+    .update(Attendance)
+    .set({ late: false, lateMinutes: 0, earlyDeparture: false, earlyMinutes: 0 })
+    .where(and(isNotNull(Attendance.checkOut), gte(Attendance.workMinutes, fullDayMinutes), or(eq(Attendance.late, true), eq(Attendance.earlyDeparture, true))));
+  return `${res.meta.changes} day(s) cleared`;
 }
 
 /** Leave requests waiting more than 24 h for a decision → reminder to whoever must decide (once per request per day). */
@@ -185,4 +198,5 @@ export const timeJobs: Job[] = [
   { name: "leave-pending-reminder", intervalMinutes: 60, run: leaveReminders },
   { name: "attendance-correction-reminder", intervalMinutes: 60, run: correctionReminders },
   { name: "leave-year-rollover", intervalMinutes: 720, run: leaveYearRollover },
+  { name: "attendance-flexible-hours", intervalMinutes: 720, run: flexibleHours },
 ];

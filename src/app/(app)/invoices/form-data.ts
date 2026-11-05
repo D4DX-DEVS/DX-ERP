@@ -3,6 +3,7 @@ import { and, asc, desc, eq, isNotNull, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { Client, Contract, Project } from "@/lib/models";
 import { can, type CurrentUser } from "@/lib/auth/session";
+import type { TaxRate } from "@/lib/config-defaults";
 import { getSettings } from "@/lib/settings";
 import { clientScope, hiddenClientIds, notHiddenClient } from "@/app/(app)/crm/_lib/access";
 import type { ClientOption, ContractOption, ProjectOption } from "./invoice-form";
@@ -11,7 +12,7 @@ import type { ClientOption, ContractOption, ProjectOption } from "./invoice-form
 export async function loadInvoiceFormOptions(
   user: CurrentUser,
   invoiceId?: string,
-): Promise<{ clients: ClientOption[]; projects: ProjectOption[]; contracts: ContractOption[] | null; taxes: { name: string; rate: number }[]; paymentTerms: { label: string; days: number }[]; defaults: { notes: string; terms: string } }> {
+): Promise<{ clients: ClientOption[]; projects: ProjectOption[]; contracts: ContractOption[] | null; taxes: TaxRate[]; paymentTerms: { label: string; days: number }[]; defaults: { notes: string; terms: string } }> {
   const settings = await getSettings();
   const showContracts = can(user, "contracts.view");
   const privileged = can(user, "contracts.manage") || can(user, "crm.confidential");

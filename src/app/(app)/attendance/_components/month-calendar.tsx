@@ -1,8 +1,10 @@
+import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { TONE_CLASSES } from "@/lib/status";
 import { fmtDate, formatDuration, weekday } from "@/lib/time";
 import { dayChipInfo, type DayKey } from "../_lib/day";
 import type { LogDay } from "../_lib/month";
+import { LiveDuration } from "./live-duration";
 
 /** Calendar cell appearance per day status (design: Present / Late / Leave / Missing check-out / Holiday-weekend). */
 function cellTone(key: DayKey): string {
@@ -12,7 +14,7 @@ function cellTone(key: DayKey): string {
   return cn(t.bg, t.fg);
 }
 
-function cellNote(d: LogDay): string {
+function cellNote(d: LogDay): ReactNode {
   switch (d.cls.key) {
     case "present":
     case "late":
@@ -20,6 +22,7 @@ function cellNote(d: LogDay): string {
     case "half_day":
       return d.worked ? formatDuration(d.worked) : "";
     case "in_progress":
+      if (d.runningAt !== null) return <LiveDuration baseMinutes={d.worked ?? 0} renderedAt={d.runningAt} running />;
       return d.worked ? formatDuration(d.worked) : "In";
     case "on_leave":
     case "half_leave":

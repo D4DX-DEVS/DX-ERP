@@ -15,6 +15,10 @@ export interface ItemInput {
   quantity: number;
   rate: number;
   taxRate: number;
+  /** Name of the tax chosen from Settings → Taxes (absent on lines saved before tax names were kept). */
+  taxName?: string;
+  /** Intra-state GST: charged as CGST + SGST, half the rate each. */
+  taxSplit?: boolean;
 }
 
 export interface ComputedItem extends ItemInput {
@@ -28,7 +32,8 @@ export interface InvoiceTotals {
   discount: number;
   taxTotal: number;
   total: number;
-  taxByRate: { rate: number; amount: number }[];
+  /** Tax rows for the totals block, e.g. "CGST @ 9%" + "SGST @ 9%", or "IGST 18%". */
+  taxLines: { label: string; amount: number }[];
 }
 
 export function computeTotals(items: ItemInput[], discountInput: number): InvoiceTotals {
@@ -46,8 +51,16 @@ export function computeTotals(items: ItemInput[], discountInput: number): Invoic
     return { ...l, taxRate: rate, tax: round2((taxable * rate) / 100) };
   });
 
-  const byRate = new Map<number, number>();
-  for (const c of computed) if (c.tax > 0) byRate.set(c.taxRate, round2((byRate.get(c.taxRate) ?? 0) + c.tax));
+  const byLabel = new Map<string, number>();
+  const add = (label: string, amount: number) => byLabel.set(label, round2((byLabel.get(label) ?? 0) + amount));
+  for (const c of computed) {
+    if (c.tax <= 0) continue;
+    if (c.taxSplit) {
+      const cgst = round2(c.tax / 2);
+      add(`CGST @ ${c.taxRate / 2}%`, cgst);
+      add(`SGST @ ${c.taxRate / 2}%`, round2(c.tax - cgst));
+    } else add(c.taxName ?? `Tax @ ${c.taxRate}%`, c.tax);
+  }
   const taxTotal = round2(computed.reduce((s, c) => s + c.tax, 0));
   return {
     items: computed,
@@ -55,8 +68,14 @@ export function computeTotals(items: ItemInput[], discountInput: number): Invoic
     discount,
     taxTotal,
     total: round2(subtotal - discount + taxTotal),
-    taxByRate: [...byRate.entries()].sort((a, b) => a[0] - b[0]).map(([rate, amount]) => ({ rate, amount })),
+    taxLines: [...byLabel.entries()].map(([label, amount]) => ({ label, amount })),
   };
+}
+
+/** A line's tax for item tables: "9% + 9%" (CGST + SGST), "18%", or null when untaxed. */
+export function lineTaxLabel(item: { taxRate: number; taxSplit?: boolean }): string | null {
+  if (!item.taxRate) return null;
+  return item.taxSplit ? `${item.taxRate / 2}% + ${item.taxRate / 2}%` : `${item.taxRate}%`;
 }
 
 export interface BalanceInput {

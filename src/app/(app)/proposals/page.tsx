@@ -146,7 +146,7 @@ export default async function ProposalsPage({ searchParams }: { searchParams: Pr
               const left = daysUntil(p.validUntil);
               const open = p.status === "sent" || p.status === "negotiation";
               return (
-                <Tr key={p._id}>
+                <Tr key={p._id} href={`/proposals/${p._id}`}>
                   <Td>
                     <Link href={`/proposals/${p._id}`} className="font-semibold text-ink hover:text-brand-600">
                       {p.title}

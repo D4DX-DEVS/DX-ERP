@@ -170,6 +170,7 @@ export function TaskBoard({ columns, statuses, showProject = true }: { columns: 
                   return (
                     <article
                       key={r.id}
+                      data-href={`/tasks/${r.id}`}
                       draggable={draggable}
                       onDragStart={(e) => {
                         e.dataTransfer.effectAllowed = "move";
@@ -186,7 +187,7 @@ export function TaskBoard({ columns, statuses, showProject = true }: { columns: 
                       title={draggable ? "Drag to another column to change the status" : undefined}
                       className={cn(
                         "group relative flex flex-col gap-1.5 rounded-xl border border-line bg-white p-2.5 shadow-[0_1px_2px_rgba(16,24,58,0.04)] transition-opacity sm:gap-2 sm:p-3",
-                        draggable && "cursor-grab active:cursor-grabbing hover:border-brand-200",
+                        draggable ? "cursor-grab active:cursor-grabbing hover:border-brand-200" : "cursor-pointer",
                         drag?.id === r.id && "opacity-40",
                         saving && "opacity-70",
                       )}

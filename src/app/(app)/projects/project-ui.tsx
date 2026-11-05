@@ -47,7 +47,7 @@ export function ProjectTable({ rows, statuses }: { rows: ProjectRow[]; statuses:
       <tbody>
         {rows.length === 0 && <EmptyRow colSpan={7}>No projects match these filters.</EmptyRow>}
         {rows.map((r) => (
-          <Tr key={r.id}>
+          <Tr key={r.id} href={`/projects/${r.id}`}>
             <Td className="max-w-[320px]">
               <Link href={`/projects/${r.id}`} className="block min-w-0 hover:text-brand-600">
                 <span className="block truncate font-semibold">{r.title}</span>
@@ -177,7 +177,7 @@ export function ProjectTimeline({ rows, statuses }: { rows: ProjectRow[]; status
             const left = pos(r.startDate!);
             const width = Math.max(1.5, pos(r.targetDate!) - left);
             return (
-              <li key={r.id} className="grid grid-cols-[104px_minmax(0,1fr)] items-center border-b border-line-soft last:border-b-0 sm:grid-cols-[220px_minmax(0,1fr)]">
+              <li key={r.id} data-href={`/projects/${r.id}`} className="grid cursor-pointer grid-cols-[104px_minmax(0,1fr)] items-center border-b border-line-soft last:border-b-0 sm:grid-cols-[220px_minmax(0,1fr)]">
                 <Link href={`/projects/${r.id}`} className="block min-w-0 px-3 py-2.5 hover:text-brand-600 sm:px-5">
                   <span className="block truncate text-[13px] font-semibold">{r.title}</span>
                   <span className="block truncate text-xs text-muted">{r.projectNo}</span>

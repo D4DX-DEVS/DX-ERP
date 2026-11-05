@@ -118,7 +118,11 @@ function subscribe(listener: () => void) {
   return () => listeners.delete(listener);
 }
 
-/** Install / update popup, shown on every page load while the app can be installed or a new version waits. */
+/**
+ * Install / update popup. The install offer only appears on the page the app was opened or reloaded on — the
+ * browser can make it available later (after some use), and it must not pop up while moving between pages.
+ * A new version is offered as soon as it is ready.
+ */
 export function PwaPrompt() {
   const pwa = useSyncExternalStore(
     subscribe,
@@ -128,13 +132,16 @@ export function PwaPrompt() {
   const pathname = usePathname();
   const [dismissed, setDismissed] = useState({ install: false, update: false });
   const [busy, setBusy] = useState(false);
+  const [openedOn] = useState(pathname);
+  const [navigated, setNavigated] = useState(false);
+  if (!navigated && pathname !== openedOn) setNavigated(true);
 
   useEffect(start, []);
 
   // The office QR screen runs unattended: never cover it.
   if (pathname.startsWith("/kiosk/")) return null;
 
-  const mode = pwa.updateReady && !dismissed.update ? "update" : (pwa.canInstall || pwa.iosInstall) && !dismissed.install ? "install" : null;
+  const mode = pwa.updateReady && !dismissed.update ? "update" : (pwa.canInstall || pwa.iosInstall) && !dismissed.install && !navigated ? "install" : null;
   const close = () => setDismissed((d) => ({ ...d, [mode === "update" ? "update" : "install"]: true }));
 
   const install = async () => {

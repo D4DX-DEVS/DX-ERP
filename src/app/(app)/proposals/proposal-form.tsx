@@ -17,6 +17,8 @@ interface ItemState {
   quantity: string;
   rate: string;
   taxRate: string;
+  /** Tax option picked here; several options can share a rate (e.g. CGST + SGST and IGST at 18%). */
+  tax?: string;
 }
 
 interface MilestoneState {
@@ -202,9 +204,16 @@ export function ProposalForm({
                   <div>
                     <span className="mb-1 block text-xs font-semibold text-muted sm:hidden">Tax</span>
                     <Field name={`items.${i}.taxRate`}>
-                      <Select aria-label={`Line ${i + 1} tax`} value={it.taxRate} onChange={(e) => setItem(i, { taxRate: e.target.value })}>
+                      <Select
+                        aria-label={`Line ${i + 1} tax`}
+                        value={it.tax ?? taxOptions(it.taxRate).find((t) => String(t.rate) === it.taxRate)?.name}
+                        onChange={(e) => {
+                          const t = taxOptions(it.taxRate).find((o) => o.name === e.target.value);
+                          if (t) setItem(i, { tax: t.name, taxRate: String(t.rate) });
+                        }}
+                      >
                         {taxOptions(it.taxRate).map((t) => (
-                          <option key={t.rate} value={String(t.rate)}>
+                          <option key={t.name} value={t.name}>
                             {t.name}
                           </option>
                         ))}

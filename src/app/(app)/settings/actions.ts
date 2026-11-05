@@ -371,7 +371,7 @@ export async function saveNumbering(input: Record<string, unknown>): Promise<Sav
 }
 
 const taxesSchema = z.object({
-  taxes: rows(z.object({ name: zs.text("Tax name", 40), rate: zs.num("Tax rate", { min: 0, max: 100 }) }), 30),
+  taxes: rows(z.object({ name: zs.text("Tax name", 40), rate: zs.num("Tax rate", { min: 0, max: 100 }), split: zs.bool() }), 30),
   paymentTerms: rows(z.object({ label: zs.text("Term name", 40), days: zs.num("Days", { min: 0, max: 365 }) }), 30),
 });
 

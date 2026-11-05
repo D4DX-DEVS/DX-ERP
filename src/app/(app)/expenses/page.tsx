@@ -236,7 +236,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
               {rows.map((r) => {
                 const id = r._id;
                 return (
-                  <Tr key={id}>
+                  <Tr key={id} href={`/expenses/${id}`}>
                     <Td>
                       <Link href={`/expenses/${id}`} className="font-semibold text-ink hover:text-brand-600">
                         {r.description.length > 60 ? `${r.description.slice(0, 59)}…` : r.description}
@@ -314,7 +314,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
               <CardHeader title="Waiting for your approval" href="/expenses?view=approve" hrefLabel="Open queue" />
               <CardBody className="flex flex-col">
                 {pendingForMe.map((r) => (
-                  <div key={r._id} className="flex flex-col gap-2 border-t border-line-soft py-3 first:border-t-0 first:pt-0">
+                  <div key={r._id} data-href={`/expenses/${r._id}`} className="flex cursor-pointer flex-col gap-2 border-t border-line-soft py-3 first:border-t-0 first:pt-0">
                     <div className="text-[13px]">
                       <Link href={`/expenses/${r._id}`} className="font-semibold text-ink hover:text-brand-600">
                         {names.get(r.user) ?? "Someone"} · {inr(r.amount, true)}

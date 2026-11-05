@@ -48,6 +48,8 @@ export interface PayrollComponent {
 export interface TaxRate {
   name: string;
   rate: number;
+  /** Intra-state GST: invoices show it as CGST + SGST at half the rate each (otherwise one tax, e.g. IGST). */
+  split?: boolean;
 }
 
 export interface PaymentTerm {
@@ -289,9 +291,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   taxes: [
     { name: "No tax", rate: 0 },
-    { name: "GST 18%", rate: 18 },
-    { name: "GST 12%", rate: 12 },
-    { name: "GST 5%", rate: 5 },
+    { name: "CGST 9% + SGST 9%", rate: 18, split: true },
+    { name: "IGST 18%", rate: 18 },
   ],
   paymentTerms: [
     { label: "Due on receipt", days: 0 },

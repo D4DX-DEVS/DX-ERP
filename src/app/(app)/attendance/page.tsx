@@ -19,6 +19,7 @@ import { cn } from "@/lib/cn";
 import { cancelCorrection } from "./actions";
 import { CorrectionDialog } from "./_components/correction-dialog";
 import { DayChips } from "./_components/day-chip";
+import { LiveDuration } from "./_components/live-duration";
 import { MonthNav } from "./_components/month-nav";
 import { AttendanceTabs } from "./_components/tabs";
 import { attendanceAccess } from "./_lib/access";
@@ -147,7 +148,7 @@ export default async function MyAttendancePage({ searchParams }: { searchParams:
       )}
 
       <div className="grid items-start gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+        <Card id="month" className="scroll-mt-24 lg:col-span-2">
           <CardHeader
             title={fmtDate(`${month}-01`, "MMMM")}
             action={<CalendarLegend />}
@@ -209,6 +210,7 @@ export default async function MyAttendancePage({ searchParams }: { searchParams:
             <span>
               Grace period {a.graceMinutes} min · full day {formatDuration(a.fullDayMinutes)} · half day {formatDuration(a.halfDayMinutes)}
             </span>
+            <span>Flexible hours: a day that reaches the full-day target is never marked late or early.</span>
             <span>
               Movements don&apos;t end your working day.
               {a.officialMovementCountsAsWork ? " Official movement counts as work time." : " Official movement time is not counted as work."}
@@ -259,7 +261,7 @@ export default async function MyAttendancePage({ searchParams }: { searchParams:
                   <Td className="font-semibold tabular">
                     {d.worked != null ? (
                       <>
-                        {formatDuration(d.worked)}
+                        {d.runningAt !== null ? <LiveDuration baseMinutes={d.worked} renderedAt={d.runningAt} running /> : formatDuration(d.worked)}
                         {!d.att?.checkOut && <span className="ml-1 text-xs font-normal text-muted">so far</span>}
                       </>
                     ) : d.cls.key === "missing_checkout" ? (

@@ -413,7 +413,7 @@ export function DocumentCategoriesEditor({ items, usage }: { items: AppSettings[
 /* ───────────────────────────── Taxes & payment terms ───────────────────────────── */
 
 export function TaxesForm({ taxes, paymentTerms }: { taxes: AppSettings["taxes"]; paymentTerms: AppSettings["paymentTerms"] }) {
-  const tax = useRows<{ name: string; rate: string }>(taxes.map((t) => ({ name: t.name, rate: String(t.rate) })));
+  const tax = useRows<{ name: string; rate: string; split: boolean }>(taxes.map((t) => ({ name: t.name, rate: String(t.rate), split: Boolean(t.split) })));
   const terms = useRows<{ label: string; days: string }>(paymentTerms.map((t) => ({ label: t.label, days: String(t.days) })));
   return (
     <SettingsCard title="Taxes & payment terms" description="Offered when creating invoices and proposals.">
@@ -422,13 +422,15 @@ export function TaxesForm({ taxes, paymentTerms }: { taxes: AppSettings["taxes"]
           <div className="flex flex-col gap-2">
             <div className="text-[13px] font-semibold text-ink-2">Tax rates</div>
             {tax.rows.map((row, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <Input aria-label="Tax name" value={row.name} maxLength={40} placeholder="e.g. GST 18%" onChange={(e) => tax.update(i, { name: e.target.value })} className="min-w-0 flex-1" />
+              <div key={i} className="flex flex-wrap items-center gap-2">
+                <Input aria-label="Tax name" value={row.name} maxLength={40} placeholder="e.g. IGST 18%" onChange={(e) => tax.update(i, { name: e.target.value })} className="min-w-40 flex-1" />
                 <Input aria-label="Rate (%)" type="number" min={0} max={100} step="any" value={row.rate} onChange={(e) => tax.update(i, { rate: e.target.value })} className="w-24" />
+                <Switch aria-label="Charged as CGST + SGST" checked={row.split} onChange={(e) => tax.update(i, { split: e.target.checked })} label="CGST + SGST" className="shrink-0" />
                 <RowTools index={i} count={tax.rows.length} label={row.name || "tax"} onMove={(d) => tax.move(i, d)} onRemove={() => tax.remove(i)} />
               </div>
             ))}
-            <AddRow label="Add tax rate" onClick={() => tax.add({ name: "", rate: "0" })} />
+            <AddRow label="Add tax rate" onClick={() => tax.add({ name: "", rate: "0", split: false })} />
+            <p className="text-xs text-muted">Rate is the total. CGST + SGST (intra-state) shows on invoices as two taxes at half the rate each; leave it off for IGST.</p>
           </div>
           <div className="flex flex-col gap-2">
             <div className="text-[13px] font-semibold text-ink-2">Payment terms</div>

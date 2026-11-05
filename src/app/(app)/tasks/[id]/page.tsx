@@ -210,7 +210,7 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
                     {subtasks.map((s) => {
                       const cur = statuses.find((x) => x.key === s.status);
                       return (
-                        <li key={s.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[10px] border border-line-soft px-3 py-2 text-sm">
+                        <li key={s.id} data-href={`/tasks/${s.id}`} className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 rounded-[10px] border border-line-soft px-3 py-2 text-sm">
                           <Link href={`/tasks/${s.id}`} className={`min-w-0 flex-1 break-words max-sm:basis-full hover:text-brand-600 ${closedKeys.includes(s.status) ? "text-muted line-through" : "text-ink"}`}>
                             <span className="mr-2 font-mono text-[11px] whitespace-nowrap text-muted no-underline">{s.taskNo}</span>
                             {s.title}

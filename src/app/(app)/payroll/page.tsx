@@ -120,7 +120,7 @@ export default async function PayrollPage({ searchParams }: { searchParams: Prom
               <EmptyRow colSpan={8}>{hasFilters ? "No runs match these filters." : prepare ? "No payroll runs yet. Create one with “New run”." : "No payroll runs yet."}</EmptyRow>
             )}
             {rows.map((r) => (
-              <Tr key={r._id}>
+              <Tr key={r._id} href={`/payroll/${r._id}`}>
                 <Td>
                   <Link href={`/payroll/${r._id}`} className="font-mono text-xs font-semibold text-brand-600 hover:text-brand-800">
                     {r.runNo}

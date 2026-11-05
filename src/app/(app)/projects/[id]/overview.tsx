@@ -376,7 +376,7 @@ export async function Overview({
                   if (!t) return null;
                   const actual = r.minutes / 60;
                   return (
-                    <div key={r.task} className="flex flex-col gap-1.5">
+                    <div key={r.task} data-href={`/tasks/${t._id}`} className="flex cursor-pointer flex-col gap-1.5">
                       <div className="flex items-center justify-between gap-3 text-[13px]">
                         <Link href={`/tasks/${t._id}`} className="min-w-0 font-medium break-words hover:text-brand-600">
                           <span className="mr-1.5 font-mono text-[11px] text-muted">{t.taskNo}</span>

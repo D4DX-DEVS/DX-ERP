@@ -23,7 +23,8 @@ export interface AttendanceMetrics {
 /**
  * Pure attendance calculation (FRS §7.1–7.2, §8.11):
  * - work = (check-out − check-in) − closed breaks − (personal movement time, if policy deducts it)
- * - late when check-in is after office start + grace; early departure when check-out is before office end − grace
+ * - late when check-in is after office start + grace; early departure when check-out is before office end − grace;
+ *   neither once the closed day's work reaches its target (flexible hours)
  * - full day ≥ fullDayMinutes, half day ≥ halfDayMinutes, otherwise absent (only once checked out)
  * - a temporary movement never ends the working day
  */
@@ -55,12 +56,14 @@ export function computeAttendance(
     workMinutes = Math.max(0, workMinutes);
   }
 
+  // Flexible hours: a closed day that reaches its target (full day, or half day on half-day leave) is neither late nor early.
+  const hoursMet = Boolean(input.checkOut) && workMinutes >= (input.onLeave === "half" ? a.halfDayMinutes : a.fullDayMinutes);
   const start = zonedDateTime(input.date, a.officeStart);
   const end = zonedDateTime(input.date, a.officeEnd);
-  const lateMinutes = input.checkIn ? Math.max(0, minutesBetween(start, input.checkIn) - a.graceMinutes) : 0;
-  const late = Boolean(input.checkIn && input.checkIn.getTime() > start.getTime() + a.graceMinutes * 60_000);
-  const earlyMinutes = input.checkOut ? Math.max(0, Math.round((end.getTime() - input.checkOut.getTime()) / 60_000) - a.earlyLeaveGraceMinutes) : 0;
-  const earlyDeparture = Boolean(input.checkOut && input.checkOut.getTime() < end.getTime() - a.earlyLeaveGraceMinutes * 60_000);
+  const late = !hoursMet && Boolean(input.checkIn && input.checkIn.getTime() > start.getTime() + a.graceMinutes * 60_000);
+  const lateMinutes = late && input.checkIn ? Math.max(0, minutesBetween(start, input.checkIn) - a.graceMinutes) : 0;
+  const earlyDeparture = !hoursMet && Boolean(input.checkOut && input.checkOut.getTime() < end.getTime() - a.earlyLeaveGraceMinutes * 60_000);
+  const earlyMinutes = earlyDeparture && input.checkOut ? Math.max(0, Math.round((end.getTime() - input.checkOut.getTime()) / 60_000) - a.earlyLeaveGraceMinutes) : 0;
 
   const cutoff = zonedDateTime(input.date, a.missingCheckoutAfter);
   const missingCheckout = Boolean(input.checkIn && !input.checkOut && now.getTime() > cutoff.getTime());

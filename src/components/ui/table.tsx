@@ -86,8 +86,9 @@ export function Th({ className, children, align = "left", ...props }: ComponentP
   );
 }
 
-export function Tr({ className, ...props }: ComponentProps<"tr">) {
-  return <tr className={cn("border-t border-line-soft align-middle hover:bg-[#fafbfe]", className)} {...props} />;
+/** `href` makes the whole row open that page (see `RowLinks`); links, buttons and controls inside keep their own action. */
+export function Tr({ className, href, ...props }: ComponentProps<"tr"> & { href?: string }) {
+  return <tr data-href={href} className={cn("border-t border-line-soft align-middle hover:bg-[#fafbfe]", href && "cursor-pointer", className)} {...props} />;
 }
 
 export function Td({ className, align = "left", ...props }: ComponentProps<"td"> & { align?: "left" | "right" | "center" }) {

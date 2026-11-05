@@ -6,11 +6,14 @@ import { CompOffClaim, Expense, LeaveRequest, Movement, Notification, Task, User
 import { buildNav } from "@/lib/nav";
 import { presenceFor } from "@/lib/presence";
 import { getSettings } from "@/lib/settings";
-import { inList, jsonHas, jsonPath, notInList } from "@/lib/sql";
+import { inList, jsonPath, notInList } from "@/lib/sql";
+import { keysInCategories, taskFilter, TASK_CLOSED_CATEGORIES } from "@/lib/work-access";
+import { assignedToTaskOrSubtask, topLevelTask } from "./tasks/_components/task-query";
 import { Sidebar, Rail } from "@/components/shell/sidebar";
 import { Topbar } from "@/components/shell/topbar";
 import { TabBar } from "@/components/shell/tab-bar";
 import { NavigationTracker } from "@/components/ui/back-link";
+import { RowLinks } from "@/components/ui/row-links";
 import type { Presence, ShellUser } from "@/components/shell/types";
 
 /** Scalar `select count(*)` subquery, so every shell count comes back in a single D1 round trip. */
@@ -19,8 +22,7 @@ const zero = sql<number>`0`;
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
-  const settings = await getSettings();
-  const doneTaskStatuses = settings.taskStatuses.filter((s) => s.category === "done" || s.category === "cancelled").map((s) => s.key);
+  const [settings, visibleTasks] = await Promise.all([getSettings(), taskFilter(user)]);
   const me = user._id;
   const awaitingApproval = inList(Movement.approvalStatus, ["pending", "correction_requested"]);
 
@@ -34,7 +36,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       leavePendingMgr: countOf(LeaveRequest, and(eq(LeaveRequest.status, "pending_manager"), eq(LeaveRequest.manager, me))),
       leavePendingHr: can(user, "leave.approve") ? countOf(LeaveRequest, and(eq(LeaveRequest.status, "pending_hr"), ne(LeaveRequest.user, me))) : zero,
       compOffPending: countOf(CompOffClaim, and(eq(CompOffClaim.status, "pending"), can(user, "leave.approve") ? ne(CompOffClaim.user, me) : eq(CompOffClaim.manager, me))),
-      myOpenTasks: countOf(Task, and(jsonHas(Task.assignees, me), notInList(Task.status, doneTaskStatuses))),
+      // Same tasks as Tasks → "Assigned to me" (top-level, visible, open), so the badge drops as soon as one is closed.
+      myOpenTasks: countOf(Task, and(visibleTasks, topLevelTask(), assignedToTaskOrSubtask(me), notInList(Task.status, keysInCategories(settings.taskStatuses, TASK_CLOSED_CATEGORIES)))),
       expensesPending: can(user, "expenses.approve") ? countOf(Expense, and(eq(Expense.status, "submitted"), ne(Expense.user, me))) : zero,
     })
     .from(User)
@@ -80,6 +83,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       </div>
       <TabBar sections={sections} user={shellUser} unread={unread} />
       <NavigationTracker />
+      <RowLinks />
     </div>
   );
 }

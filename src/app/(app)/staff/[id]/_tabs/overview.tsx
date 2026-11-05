@@ -266,7 +266,7 @@ export async function OverviewTab({
               ) : (
                 <ul className="flex flex-col gap-2.5">
                   {reports.slice(0, 8).map((r) => (
-                    <li key={r._id}>
+                    <li key={r._id} data-href={`/staff/${r._id}`} className="cursor-pointer">
                       <PersonCell name={r.name} sub={r.employeeId} photo={r.photo} href={`/staff/${r._id}`} />
                     </li>
                   ))}
@@ -293,11 +293,12 @@ export async function OverviewTab({
                 <ul className="flex flex-col">
                   {assets.map((a) => {
                     const issued = [...(a.history ?? [])].reverse().find((h) => h.user === id);
+                    const canOpen = can(user, "assets.view");
                     return (
-                      <li key={a._id} className="flex items-start gap-3 border-t border-line-soft py-2.5 first:border-t-0 first:pt-0">
+                      <li key={a._id} data-href={canOpen ? `/assets/${a._id}` : undefined} className={`flex items-start gap-3 border-t border-line-soft py-2.5 first:border-t-0 first:pt-0${canOpen ? " cursor-pointer" : ""}`}>
                         <Laptop className="mt-0.5 size-[18px] shrink-0 text-muted" aria-hidden />
                         <div className="min-w-0 flex-1">
-                          {can(user, "assets.view") ? (
+                          {canOpen ? (
                             <Link href={`/assets/${a._id}`} className="block text-sm font-semibold break-words text-ink hover:text-brand-600">
                               {a.name}
                             </Link>

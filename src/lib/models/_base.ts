@@ -102,5 +102,8 @@ export interface LineItem {
   quantity: number;
   rate: number;
   taxRate: number;
+  /** Tax chosen from Settings → Taxes, and whether it is intra-state GST (CGST + SGST, half each). Invoices only. */
+  taxName?: string;
+  taxSplit?: boolean;
   amount: number;
 }

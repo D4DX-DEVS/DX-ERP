@@ -57,7 +57,7 @@ export async function MyMovementsCard({ userId }: { userId: string }) {
             const missing = state === "missing_in";
             const overdue = state === "overdue";
             return (
-              <li key={m._id} className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line-soft px-5 py-3">
+              <li key={m._id} data-href={`/movement/${m._id}`} className="flex cursor-pointer flex-wrap items-center gap-x-4 gap-y-1 border-t border-line-soft px-5 py-3">
                 <span className="w-16 shrink-0 text-[13px] font-semibold text-ink">{fmtDate(m.date, "EEE d MMM")}</span>
                 <span className="min-w-40 flex-1">
                   <Link href={`/movement/${m._id}`} className="block truncate text-[13px] font-medium text-ink hover:text-brand-600">

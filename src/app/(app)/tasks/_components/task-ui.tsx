@@ -28,7 +28,7 @@ export function TaskTable({ rows, statuses, showProject = true, empty = "No task
         {rows.map((r) => {
           const { current, choices } = choicesFor(r, statuses);
           return (
-            <Tr key={r.id}>
+            <Tr key={r.id} href={`/tasks/${r.id}`}>
               <Td className="max-w-[380px]">
                 <Link href={`/tasks/${r.id}`} className="block min-w-0 hover:text-brand-600">
                   <span className="flex items-center gap-2 font-semibold">

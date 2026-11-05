@@ -44,7 +44,7 @@ export async function OutOfOfficeCard({ showPersonal }: { showPersonal: boolean 
               const visible = r.official || showPersonal;
               const state = STATE[r.state];
               return (
-                <Tr key={r.id}>
+                <Tr key={r.id} href={`/movement/${r.id}`}>
                   <Td>
                     <PersonCell name={person?.name ?? "Unknown"} sub={person?.designation} href={`/movement/${r.id}`} />
                   </Td>

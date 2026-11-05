@@ -234,7 +234,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
               const isOverdue = status === "overdue";
               const ref = [r.items[0]?.description, r.project ? projectNo.get(r.project) : undefined].filter(Boolean).join(" · ");
               return (
-                <Tr key={r._id}>
+                <Tr key={r._id} href={`/invoices/${r._id}`}>
                   <Td>
                     <Link href={`/invoices/${r._id}`} className="font-mono text-xs font-semibold text-brand-600 hover:text-brand-800">
                       {r.invoiceNo ?? r.draftNo}

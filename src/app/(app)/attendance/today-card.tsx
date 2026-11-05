@@ -195,7 +195,7 @@ export async function TodayAttendanceCard({ userId }: { userId: string }) {
       <div className="flex min-w-0 flex-[1_1_260px] flex-col gap-2.5 md:border-l md:border-line-soft md:pl-6">
         <div className="flex items-center justify-between">
           <div className="text-[13px] font-semibold text-ink-2">This week</div>
-          <Link href="/attendance" className="text-xs font-semibold text-brand-600 hover:text-brand-800">
+          <Link href="/attendance#month" className="text-xs font-semibold text-brand-600 hover:text-brand-800">
             Month view →
           </Link>
         </div>

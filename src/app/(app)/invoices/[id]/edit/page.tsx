@@ -34,7 +34,7 @@ export default async function EditInvoicePage({ params }: { params: Promise<{ id
     placeOfSupply: inv.placeOfSupply ?? "",
     notes: inv.notes ?? "",
     terms: inv.terms ?? "",
-    items: inv.items.map((i) => ({ description: i.description, quantity: String(i.quantity), rate: String(i.rate), taxRate: String(i.taxRate) })),
+    items: inv.items.map((i) => ({ description: i.description, quantity: String(i.quantity), rate: String(i.rate), tax: i.taxName ?? "", taxRate: i.taxRate, taxSplit: i.taxSplit })),
   };
 
   return (

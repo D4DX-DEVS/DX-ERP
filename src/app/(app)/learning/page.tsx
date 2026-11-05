@@ -302,7 +302,7 @@ async function MatrixView() {
                 );
               });
               return (
-                <Tr key={pid}>
+                <Tr key={pid} href={`/interns/${pid}`}>
                   <Td>
                     <PersonCell name={p.name} sub={p.employeeId} photo={p.photo ?? undefined} href={`/interns/${pid}`} />
                   </Td>

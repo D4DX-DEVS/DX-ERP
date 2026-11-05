@@ -16,7 +16,7 @@ import { buttonClass, ButtonLink } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/chip";
 import { cn } from "@/lib/cn";
 import { canSeeClient } from "@/app/(app)/crm/_lib/access";
-import { computeTotals, effectiveStatus } from "../totals";
+import { computeTotals, effectiveStatus, lineTaxLabel } from "../totals";
 import { AdjustmentDialog, CancelInvoiceButton, DeleteDraftButton, IssueInvoiceButton, RecordPaymentDialog, RefundDialog } from "../invoice-actions";
 
 export const metadata = { title: "Invoice" };
@@ -207,7 +207,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                     <td className="py-3 pr-2 break-words whitespace-pre-line">{i.description}</td>
                     <td className="px-2 py-3 text-right tabular">{i.quantity}</td>
                     <td className="px-2 py-3 text-right tabular">{inr(i.rate, true)}</td>
-                    <td className="px-2 py-3 text-right tabular">{i.taxRate ? `${i.taxRate}%` : "—"}</td>
+                    <td className="px-2 py-3 text-right tabular">{lineTaxLabel(i) ?? "—"}</td>
                     <td className="py-3 pl-2 text-right tabular">{inr(i.amount, true)}</td>
                   </tr>
                 ))}
@@ -219,8 +219,8 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
             <dl className="flex w-full max-w-[320px] flex-col gap-1.5 text-[13px]">
               <Row label="Subtotal" value={inr(inv.subtotal, true)} />
               {inv.discount > 0 && <Row label="Discount" value={`−${inr(inv.discount, true)}`} />}
-              {totals.taxByRate.map((t) => (
-                <Row key={t.rate} label={`Tax @ ${t.rate}%`} value={inr(t.amount, true)} />
+              {totals.taxLines.map((t) => (
+                <Row key={t.label} label={t.label} value={inr(t.amount, true)} />
               ))}
               <div className="mt-1 flex justify-between border-t border-line pt-2 text-[15px] font-bold">
                 <dt>Total</dt>
