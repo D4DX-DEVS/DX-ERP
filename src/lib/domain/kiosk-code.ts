@@ -135,3 +135,29 @@ export function readNetworkToken(secret: string, token: unknown, now: number): s
   const [net, expires] = Buffer.from(payload, "base64url").toString().split("|");
   return net && Number(expires) >= now ? net : null;
 }
+
+function lanSignature(secret: string, kiosk: KioskCodeKey, window: number): string {
+  return createHmac("sha256", secret).update(`lan|${kiosk._id}|${kiosk.codeSalt}|${window}`).digest("base64url").slice(0, 22);
+}
+
+/**
+ * Secret a QR screen hands to phones over the local Wi-Fi handshake (`window.sig`, changes every minute). Never
+ * shown in the QR, so holding it shows the phone reached the screen directly on the local network.
+ */
+export function lanProofFor(secret: string, kiosk: KioskCodeKey, now: number): string {
+  const window = codeWindow(now);
+  return `${window}.${lanSignature(secret, kiosk, window)}`;
+}
+
+/** The proof is this screen's, from this minute or the previous one. */
+export function lanProofValid(secret: string, kiosk: KioskCodeKey, proof: unknown, now: number): boolean {
+  if (typeof proof !== "string") return false;
+  const m = /^(\d{1,12})\.([A-Za-z0-9_-]{22})$/.exec(proof);
+  if (!m) return false;
+  const window = Number(m[1]);
+  const current = codeWindow(now);
+  if (window !== current && window !== current - 1) return false;
+  const expected = Buffer.from(lanSignature(secret, kiosk, window));
+  const given = Buffer.from(m[2]);
+  return expected.length === given.length && timingSafeEqual(expected, given);
+}

@@ -43,6 +43,13 @@
       "when": 1793807594601,
       "tag": "0005_attendance_kiosks",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1793860764998,
+      "tag": "0006_kiosk_lan_signals",
+      "breakpoints": true
     }
   ]
 }

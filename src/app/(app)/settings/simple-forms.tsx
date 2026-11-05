@@ -152,7 +152,7 @@ export function AttendanceForm({ attendance }: { attendance: AppSettings["attend
             name="qrSameNetwork"
             defaultChecked={attendance.qrSameNetwork}
             label="Phone must be on the same network as the QR screen"
-            description="Blocks scans of forwarded photos: staff must be on the office Wi-Fi. Check “Your connection” below before turning this on."
+            description="Blocks scans of forwarded photos: the phone connects to the QR screen directly over the office Wi-Fi (works across IPv4 / IPv6). Where the Wi-Fi keeps devices apart, its internet address must match the screen's or an allowed office network below."
           />
           <Switch name="officialMovementCountsAsWork" defaultChecked={attendance.officialMovementCountsAsWork} label="Official movements count as working time" description="Time out of the office for official purposes is not deducted." />
           <Switch name="personalMovementDeducted" defaultChecked={attendance.personalMovementDeducted} label="Deduct personal movement time" description="Time out for personal reasons is deducted from working hours." />

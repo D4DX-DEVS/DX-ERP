@@ -1,5 +1,5 @@
 import { index, sqliteTable, uniqueIndex } from "drizzle-orm/sqlite-core";
-import { bool, date, int, json, pk, ref, text, timestamps, type HistoryEntry, type Id } from "./_base";
+import { bool, createdAt, date, int, json, pk, ref, text, timestamps, type HistoryEntry, type Id } from "./_base";
 
 export type AttendanceStatus = "present" | "half_day" | "absent" | "on_leave" | "holiday" | "weekend";
 
@@ -103,3 +103,20 @@ export const AttendanceKiosk = sqliteTable(
   (t) => [uniqueIndex("attendance_kiosks_token").on(t.tokenHash)],
 );
 export type IAttendanceKiosk = typeof AttendanceKiosk.$inferSelect;
+
+/**
+ * Local Wi-Fi handshake between a phone and a QR screen (WebRTC offer from the phone, answer from the screen).
+ * Short-lived: a user's previous row is replaced by each new one, and rows older than a few minutes are purged.
+ */
+export const KioskLanSignal = sqliteTable(
+  "kiosk_lan_signals",
+  {
+    _id: pk(),
+    kiosk: ref().notNull(),
+    user: ref().notNull(),
+    offer: text().notNull(),
+    answer: text(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("kiosk_lan_signals_kiosk").on(t.kiosk, t.createdAt), index("kiosk_lan_signals_user").on(t.user)],
+);

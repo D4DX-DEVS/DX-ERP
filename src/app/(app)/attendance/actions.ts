@@ -8,7 +8,7 @@ import { audit, diff } from "@/lib/audit";
 import { can, isStaff, type CurrentUser } from "@/lib/auth/session";
 import { recalcAttendanceDay } from "@/lib/domain/attendance-calc";
 import { workCalendar } from "@/lib/domain/calendar";
-import { requireKioskScan } from "@/lib/domain/kiosk";
+import { requireKioskScan, startLanSignal } from "@/lib/domain/kiosk";
 import { db } from "@/lib/db";
 import { Attendance, AttendanceCorrection, LeaveRequest, Movement, User, newId, type IAttendance, type IAttendanceCorrection } from "@/lib/models";
 import { managerOf, notify, usersWithPermission } from "@/lib/notify";
@@ -70,14 +70,14 @@ function span(checkIn?: Date | null, checkOut?: Date | null): string {
 
 /**
  * `code`: the QR scanned from an office screen — required while QR check-in is on (Settings → Attendance).
- * `network`: token from /api/kiosk/network, for the same-network rule.
+ * `proof`: for the same-network rule, `{ lan, network }` (see `ScanProof` in lib/domain/kiosk).
  */
-export async function checkIn(code?: unknown, network?: unknown): Promise<ActionResult<null>> {
+export async function checkIn(code?: unknown, proof?: unknown): Promise<ActionResult<null>> {
   return runAction(async () => {
     const user = await staffUser();
     const settings = await getSettings();
     if (!settings.attendance.allowSelfCheckIn) throw new ActionError("Self check-in is turned off. Ask HR to record your attendance.");
-    const screen = await requireKioskScan(settings, code, network, "check in", user);
+    const screen = await requireKioskScan(settings, code, proof, "check in", user);
     const today = todayKey();
     const [leave] = await db()
       .select({ startDate: LeaveRequest.startDate, endDate: LeaveRequest.endDate })
@@ -120,10 +120,10 @@ export async function checkIn(code?: unknown, network?: unknown): Promise<Action
   }, "Checked in");
 }
 
-export async function checkOut(code?: unknown, network?: unknown): Promise<ActionResult<null>> {
+export async function checkOut(code?: unknown, proof?: unknown): Promise<ActionResult<null>> {
   return runAction(async () => {
     const user = await staffUser();
-    const screen = await requireKioskScan(await getSettings(), code, network, "check out", user);
+    const screen = await requireKioskScan(await getSettings(), code, proof, "check out", user);
     const today = todayKey();
     const att = await dayOf(user._id, today);
     if (!att?.checkIn) {
@@ -159,6 +159,17 @@ export async function checkOut(code?: unknown, network?: unknown): Promise<Actio
     await recalcAttendanceDay(user._id, today);
     return null;
   }, "Checked out");
+}
+
+/**
+ * Starts the local Wi-Fi handshake with the screen behind a scanned code: stores the phone's WebRTC offer and returns
+ * a token to poll for the screen's answer on the Worker's own host.
+ */
+export async function startLanCheck(code: unknown, sdp: unknown, mode: unknown): Promise<ActionResult<{ id: string; token: string }>> {
+  return runAction(async () => {
+    const user = await staffUser();
+    return startLanSignal(code, sdp, user, mode === "out" ? "check out" : "check in");
+  });
 }
 
 async function openDay(user: CurrentUser) {

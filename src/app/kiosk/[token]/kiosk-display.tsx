@@ -5,6 +5,7 @@ import Image from "next/image";
 import QRCode from "qrcode";
 import { Loader2, WifiOff } from "lucide-react";
 import { useNow } from "@/components/ui/use-now";
+import { serveLocalNetworkProofs, type LanHub } from "@/lib/lan-handshake";
 import { fetchNetworkToken } from "@/lib/network-token";
 import { fmtLongDate, fmtTime } from "@/lib/time";
 
@@ -28,6 +29,9 @@ export function KioskDisplay({ networkOrigin }: { networkOrigin: string }) {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let build: string | undefined;
+    // Token and secret for answering phones' local Wi-Fi handshakes, refreshed with every code.
+    let hub: LanHub | null = null;
+    const stopServing = serveLocalNetworkProofs(() => hub);
     const load = async () => {
       clearTimeout(timer);
       let next = RETRY_MS;
@@ -35,7 +39,7 @@ export function KioskDisplay({ networkOrigin }: { networkOrigin: string }) {
         const network = (await fetchNetworkToken(networkOrigin))?.token;
         const sent = Date.now();
         const res = await fetch(`/api/kiosk/code${network ? `?network=${encodeURIComponent(network)}` : ""}`, { cache: "no-store" });
-        const body = (await res.json()) as { name: string; code: string; expiresAt: number; serverNow: number; build: string; error?: string };
+        const body = (await res.json()) as { name: string; code: string; expiresAt: number; serverNow: number; build: string; lan: string; hub: string; error?: string };
         const received = Date.now();
         if (stopped) return;
         if (res.status === 401) {
@@ -46,6 +50,7 @@ export function KioskDisplay({ networkOrigin }: { networkOrigin: string }) {
         // The screen runs unattended: pick up a new deploy by itself.
         if (build && body.build !== build) return window.location.reload();
         build = body.build;
+        hub = { origin: networkOrigin, token: body.hub, secret: body.lan };
         const svg = await QRCode.toString(body.code, { type: "svg", margin: 2, errorCorrectionLevel: "M", color: { dark: "#0a1450", light: "#ffffff" } });
         if (stopped) return;
         // Server clock − local clock, taking the server's reading as the middle of the round trip.
@@ -66,6 +71,7 @@ export function KioskDisplay({ networkOrigin }: { networkOrigin: string }) {
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       stopped = true;
+      stopServing();
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
