@@ -68,13 +68,16 @@ function span(checkIn?: Date | null, checkOut?: Date | null): string {
 /* Self service: check-in / check-out / breaks (FRS §7.1)              */
 /* ------------------------------------------------------------------ */
 
-/** `code`: the QR scanned from an office screen — required while QR check-in is on (Settings → Attendance). */
-export async function checkIn(code?: unknown): Promise<ActionResult<null>> {
+/**
+ * `code`: the QR scanned from an office screen — required while QR check-in is on (Settings → Attendance).
+ * `network`: token from /api/kiosk/network, for the same-network rule.
+ */
+export async function checkIn(code?: unknown, network?: unknown): Promise<ActionResult<null>> {
   return runAction(async () => {
     const user = await staffUser();
     const settings = await getSettings();
     if (!settings.attendance.allowSelfCheckIn) throw new ActionError("Self check-in is turned off. Ask HR to record your attendance.");
-    const screen = await requireKioskScan(settings, code, "check in");
+    const screen = await requireKioskScan(settings, code, network, "check in");
     const today = todayKey();
     const [leave] = await db()
       .select({ startDate: LeaveRequest.startDate, endDate: LeaveRequest.endDate })
@@ -117,10 +120,10 @@ export async function checkIn(code?: unknown): Promise<ActionResult<null>> {
   }, "Checked in");
 }
 
-export async function checkOut(code?: unknown): Promise<ActionResult<null>> {
+export async function checkOut(code?: unknown, network?: unknown): Promise<ActionResult<null>> {
   return runAction(async () => {
     const user = await staffUser();
-    const screen = await requireKioskScan(await getSettings(), code, "check out");
+    const screen = await requireKioskScan(await getSettings(), code, network, "check out");
     const today = todayKey();
     const att = await dayOf(user._id, today);
     if (!att?.checkIn) {

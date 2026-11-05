@@ -8,7 +8,8 @@ import type { AppSettings } from "@/lib/config-defaults";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { AttendanceKiosk, type IAttendanceKiosk } from "@/lib/models";
-import { networkOf, parseKioskCode, sigMatches, windowAccepted } from "./kiosk-code";
+import { directOrigin } from "@/lib/proxy-hosts";
+import { networkOf, parseKioskCode, readNetworkToken, sigMatches, windowAccepted } from "./kiosk-code";
 
 const KIOSK_AUDIENCE = "kiosk";
 /** Chrome caps cookie lifetimes at 400 days; the code endpoint renews the cookie weekly. */
@@ -19,10 +20,25 @@ const NETWORK_TTL_MS = 24 * 3_600_000;
 
 type KioskClaims = { kid: string; did: string; iat?: number };
 
-/** Network of the current request's client (Cloudflare's connecting IP first). */
+/**
+ * Network of the current request's client (Cloudflare's connecting IP first). Null when unknown — in particular
+ * for requests forwarded by another Worker (the erp.d4dx.co proxy), which carry the proxy's address instead.
+ */
 export async function clientNetwork(): Promise<string | null> {
   const h = await headers();
+  if (h.get("cf-worker")) return null;
   return networkOf(h.get("cf-connecting-ip") || h.get("x-real-ip") || h.get("x-forwarded-for")?.split(",")[0]);
+}
+
+/** Where pages fetch a network token (`/api/kiosk/network`): the Worker's direct host when reached through a proxy. */
+export async function networkCheckOrigin(): Promise<string> {
+  const h = await headers();
+  return directOrigin(h.get("host"), h.get("x-forwarded-host"));
+}
+
+/** Network proven by a token from `/api/kiosk/network`, else the request's own (when not proxied). */
+export async function provenNetwork(token: unknown): Promise<string | null> {
+  return readNetworkToken(env.authSecret, token, Date.now()) ?? (await clientNetwork());
 }
 
 /** Signed cookie that binds a screen to the browser that activated it. */
@@ -47,7 +63,7 @@ const codeSchema = z.string().trim().min(1).max(200);
  * With QR check-in on, a check-in / check-out needs a code scanned from an office screen within its minute.
  * Returns the screen's name, or null when QR check-in is off.
  */
-export async function requireKioskScan(settings: AppSettings, code: unknown, action: "check in" | "check out"): Promise<string | null> {
+export async function requireKioskScan(settings: AppSettings, code: unknown, network: unknown, action: "check in" | "check out"): Promise<string | null> {
   if (!settings.attendance.qrCheckIn) return null;
   const input = codeSchema.safeParse(code);
   if (!input.success) throw new ActionError(`Scan the QR code on the office attendance screen to ${action}.`);
@@ -62,7 +78,8 @@ export async function requireKioskScan(settings: AppSettings, code: unknown, act
     .limit(1);
   if (!kiosk?.deviceId || !sigMatches(env.authSecret, kiosk, parsed)) throw new ActionError("This QR code is no longer valid. Scan the code on the office screen.");
   if (settings.attendance.qrSameNetwork) {
-    const net = await clientNetwork();
+    // Fails closed: an unknown network never passes.
+    const net = await provenNetwork(network);
     const onNetwork = net && kiosk.networks.some((n) => n.net === net && now - n.at.getTime() <= NETWORK_TTL_MS);
     if (!onNetwork) throw new ActionError("Connect your phone to the office Wi-Fi and scan again.");
   }

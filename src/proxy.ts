@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, verifyToken } from "@/lib/auth/token";
+import { directOrigin } from "@/lib/proxy-hosts";
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -27,7 +28,7 @@ function imageOrigins(): string {
  * column rules), next/font and sonner inject `<style>` elements, and a nonce there would be ignored by browsers
  * once `'unsafe-inline'` is also present. Fonts are self-hosted by next/font; images come from R2 / Google.
  */
-function contentSecurityPolicy(nonce: string): string {
+function contentSecurityPolicy(nonce: string, directOrigin: string): string {
   return [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
@@ -36,7 +37,8 @@ function contentSecurityPolicy(nonce: string): string {
     "font-src 'self' data:",
     // The service worker (/sw.js); 'strict-dynamic' above would otherwise ignore 'self' for it.
     "worker-src 'self'",
-    `connect-src 'self'${isDev ? " ws: wss:" : ""}`,
+    // directOrigin: the Worker's own host, for network tokens when the page is served through the erp.d4dx.co proxy.
+    `connect-src 'self'${directOrigin ? ` ${directOrigin}` : ""}${isDev ? " ws: wss:" : ""}`,
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
@@ -53,7 +55,7 @@ function contentSecurityPolicy(nonce: string): string {
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
-  const csp = contentSecurityPolicy(nonce);
+  const csp = contentSecurityPolicy(nonce, directOrigin(request.headers.get("host"), request.headers.get("x-forwarded-host")));
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("Content-Security-Policy", csp);

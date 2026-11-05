@@ -5,6 +5,7 @@ import Image from "next/image";
 import QRCode from "qrcode";
 import { Loader2, WifiOff } from "lucide-react";
 import { useNow } from "@/components/ui/use-now";
+import { fetchNetworkToken } from "@/lib/network-token";
 import { fmtLongDate, fmtTime } from "@/lib/time";
 
 type Screen =
@@ -15,21 +16,26 @@ type Screen =
 
 const RETRY_MS = 5_000;
 
-/** Full-screen rotating attendance QR: fetches a fresh code at every minute boundary and keeps the display awake. */
-export function KioskDisplay() {
+/**
+ * Full-screen rotating attendance QR: fetches a fresh code at every minute boundary and keeps the display awake.
+ * Each poll carries a token proving this computer's network (from `networkOrigin`), for the same-network rule.
+ */
+export function KioskDisplay({ networkOrigin }: { networkOrigin: string }) {
   const [screen, setScreen] = useState<Screen>({ status: "loading" });
   const now = useNow(1000);
 
   useEffect(() => {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let build: string | undefined;
     const load = async () => {
       clearTimeout(timer);
       let next = RETRY_MS;
       try {
+        const network = (await fetchNetworkToken(networkOrigin))?.token;
         const sent = Date.now();
-        const res = await fetch("/api/kiosk/code", { cache: "no-store" });
-        const body = (await res.json()) as { name: string; code: string; expiresAt: number; serverNow: number; error?: string };
+        const res = await fetch(`/api/kiosk/code${network ? `?network=${encodeURIComponent(network)}` : ""}`, { cache: "no-store" });
+        const body = (await res.json()) as { name: string; code: string; expiresAt: number; serverNow: number; build: string; error?: string };
         const received = Date.now();
         if (stopped) return;
         if (res.status === 401) {
@@ -37,6 +43,9 @@ export function KioskDisplay() {
           return;
         }
         if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+        // The screen runs unattended: pick up a new deploy by itself.
+        if (build && body.build !== build) return window.location.reload();
+        build = body.build;
         const svg = await QRCode.toString(body.code, { type: "svg", margin: 2, errorCorrectionLevel: "M", color: { dark: "#0a1450", light: "#ffffff" } });
         if (stopped) return;
         // Server clock − local clock, taking the server's reading as the middle of the round trip.
@@ -60,7 +69,7 @@ export function KioskDisplay() {
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, []);
+  }, [networkOrigin]);
 
   // Keep the office screen from dimming or sleeping while it shows the code.
   useEffect(() => {

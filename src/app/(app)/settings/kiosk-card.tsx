@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Copy, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { ActionButton } from "@/components/ui/actions";
@@ -11,6 +11,7 @@ import { Field } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { EmptyRow, TableWrap, THead, Td, Th, Tr } from "@/components/ui/table";
 import type { Tone } from "@/lib/config-defaults";
+import { fetchNetworkToken } from "@/lib/network-token";
 import { createKiosk, deleteKiosk, renewKioskLink } from "./kiosk-actions";
 import { FormDialog, SettingsCard } from "./ui";
 
@@ -28,8 +29,19 @@ function AddButton(props: ButtonProps) {
 }
 
 /** Office computers that show the rotating attendance QR (Settings → Attendance). */
-export function KioskCard({ screens, yourNetwork }: { screens: KioskView[]; yourNetwork: string | null }) {
+export function KioskCard({ screens, networkOrigin }: { screens: KioskView[]; networkOrigin: string }) {
   const [link, setLink] = useState<string | null>(null);
+  // Measured the way phones and screens are (a network token), so it shows what the same-network rule compares.
+  const [yourNetwork, setYourNetwork] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    let alive = true;
+    void fetchNetworkToken(networkOrigin).then((r) => {
+      if (alive) setYourNetwork(r?.net ?? null);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [networkOrigin]);
   const show = (data: { path: string }) => setLink(window.location.origin + data.path);
 
   return (
@@ -97,7 +109,7 @@ export function KioskCard({ screens, yourNetwork }: { screens: KioskView[]; your
         </tbody>
       </TableWrap>
       <p className="mt-3 text-xs text-muted">
-        Your connection: <span className="font-mono text-ink-2">{yourNetwork ?? "unknown"}</span>. With the same-network rule on, a phone&apos;s network must match one of the screen&apos;s.
+        Your connection: <span className="font-mono text-ink-2">{yourNetwork === undefined ? "checking…" : (yourNetwork ?? "unknown")}</span>. With the same-network rule on, a phone&apos;s network must match one of the screen&apos;s.
       </p>
 
       <Dialog open={link !== null} onOpenChange={(o) => !o && setLink(null)} title="Screen link" description="Shown only once. Create a new link if you lose it." size="md">

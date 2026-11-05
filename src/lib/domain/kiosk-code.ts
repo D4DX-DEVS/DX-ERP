@@ -13,6 +13,10 @@ export const CODE_GRACE_MS = 10_000;
 const PREFIX = "DXA1";
 const CODE_PATTERN = /^DXA1\.([0-9a-f]{24})\.(\d{1,12})\.([A-Za-z0-9_-]{22})$/;
 const MAX_NETWORKS = 5;
+/** A network token proves the caller's network for this long. */
+export const NETWORK_TOKEN_MS = 2 * 60_000;
+/** Source address of requests forwarded by another Cloudflare Worker (the erp.d4dx.co proxy) — never a client's. */
+const WORKER_EGRESS_PREFIX = "2a06:98c0:3600:";
 
 export interface KioskCodeKey {
   _id: string;
@@ -72,7 +76,8 @@ export function hashKioskToken(token: string): string {
 
 /**
  * Network of a client IP: IPv4 as-is, IPv6 as its /64 prefix (devices on one LAN share it, each with its own
- * address). IPv4-mapped IPv6 counts as IPv4. Null when the value is not an IP.
+ * address). IPv4-mapped IPv6 counts as IPv4. Null when the value is not an IP, or is a Cloudflare Worker's
+ * forwarding address.
  */
 export function networkOf(ip: string | null | undefined): string | null {
   const value = ip?.trim().replace(/^\[|\]$/g, "").split("%")[0].toLowerCase();
@@ -87,14 +92,40 @@ export function networkOf(ip: string | null | undefined): string | null {
   if (halves.length === 2 ? missing < 1 : missing !== 0) return null;
   const groups = [...left, ...Array<string>(halves.length === 2 ? missing : 0).fill("0"), ...right];
   if (!groups.every((g) => /^[0-9a-f]{1,4}$/.test(g))) return null;
-  return `${groups
+  const net = `${groups
     .slice(0, 4)
     .map((g) => g.replace(/^0+(?=.)/, ""))
     .join(":")}::/64`;
+  return net.startsWith(WORKER_EGRESS_PREFIX) ? null : net;
 }
 
-/** Adds a sighting of the screen's network (newest first, distinct, at most five). */
+/** Adds a sighting of the screen's network (newest first, distinct, at most five; proxy addresses dropped). */
 export function withNetwork(networks: KioskNetwork[], net: string | null, at: Date): KioskNetwork[] {
-  if (!net) return networks;
-  return [{ net, at }, ...networks.filter((n) => n.net !== net)].slice(0, MAX_NETWORKS);
+  const kept = networks.filter((n) => n.net !== net && !n.net.startsWith(WORKER_EGRESS_PREFIX));
+  return (net ? [{ net, at }, ...kept] : kept).slice(0, MAX_NETWORKS);
+}
+
+function networkSignature(secret: string, payload: string): string {
+  return createHmac("sha256", secret).update(`network|${payload}`).digest("base64url").slice(0, 22);
+}
+
+/**
+ * Signed proof of a caller's network, issued where the Worker sees the real client address (its direct host).
+ * Lets requests that arrive through the erp.d4dx.co proxy — which hides that address — still be checked.
+ */
+export function signNetworkToken(secret: string, net: string, now: number): string {
+  const payload = Buffer.from(`${net}|${now + NETWORK_TOKEN_MS}`).toString("base64url");
+  return `${payload}.${networkSignature(secret, payload)}`;
+}
+
+/** The network a token proves, or null when it is missing, forged or expired. */
+export function readNetworkToken(secret: string, token: unknown, now: number): string | null {
+  if (typeof token !== "string" || token.length > 300) return null;
+  const [payload, sig, extra] = token.split(".");
+  if (!payload || !sig || extra !== undefined) return null;
+  const expected = Buffer.from(networkSignature(secret, payload));
+  const given = Buffer.from(sig);
+  if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
+  const [net, expires] = Buffer.from(payload, "base64url").toString().split("|");
+  return net && Number(expires) >= now ? net : null;
 }

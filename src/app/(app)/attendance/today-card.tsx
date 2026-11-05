@@ -5,6 +5,7 @@ import { Chip } from "@/components/ui/chip";
 import { Progress } from "@/components/ui/page";
 import type { Tone } from "@/lib/config-defaults";
 import { db } from "@/lib/db";
+import { networkCheckOrigin } from "@/lib/domain/kiosk";
 import { Attendance, Holiday, LeaveRequest, Movement } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
 import { inList } from "@/lib/sql";
@@ -115,6 +116,7 @@ export async function TodayAttendanceCard({ userId }: { userId: string }) {
   const expectedOut = att?.checkIn ? new Date(att.checkIn.getTime() + (a.fullDayMinutes + breakSoFar) * 60_000) : null;
   const graceEnd = minutesToHm(hmToMinutes(a.officeStart) + a.graceMinutes);
   const pct = a.fullDayMinutes > 0 ? (worked / a.fullDayMinutes) * 100 : 0;
+  const networkOrigin = a.qrCheckIn && a.qrSameNetwork ? await networkCheckOrigin() : null;
 
   // Primary status chip (design: "Present · on time") + presence chip (In office / Out / On break / Checked out).
   let primary: { label: string; tone: Tone };
@@ -188,7 +190,13 @@ export async function TodayAttendanceCard({ userId }: { userId: string }) {
           </div>
         )}
 
-        <TodayActions state={state} openMovementId={openMovement?._id} unavailableNote={note} qr={a.qrCheckIn} />
+        <TodayActions
+          state={state}
+          openMovementId={openMovement?._id}
+          unavailableNote={note}
+          qr={a.qrCheckIn}
+          networkOrigin={networkOrigin}
+        />
         {state === "can_check_in" && (holiday || cls.key === "weekend") && <p className="text-xs text-muted">Today is a {holiday ? "holiday" : "weekend"}. Check in only if you are working.</p>}
       </div>
 

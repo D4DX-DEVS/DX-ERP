@@ -9,10 +9,14 @@ import { Dialog } from "@/components/ui/dialog";
 import { Alert } from "@/components/ui/page";
 import { QrScanner } from "@/components/ui/qr-scanner";
 import type { ActionResult } from "@/lib/action-result";
+import { fetchNetworkToken } from "@/lib/network-token";
 import { checkIn, checkOut } from "../actions";
 
-/** Check in / Check out by scanning the rotating QR on the office attendance screen. */
-export function ScanDialog({ mode }: { mode: "in" | "out" }) {
+/**
+ * Check in / Check out by scanning the rotating QR on the office attendance screen. `networkOrigin` (set while
+ * the same-network rule is on): where to fetch this phone's network token, sent along with the code.
+ */
+export function ScanDialog({ mode, networkOrigin }: { mode: "in" | "out"; networkOrigin?: string | null }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -36,7 +40,8 @@ export function ScanDialog({ mode }: { mode: "in" | "out" }) {
     setBusy(true);
     let result: ActionResult<null>;
     try {
-      result = mode === "in" ? await checkIn(code) : await checkOut(code);
+      const network = networkOrigin == null ? undefined : (await fetchNetworkToken(networkOrigin))?.token;
+      result = mode === "in" ? await checkIn(code, network) : await checkOut(code, network);
     } catch {
       result = { ok: false, error: "Could not reach the server. Check your connection, then close and scan again." };
     }

@@ -8,7 +8,7 @@ import { db } from "@/lib/db";
 import { fiscalYear } from "@/lib/counters";
 import { env } from "@/lib/env";
 import { cn } from "@/lib/cn";
-import { clientNetwork, kioskStatus } from "@/lib/domain/kiosk";
+import { kioskStatus, networkCheckOrigin } from "@/lib/domain/kiosk";
 import { Asset, AttendanceKiosk, Backup, Department, Designation, Expense, Holiday, Lead, LeaveBalance, LeaveRequest, LeaveType, StoredFile, User } from "@/lib/models";
 import { namesFor, peopleOptions } from "@/lib/people";
 import { param, type SearchParams } from "@/lib/query";
@@ -145,7 +145,7 @@ async function SectionBody({ section, sp, user }: { section: string; sp: SearchP
               lastSeen: s.deviceId ? `Last seen ${timeAgo(s.lastSeenAt)}` : "Link not opened yet",
               networks: s.networks.map((n) => n.net),
             }))}
-            yourNetwork={await clientNetwork()}
+            networkOrigin={await networkCheckOrigin()}
           />
         </>
       );
