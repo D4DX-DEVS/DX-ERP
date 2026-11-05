@@ -8,7 +8,7 @@ import { db } from "@/lib/db";
 import { fiscalYear } from "@/lib/counters";
 import { env } from "@/lib/env";
 import { cn } from "@/lib/cn";
-import { kioskStatus, networkCheckOrigin } from "@/lib/domain/kiosk";
+import { kioskStatus, networkCheckOrigin, recentScanRefusals } from "@/lib/domain/kiosk";
 import { Asset, AttendanceKiosk, Backup, Department, Designation, Expense, Holiday, Lead, LeaveBalance, LeaveRequest, LeaveType, StoredFile, User } from "@/lib/models";
 import { namesFor, peopleOptions } from "@/lib/people";
 import { param, type SearchParams } from "@/lib/query";
@@ -130,10 +130,14 @@ async function SectionBody({ section, sp, user }: { section: string; sp: SearchP
     }
 
     case "attendance": {
-      const screens = await db()
-        .select({ _id: AttendanceKiosk._id, name: AttendanceKiosk.name, deviceId: AttendanceKiosk.deviceId, lastSeenAt: AttendanceKiosk.lastSeenAt, networks: AttendanceKiosk.networks })
-        .from(AttendanceKiosk)
-        .orderBy(asc(AttendanceKiosk.createdAt));
+      const [screens, refusals] = await Promise.all([
+        db()
+          .select({ _id: AttendanceKiosk._id, name: AttendanceKiosk.name, deviceId: AttendanceKiosk.deviceId, lastSeenAt: AttendanceKiosk.lastSeenAt, networks: AttendanceKiosk.networks })
+          .from(AttendanceKiosk)
+          .orderBy(asc(AttendanceKiosk.createdAt)),
+        recentScanRefusals(),
+      ]);
+      const officeNetworks = settings.attendance.qrOfficeNetworks;
       return (
         <>
           <AttendanceForm key={stamp(settings.attendance)} attendance={settings.attendance} />
@@ -146,6 +150,8 @@ async function SectionBody({ section, sp, user }: { section: string; sp: SearchP
               networks: s.networks.map((n) => n.net),
             }))}
             networkOrigin={await networkCheckOrigin()}
+            officeNetworks={officeNetworks}
+            refused={refusals.filter((r) => !officeNetworks.includes(r.net)).map((r) => ({ net: r.net, count: r.count, last: timeAgo(r.last), names: r.names }))}
           />
         </>
       );

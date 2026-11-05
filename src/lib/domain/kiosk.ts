@@ -1,13 +1,15 @@
 import "server-only";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, gte } from "drizzle-orm";
 import { headers } from "next/headers";
 import { z } from "zod";
 import { ActionError } from "@/lib/actions";
+import { audit } from "@/lib/audit";
+import type { CurrentUser } from "@/lib/auth/session";
 import { KIOSK_COOKIE, signToken, verifyToken } from "@/lib/auth/token";
 import type { AppSettings } from "@/lib/config-defaults";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
-import { AttendanceKiosk, type IAttendanceKiosk } from "@/lib/models";
+import { AttendanceKiosk, AuditLog, type IAttendanceKiosk } from "@/lib/models";
 import { DIRECT_ORIGIN_HEADER } from "@/lib/proxy-hosts";
 import { networkOf, parseKioskCode, readNetworkToken, sigMatches, windowAccepted } from "./kiosk-code";
 
@@ -19,6 +21,9 @@ export const KIOSK_COOKIE_RENEW_SECONDS = 7 * 86_400;
 const NETWORK_TTL_MS = 24 * 3_600_000;
 
 type KioskClaims = { kid: string; did: string; iat?: number };
+
+/** Audit entity of scans refused by the same-network rule; Settings lists their networks so admins can allow one. */
+const SCAN_REFUSED_ENTITY = "attendance_scan";
 
 /**
  * Network of the current request's client (Cloudflare's connecting IP first). Null when unknown — in particular
@@ -65,7 +70,13 @@ const codeSchema = z.string().trim().min(1).max(200);
  * With QR check-in on, a check-in / check-out needs a code scanned from an office screen within its minute.
  * Returns the screen's name, or null when QR check-in is off.
  */
-export async function requireKioskScan(settings: AppSettings, code: unknown, network: unknown, action: "check in" | "check out"): Promise<string | null> {
+export async function requireKioskScan(
+  settings: AppSettings,
+  code: unknown,
+  network: unknown,
+  action: "check in" | "check out",
+  user: Pick<CurrentUser, "_id" | "name" | "role">,
+): Promise<string | null> {
   if (!settings.attendance.qrCheckIn) return null;
   const input = codeSchema.safeParse(code);
   if (!input.success) throw new ActionError(`Scan the QR code on the office attendance screen to ${action}.`);
@@ -83,9 +94,14 @@ export async function requireKioskScan(settings: AppSettings, code: unknown, net
     // Fails closed: an unknown network never passes.
     const net = await provenNetwork(network);
     if (!net) throw new ActionError("Your phone's network couldn't be checked. Reload the page and scan again.");
-    const screenNets = kiosk.networks.filter((n) => now - n.at.getTime() <= NETWORK_TTL_MS);
-    if (!screenNets.length) throw new ActionError(`The office screen "${kiosk.name}" hasn't reported its network yet. Ask an admin to reload it.`);
-    if (!screenNets.some((n) => n.net === net)) throw new ActionError("Connect your phone to the office Wi-Fi and scan again.");
+    // The screen's own recent networks, plus office networks an admin allowed (e.g. the Wi-Fi's IPv6 when the
+    // screen computer only reports IPv4).
+    const allowed = new Set([...kiosk.networks.filter((n) => now - n.at.getTime() <= NETWORK_TTL_MS).map((n) => n.net), ...settings.attendance.qrOfficeNetworks]);
+    if (!allowed.size) throw new ActionError(`The office screen "${kiosk.name}" hasn't reported its network yet. Ask an admin to reload it.`);
+    if (!allowed.has(net)) {
+      await audit(user, { action: "reject", entity: SCAN_REFUSED_ENTITY, entityId: kiosk._id, ref: net, summary: `QR ${action} refused at "${kiosk.name}": network ${net} is not an office network` });
+      throw new ActionError(`Connect your phone to the office Wi-Fi and scan again. (This phone's network: ${net}. If you are on the office Wi-Fi, an admin can allow it in Settings → Attendance.)`);
+    }
   }
   return kiosk.name;
 }
@@ -98,4 +114,30 @@ export function kioskStatus(kiosk: Pick<IAttendanceKiosk, "deviceId" | "lastSeen
   if (!kiosk.deviceId) return { label: "Waiting to be opened", tone: "gray" };
   const online = kiosk.lastSeenAt && Date.now() - kiosk.lastSeenAt.getTime() <= ONLINE_WITHIN_MS;
   return online ? { label: "Showing QR", tone: "green" } : { label: "Offline", tone: "amber" };
+}
+
+export interface ScanRefusal {
+  net: string;
+  count: number;
+  last: Date;
+  names: string[];
+}
+
+/** Networks scans were refused from in the last 7 days, most recent first, for admins to allow the office's own. */
+export async function recentScanRefusals(): Promise<ScanRefusal[]> {
+  const rows = await db()
+    .select({ net: AuditLog.ref, name: AuditLog.actorName, at: AuditLog.at })
+    .from(AuditLog)
+    .where(and(eq(AuditLog.entity, SCAN_REFUSED_ENTITY), gte(AuditLog.at, new Date(Date.now() - 7 * 86_400_000))))
+    .orderBy(desc(AuditLog.at))
+    .limit(200);
+  const byNet = new Map<string, ScanRefusal>();
+  for (const r of rows) {
+    if (!r.net) continue;
+    const entry = byNet.get(r.net) ?? { net: r.net, count: 0, last: r.at, names: [] };
+    entry.count++;
+    if (entry.names.length < 3 && !entry.names.includes(r.name)) entry.names.push(r.name);
+    byNet.set(r.net, entry);
+  }
+  return [...byNet.values()];
 }

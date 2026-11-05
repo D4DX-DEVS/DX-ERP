@@ -77,7 +77,7 @@ export async function checkIn(code?: unknown, network?: unknown): Promise<Action
     const user = await staffUser();
     const settings = await getSettings();
     if (!settings.attendance.allowSelfCheckIn) throw new ActionError("Self check-in is turned off. Ask HR to record your attendance.");
-    const screen = await requireKioskScan(settings, code, network, "check in");
+    const screen = await requireKioskScan(settings, code, network, "check in", user);
     const today = todayKey();
     const [leave] = await db()
       .select({ startDate: LeaveRequest.startDate, endDate: LeaveRequest.endDate })
@@ -123,7 +123,7 @@ export async function checkIn(code?: unknown, network?: unknown): Promise<Action
 export async function checkOut(code?: unknown, network?: unknown): Promise<ActionResult<null>> {
   return runAction(async () => {
     const user = await staffUser();
-    const screen = await requireKioskScan(await getSettings(), code, network, "check out");
+    const screen = await requireKioskScan(await getSettings(), code, network, "check out", user);
     const today = todayKey();
     const att = await dayOf(user._id, today);
     if (!att?.checkIn) {

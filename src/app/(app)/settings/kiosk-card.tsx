@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { EmptyRow, TableWrap, THead, Td, Th, Tr } from "@/components/ui/table";
 import type { Tone } from "@/lib/config-defaults";
 import { fetchNetworkToken } from "@/lib/network-token";
-import { createKiosk, deleteKiosk, renewKioskLink } from "./kiosk-actions";
+import { allowOfficeNetwork, createKiosk, deleteKiosk, removeOfficeNetwork, renewKioskLink } from "./kiosk-actions";
 import { FormDialog, SettingsCard } from "./ui";
 
 export interface KioskView {
@@ -29,7 +29,25 @@ function AddButton(props: ButtonProps) {
 }
 
 /** Office computers that show the rotating attendance QR (Settings → Attendance). */
-export function KioskCard({ screens, networkOrigin }: { screens: KioskView[]; networkOrigin: string }) {
+/** A network scans were refused from recently (`last` already formatted). */
+export interface RefusedNetworkView {
+  net: string;
+  count: number;
+  last: string;
+  names: string[];
+}
+
+export function KioskCard({
+  screens,
+  networkOrigin,
+  officeNetworks,
+  refused,
+}: {
+  screens: KioskView[];
+  networkOrigin: string;
+  officeNetworks: string[];
+  refused: RefusedNetworkView[];
+}) {
   const [link, setLink] = useState<string | null>(null);
   // Measured the way phones and screens are (a network token), so it shows what the same-network rule compares.
   const [yourNetwork, setYourNetwork] = useState<string | null | undefined>(undefined);
@@ -108,9 +126,62 @@ export function KioskCard({ screens, networkOrigin }: { screens: KioskView[]; ne
           ))}
         </tbody>
       </TableWrap>
-      <p className="mt-3 text-xs text-muted">
-        Your connection: <span className="font-mono text-ink-2">{yourNetwork === undefined ? "checking…" : (yourNetwork ?? "unknown")}</span>. With the same-network rule on, a phone&apos;s network must match one of the screen&apos;s.
-      </p>
+      <div className="mt-4 flex flex-col gap-4 border-t border-line-soft pt-4">
+        <div className="flex flex-col gap-1.5">
+          <div className="text-[13px] font-semibold text-ink-2">Office networks</div>
+          <p className="text-xs text-muted">
+            With the same-network rule on, a phone&apos;s network must match a screen&apos;s or one of these. Add the office Wi-Fi&apos;s other address type here: a
+            screen computer may report only IPv4 while phones use IPv6, or the reverse.
+          </p>
+          {officeNetworks.length === 0 ? (
+            <p className="text-xs text-subtle">None added.</p>
+          ) : (
+            <ul className="flex flex-col gap-1">
+              {officeNetworks.map((net) => (
+                <li key={net} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-field px-3 py-1.5">
+                  <span className="font-mono text-xs break-all text-ink-2">{net}</span>
+                  <ActionButton variant="ghost" size="sm" className="text-danger hover:bg-danger-bg hover:text-danger" action={() => removeOfficeNetwork(net)} confirmTone="danger" confirmTitle="Remove office network" confirmLabel="Remove" confirm={`Phones on ${net} will no longer pass the same-network rule.`}>
+                    Remove
+                  </ActionButton>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {refused.length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            <div className="text-[13px] font-semibold text-ink-2">Refused in the last 7 days</div>
+            <p className="text-xs text-muted">Scans turned away for being on another network. Allow one only if it is the office Wi-Fi.</p>
+            <ul className="flex flex-col gap-1">
+              {refused.map((r) => (
+                <li key={r.net} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-field px-3 py-1.5">
+                  <div className="min-w-0">
+                    <div className="font-mono text-xs break-all text-ink-2">{r.net}</div>
+                    <div className="text-xs text-muted">
+                      {r.names.join(", ")} · {r.count} {r.count === 1 ? "scan" : "scans"} · {r.last}
+                    </div>
+                  </div>
+                  <ActionButton variant="secondary" size="sm" action={() => allowOfficeNetwork(r.net)} confirmTitle="Allow this network" confirmLabel="Allow" confirm={`Phones on ${r.net} will pass the same-network rule. Allow it only if it is the office Wi-Fi.`}>
+                    Allow
+                  </ActionButton>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+          <span>
+            Your connection: <span className="font-mono text-ink-2">{yourNetwork === undefined ? "checking…" : (yourNetwork ?? "unknown")}</span>
+          </span>
+          {yourNetwork && !officeNetworks.includes(yourNetwork) && !screens.some((s) => s.networks.includes(yourNetwork)) && (
+            <ActionButton variant="ghost" size="sm" action={() => allowOfficeNetwork(yourNetwork)} confirmTitle="Allow this network" confirmLabel="Allow" confirm={`Phones on ${yourNetwork} will pass the same-network rule. Allow it only if this device is on the office Wi-Fi.`}>
+              Allow this network
+            </ActionButton>
+          )}
+        </div>
+      </div>
 
       <Dialog open={link !== null} onOpenChange={(o) => !o && setLink(null)} title="Screen link" description="Shown only once. Create a new link if you lose it." size="md">
         <div className="flex flex-col gap-4 pb-1">

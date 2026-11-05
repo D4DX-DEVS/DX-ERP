@@ -99,6 +99,12 @@ export function networkOf(ip: string | null | undefined): string | null {
   return net.startsWith(WORKER_EGRESS_PREFIX) ? null : net;
 }
 
+/** A network as `networkOf` writes it ("1.2.3.4", "2401:4900:8824:c80a::/64" or any IPv6 address), normalised. */
+export function parseNetwork(text: string): string | null {
+  const t = text.trim().toLowerCase();
+  return t.endsWith("::/64") ? networkOf(`${t.slice(0, -3)}1`) : networkOf(t);
+}
+
 /** Adds a sighting of the screen's network (newest first, distinct, at most five; proxy addresses dropped). */
 export function withNetwork(networks: KioskNetwork[], net: string | null, at: Date): KioskNetwork[] {
   const kept = networks.filter((n) => n.net !== net && !n.net.startsWith(WORKER_EGRESS_PREFIX));
