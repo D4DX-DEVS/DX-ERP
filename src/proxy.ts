@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, verifyToken } from "@/lib/auth/token";
-import { directOrigin } from "@/lib/proxy-hosts";
+import { DIRECT_ORIGIN_HEADER, directOrigin } from "@/lib/proxy-hosts";
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -55,10 +55,13 @@ function contentSecurityPolicy(nonce: string, directOrigin: string): string {
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
-  const csp = contentSecurityPolicy(nonce, directOrigin(request.headers.get("host"), request.headers.get("x-forwarded-host")));
+  // Only here does `host` still name the Worker's own host; by the time pages render it reads like the proxy's.
+  const direct = directOrigin(request.headers.get("host"), request.headers.get("x-forwarded-host"));
+  const csp = contentSecurityPolicy(nonce, direct);
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("Content-Security-Policy", csp);
+  requestHeaders.set(DIRECT_ORIGIN_HEADER, direct); // always overwritten, so a client can't supply it
 
   const withCsp = (response: NextResponse) => {
     response.headers.set("Content-Security-Policy", csp);

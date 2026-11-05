@@ -5,6 +5,9 @@
  */
 export const PROXY_HOSTS = ["erp.d4dx.co"];
 
+/** Request header through which `proxy.ts` hands pages the result of `directOrigin`. */
+export const DIRECT_ORIGIN_HEADER = "x-dx-direct-origin";
+
 /**
  * Origin where the Worker sees the client's real address: its own host when the request came through a proxy
  * that rewrote the host (erp.d4dx.co → *.workers.dev), else "" (same origin).

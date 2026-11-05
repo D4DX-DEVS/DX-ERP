@@ -8,7 +8,7 @@ import type { AppSettings } from "@/lib/config-defaults";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { AttendanceKiosk, type IAttendanceKiosk } from "@/lib/models";
-import { directOrigin } from "@/lib/proxy-hosts";
+import { DIRECT_ORIGIN_HEADER } from "@/lib/proxy-hosts";
 import { networkOf, parseKioskCode, readNetworkToken, sigMatches, windowAccepted } from "./kiosk-code";
 
 const KIOSK_AUDIENCE = "kiosk";
@@ -30,10 +30,12 @@ export async function clientNetwork(): Promise<string | null> {
   return networkOf(h.get("cf-connecting-ip") || h.get("x-real-ip") || h.get("x-forwarded-for")?.split(",")[0]);
 }
 
-/** Where pages fetch a network token (`/api/kiosk/network`): the Worker's direct host when reached through a proxy. */
+/**
+ * Where pages fetch a network token (`/api/kiosk/network`): the Worker's direct host when reached through a proxy.
+ * Worked out by `proxy.ts`, which still sees the Worker's own host (pages see the proxy's).
+ */
 export async function networkCheckOrigin(): Promise<string> {
-  const h = await headers();
-  return directOrigin(h.get("host"), h.get("x-forwarded-host"));
+  return (await headers()).get(DIRECT_ORIGIN_HEADER) ?? "";
 }
 
 /** Network proven by a token from `/api/kiosk/network`, else the request's own (when not proxied). */
@@ -80,8 +82,10 @@ export async function requireKioskScan(settings: AppSettings, code: unknown, net
   if (settings.attendance.qrSameNetwork) {
     // Fails closed: an unknown network never passes.
     const net = await provenNetwork(network);
-    const onNetwork = net && kiosk.networks.some((n) => n.net === net && now - n.at.getTime() <= NETWORK_TTL_MS);
-    if (!onNetwork) throw new ActionError("Connect your phone to the office Wi-Fi and scan again.");
+    if (!net) throw new ActionError("Your phone's network couldn't be checked. Reload the page and scan again.");
+    const screenNets = kiosk.networks.filter((n) => now - n.at.getTime() <= NETWORK_TTL_MS);
+    if (!screenNets.length) throw new ActionError(`The office screen "${kiosk.name}" hasn't reported its network yet. Ask an admin to reload it.`);
+    if (!screenNets.some((n) => n.net === net)) throw new ActionError("Connect your phone to the office Wi-Fi and scan again.");
   }
   return kiosk.name;
 }
