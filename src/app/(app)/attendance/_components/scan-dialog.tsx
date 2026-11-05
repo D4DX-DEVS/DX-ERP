@@ -9,16 +9,10 @@ import { Dialog } from "@/components/ui/dialog";
 import { Alert } from "@/components/ui/page";
 import { QrScanner } from "@/components/ui/qr-scanner";
 import type { ActionResult } from "@/lib/action-result";
-import { proveLocalNetwork } from "@/lib/lan-handshake";
-import { fetchNetworkToken } from "@/lib/network-token";
-import { checkIn, checkOut, startLanCheck } from "../actions";
+import { checkIn, checkOut } from "../actions";
 
-/**
- * Check in / Check out by scanning the rotating QR on the office attendance screen. `networkOrigin` (set while
- * the same-network rule is on): the Worker's own host, used for the local Wi-Fi handshake with the screen and
- * for this phone's network token — both sent along with the code.
- */
-export function ScanDialog({ mode, networkOrigin }: { mode: "in" | "out"; networkOrigin?: string | null }) {
+/** Check in / Check out by scanning the rotating QR on the office attendance screen. */
+export function ScanDialog({ mode }: { mode: "in" | "out" }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -42,15 +36,7 @@ export function ScanDialog({ mode, networkOrigin }: { mode: "in" | "out"; networ
     setBusy(true);
     let result: ActionResult<null>;
     try {
-      let proof: { network?: string; lan?: string } | undefined;
-      if (networkOrigin != null) {
-        const [network, lan] = await Promise.all([
-          fetchNetworkToken(networkOrigin).then((r) => r?.token),
-          proveLocalNetwork((sdp) => startLanCheck(code, sdp, mode).then((r) => (r.ok ? r.data : null)), networkOrigin),
-        ]);
-        proof = { network, lan: lan ?? undefined };
-      }
-      result = mode === "in" ? await checkIn(code, proof) : await checkOut(code, proof);
+      result = mode === "in" ? await checkIn(code) : await checkOut(code);
     } catch {
       result = { ok: false, error: "Could not reach the server. Check your connection, then close and scan again." };
     }
@@ -83,12 +69,12 @@ export function ScanDialog({ mode, networkOrigin }: { mode: "in" | "out"; networ
         <QrScanner onResult={onScan} paused={busy} />
         {busy ? (
           <p className="flex items-center justify-center gap-2 text-sm text-muted">
-            <Loader2 className="size-4 animate-spin" /> {networkOrigin != null ? "Checking you're on the office Wi-Fi…" : mode === "in" ? "Checking in…" : "Checking out…"}
+            <Loader2 className="size-4 animate-spin" /> {mode === "in" ? "Checking in…" : "Checking out…"}
           </p>
         ) : error ? (
           <Alert tone="danger">{error}</Alert>
         ) : (
-          <p className="text-center text-xs text-muted">The code changes every minute — scan the one on the screen now.</p>
+          <p className="text-center text-xs text-muted">The code changes every 15 seconds — scan the one on the screen now.</p>
         )}
       </div>
     </Dialog>

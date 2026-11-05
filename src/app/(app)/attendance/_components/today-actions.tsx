@@ -14,7 +14,6 @@ export function TodayActions({
   openMovementId,
   unavailableNote,
   qr = false,
-  networkOrigin,
 }: {
   state: TodayState;
   /** Id of the person's open movement (status "out"), if any. */
@@ -22,8 +21,6 @@ export function TodayActions({
   unavailableNote?: string;
   /** Check-in / check-out by scanning the office QR screen (Settings → Attendance). */
   qr?: boolean;
-  /** Same-network rule on: where the scanner fetches the phone's network token. */
-  networkOrigin?: string | null;
 }) {
   if (state === "unavailable") return unavailableNote ? <p className="text-[13px] text-muted">{unavailableNote}</p> : null;
   if (state === "done") return <p className="text-[13px] text-muted">You&apos;re checked out for today. Use a correction request if a time is wrong.</p>;
@@ -32,7 +29,7 @@ export function TodayActions({
     return (
       <div className="flex flex-wrap gap-2.5">
         {qr ? (
-          <ScanDialog mode="in" networkOrigin={networkOrigin} />
+          <ScanDialog mode="in" />
         ) : (
           <ActionButton action={checkIn} icon={<LogIn className="size-4" />} successMessage={false}>
             Check in
@@ -68,7 +65,7 @@ export function TodayActions({
             Check out
           </Button>
         ) : qr ? (
-          <ScanDialog mode="out" networkOrigin={networkOrigin} />
+          <ScanDialog mode="out" />
         ) : (
           <ActionButton action={checkOut} variant="secondary" icon={<LogOut className="size-4" />} confirm="Check out for today? Your working day ends now." successMessage={false}>
             Check out

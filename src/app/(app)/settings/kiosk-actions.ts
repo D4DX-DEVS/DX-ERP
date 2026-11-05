@@ -5,13 +5,10 @@ import { z } from "zod";
 import { actionPermission, ActionError, parse, runAction, type ActionResult } from "@/lib/actions";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
-import { hashKioskToken, newCodeSalt, newKioskToken, parseNetwork } from "@/lib/domain/kiosk-code";
+import { hashKioskToken, newCodeSalt, newKioskToken } from "@/lib/domain/kiosk-code";
 import { AttendanceKiosk } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
 import { isObjectId, zs } from "@/lib/validation";
-import { saveConfig } from "./helpers";
-
-const MAX_OFFICE_NETWORKS = 10;
 
 /** Link of a QR attendance screen, as a path: the admin's browser adds its own origin. Shown once, never stored. */
 const linkPath = (token: string) => `/kiosk/${token}`;
@@ -38,7 +35,7 @@ export async function renewKioskLink(id: string): Promise<ActionResult<{ path: s
     const token = newKioskToken();
     const [kiosk] = await db()
       .update(AttendanceKiosk)
-      .set({ tokenHash: hashKioskToken(token), codeSalt: newCodeSalt(), deviceId: null, boundAt: null, networks: [] })
+      .set({ tokenHash: hashKioskToken(token), codeSalt: newCodeSalt(), deviceId: null, boundAt: null })
       .where(eq(AttendanceKiosk._id, id))
       .returning({ name: AttendanceKiosk.name });
     if (!kiosk) throw new ActionError("Screen not found");
@@ -65,28 +62,4 @@ export async function deleteKiosk(id: string): Promise<ActionResult<null>> {
     await audit(user, { action: "delete", entity: "attendance_kiosk", entityId: id, ref: kiosk.name, summary: `Removed QR attendance screen "${kiosk.name}"` });
     return null;
   }, "Screen removed");
-}
-
-/** Accepts a network (IPv4 address or IPv6 /64) for the same-network rule besides the screens' own. */
-export async function allowOfficeNetwork(network: string): Promise<ActionResult<null>> {
-  return runAction(async () => {
-    const user = await actionPermission("settings.manage");
-    const net = typeof network === "string" ? parseNetwork(network) : null;
-    if (!net) throw new ActionError("That isn't a network address.");
-    const current = (await getSettings()).attendance;
-    if (current.qrOfficeNetworks.includes(net)) return null;
-    if (current.qrOfficeNetworks.length >= MAX_OFFICE_NETWORKS) throw new ActionError(`At most ${MAX_OFFICE_NETWORKS} office networks. Remove one first.`);
-    await saveConfig(user, "attendance", "QR office networks", { ...current, qrOfficeNetworks: [...current.qrOfficeNetworks, net] });
-    return null;
-  }, "Network allowed");
-}
-
-export async function removeOfficeNetwork(network: string): Promise<ActionResult<null>> {
-  return runAction(async () => {
-    const user = await actionPermission("settings.manage");
-    const current = (await getSettings()).attendance;
-    if (!current.qrOfficeNetworks.includes(network)) throw new ActionError("Network not found");
-    await saveConfig(user, "attendance", "QR office networks", { ...current, qrOfficeNetworks: current.qrOfficeNetworks.filter((n) => n !== network) });
-    return null;
-  }, "Network removed");
 }

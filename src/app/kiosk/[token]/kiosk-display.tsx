@@ -5,23 +5,18 @@ import Image from "next/image";
 import QRCode from "qrcode";
 import { Loader2, WifiOff } from "lucide-react";
 import { useNow } from "@/components/ui/use-now";
-import { serveLocalNetworkProofs, type LanHub } from "@/lib/lan-handshake";
-import { fetchNetworkToken } from "@/lib/network-token";
 import { fmtLongDate, fmtTime } from "@/lib/time";
 
 type Screen =
   | { status: "loading" }
-  | { status: "live"; name: string; qr: string; expiresAt: number; offset: number }
+  | { status: "live"; name: string; qr: string; expiresAt: number; period: number; offset: number }
   | { status: "offline" }
   | { status: "disconnected"; message: string };
 
 const RETRY_MS = 5_000;
 
-/**
- * Full-screen rotating attendance QR: fetches a fresh code at every minute boundary and keeps the display awake.
- * Each poll carries a token proving this computer's network (from `networkOrigin`), for the same-network rule.
- */
-export function KioskDisplay({ networkOrigin }: { networkOrigin: string }) {
+/** Full-screen rotating attendance QR: fetches a fresh code each time it rotates and keeps the display awake. */
+export function KioskDisplay() {
   const [screen, setScreen] = useState<Screen>({ status: "loading" });
   const now = useNow(1000);
 
@@ -29,17 +24,13 @@ export function KioskDisplay({ networkOrigin }: { networkOrigin: string }) {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let build: string | undefined;
-    // Token and secret for answering phones' local Wi-Fi handshakes, refreshed with every code.
-    let hub: LanHub | null = null;
-    const stopServing = serveLocalNetworkProofs(() => hub);
     const load = async () => {
       clearTimeout(timer);
       let next = RETRY_MS;
       try {
-        const network = (await fetchNetworkToken(networkOrigin))?.token;
         const sent = Date.now();
-        const res = await fetch(`/api/kiosk/code${network ? `?network=${encodeURIComponent(network)}` : ""}`, { cache: "no-store" });
-        const body = (await res.json()) as { name: string; code: string; expiresAt: number; serverNow: number; build: string; lan: string; hub: string; error?: string };
+        const res = await fetch("/api/kiosk/code", { cache: "no-store" });
+        const body = (await res.json()) as { name: string; code: string; expiresAt: number; period: number; serverNow: number; build: string; error?: string };
         const received = Date.now();
         if (stopped) return;
         if (res.status === 401) {
@@ -50,12 +41,11 @@ export function KioskDisplay({ networkOrigin }: { networkOrigin: string }) {
         // The screen runs unattended: pick up a new deploy by itself.
         if (build && body.build !== build) return window.location.reload();
         build = body.build;
-        hub = { origin: networkOrigin, token: body.hub, secret: body.lan };
         const svg = await QRCode.toString(body.code, { type: "svg", margin: 2, errorCorrectionLevel: "M", color: { dark: "#0a1450", light: "#ffffff" } });
         if (stopped) return;
         // Server clock − local clock, taking the server's reading as the middle of the round trip.
         const offset = body.serverNow - (sent + received) / 2;
-        setScreen({ status: "live", name: body.name, qr: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`, expiresAt: body.expiresAt, offset });
+        setScreen({ status: "live", name: body.name, qr: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`, expiresAt: body.expiresAt, period: body.period, offset });
         next = Math.max(body.expiresAt - (Date.now() + offset), 0) + 300;
       } catch {
         if (stopped) return;
@@ -71,11 +61,10 @@ export function KioskDisplay({ networkOrigin }: { networkOrigin: string }) {
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       stopped = true;
-      stopServing();
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [networkOrigin]);
+  }, []);
 
   // Keep the office screen from dimming or sleeping while it shows the code.
   useEffect(() => {
@@ -99,7 +88,7 @@ export function KioskDisplay({ networkOrigin }: { networkOrigin: string }) {
 
   const serverNow = now === null ? null : now + (screen.status === "live" ? screen.offset : 0);
   const remaining = screen.status === "live" && serverNow !== null ? screen.expiresAt - serverNow : null;
-  // A code past its minute (e.g. the computer just woke up) is hidden until the fresh one arrives.
+  // A code past its period (e.g. the computer just woke up) is hidden until the fresh one arrives.
   const stale = remaining !== null && remaining < -2_000;
 
   if (screen.status === "disconnected") {
@@ -134,7 +123,7 @@ export function KioskDisplay({ networkOrigin }: { networkOrigin: string }) {
             <li>2. Tap Check in or Check out</li>
             <li>3. Point the camera at this code</li>
           </ol>
-          <p className="text-sm text-[#c3cae8]">The code changes every minute. Photos of it stop working.</p>
+          <p className="text-sm text-[#c3cae8]">The code changes every 15 seconds.</p>
         </div>
 
         <div className="flex flex-col items-center gap-4">
@@ -155,7 +144,7 @@ export function KioskDisplay({ networkOrigin }: { networkOrigin: string }) {
           {screen.status === "live" && remaining !== null && !stale && (
             <div className="flex w-full flex-col gap-1.5">
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/20">
-                <div className="h-full rounded-full bg-white transition-[width] duration-1000 ease-linear" style={{ width: `${Math.min(100, Math.max(0, remaining / 600))}%` }} />
+                <div className="h-full rounded-full bg-white transition-[width] duration-1000 ease-linear" style={{ width: `${Math.min(100, Math.max(0, (remaining / screen.period) * 100))}%` }} />
               </div>
               <div className="text-center text-sm text-[#d6defa] tabular">New code in {Math.max(0, Math.ceil(remaining / 1000))}s</div>
             </div>

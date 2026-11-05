@@ -83,13 +83,6 @@ export interface AppSettings {
     allowSelfCheckIn: boolean;
     /** Self check-in / check-out only by scanning the rotating QR on an office screen (Settings → Attendance). */
     qrCheckIn: boolean;
-    /** With QR check-in: the phone must be on the same network (public IP) the QR screen polls from. */
-    qrSameNetwork: boolean;
-    /**
-     * Networks accepted by the same-network rule besides each screen's own (IPv4 address or IPv6 /64), e.g. the
-     * office Wi-Fi's IPv6 when the screen computer only reports IPv4. Managed on the QR check-in screens card.
-     */
-    qrOfficeNetworks: string[];
     /**
      * First day attendance is recorded in the ERP ("yyyy-MM-dd", empty = always). Working days before it
      * with no attendance record are not treated as absent (e.g. the month the system goes live).
@@ -205,8 +198,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
     personalMovementDeducted: false,
     allowSelfCheckIn: true,
     qrCheckIn: false,
-    qrSameNetwork: false,
-    qrOfficeNetworks: [],
     trackingStartDate: "",
   },
   movement: {

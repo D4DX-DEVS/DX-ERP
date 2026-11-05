@@ -1,7 +1,6 @@
 import path from "node:path";
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 import type { NextConfig } from "next";
-import { PROXY_HOSTS } from "./src/lib/proxy-hosts";
 
 // The Content-Security-Policy is set per request in `src/proxy.ts` (nonce-based), not here.
 const securityHeaders = [
@@ -32,7 +31,7 @@ const nextConfig: NextConfig = {
       // erp.d4dx.co reaches the Worker through a proxy rule in the d4dx.co Cloudflare account, so requests arrive
       // addressed to the workers.dev host while the browser's Origin is erp.d4dx.co. Without this, Next.js aborts
       // every Server Action (sign-in, forms) as cross-origin.
-      allowedOrigins: PROXY_HOSTS,
+      allowedOrigins: ["erp.d4dx.co"],
     },
   },
   async headers() {

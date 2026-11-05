@@ -1,6 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, verifyToken } from "@/lib/auth/token";
-import { DIRECT_ORIGIN_HEADER, directOrigin } from "@/lib/proxy-hosts";
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -28,7 +27,7 @@ function imageOrigins(): string {
  * column rules), next/font and sonner inject `<style>` elements, and a nonce there would be ignored by browsers
  * once `'unsafe-inline'` is also present. Fonts are self-hosted by next/font; images come from R2 / Google.
  */
-function contentSecurityPolicy(nonce: string, directOrigin: string): string {
+function contentSecurityPolicy(nonce: string): string {
   return [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
@@ -37,8 +36,7 @@ function contentSecurityPolicy(nonce: string, directOrigin: string): string {
     "font-src 'self' data:",
     // The service worker (/sw.js); 'strict-dynamic' above would otherwise ignore 'self' for it.
     "worker-src 'self'",
-    // directOrigin: the Worker's own host, for network tokens when the page is served through the erp.d4dx.co proxy.
-    `connect-src 'self'${directOrigin ? ` ${directOrigin}` : ""}${isDev ? " ws: wss:" : ""}`,
+    `connect-src 'self'${isDev ? " ws: wss:" : ""}`,
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
@@ -55,13 +53,10 @@ function contentSecurityPolicy(nonce: string, directOrigin: string): string {
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
-  // Only here does `host` still name the Worker's own host; by the time pages render it reads like the proxy's.
-  const direct = directOrigin(request.headers.get("host"), request.headers.get("x-forwarded-host"));
-  const csp = contentSecurityPolicy(nonce, direct);
+  const csp = contentSecurityPolicy(nonce);
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("Content-Security-Policy", csp);
-  requestHeaders.set(DIRECT_ORIGIN_HEADER, direct); // always overwritten, so a client can't supply it
 
   const withCsp = (response: NextResponse) => {
     response.headers.set("Content-Security-Policy", csp);

@@ -93,7 +93,6 @@ const attendanceSchema = z.object({
   personalMovementDeducted: zs.bool(),
   allowSelfCheckIn: zs.bool(),
   qrCheckIn: zs.bool(),
-  qrSameNetwork: zs.bool(),
   trackingStartDate: zs.optDate(),
 });
 
@@ -108,8 +107,7 @@ export async function saveAttendance(input: Record<string, unknown>): Promise<Sa
       const [screen] = await db().select({ id: AttendanceKiosk._id }).from(AttendanceKiosk).where(isNotNull(AttendanceKiosk.deviceId)).limit(1);
       if (!screen) fieldError("qrCheckIn", "Set up a QR screen first: add one under QR check-in screens and open its link on the office computer.");
     }
-    // Starts from the saved section: keys this form doesn't edit (office networks) are kept.
-    const next: AppSettings["attendance"] = { ...(await getSettings()).attendance, ...data, trackingStartDate: data.trackingStartDate ?? "", workingDays: [...new Set(data.workingDays)].sort((a, b) => a - b), saturdaysOff: [...new Set(data.saturdaysOff)].sort((a, b) => a - b) };
+    const next: AppSettings["attendance"] = { ...data, trackingStartDate: data.trackingStartDate ?? "", workingDays: [...new Set(data.workingDays)].sort((a, b) => a - b), saturdaysOff: [...new Set(data.saturdaysOff)].sort((a, b) => a - b) };
     return saveConfig(user, "attendance", "Working days & attendance rules", next);
   }, "Attendance rules saved");
 }

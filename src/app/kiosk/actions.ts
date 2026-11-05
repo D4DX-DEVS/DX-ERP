@@ -5,8 +5,8 @@ import { cookies } from "next/headers";
 import { ActionError, runAction, type ActionResult } from "@/lib/actions";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
-import { clientNetwork, kioskCookie } from "@/lib/domain/kiosk";
-import { hashKioskToken, withNetwork } from "@/lib/domain/kiosk-code";
+import { kioskCookie } from "@/lib/domain/kiosk";
+import { hashKioskToken } from "@/lib/domain/kiosk-code";
 import { AttendanceKiosk, newId } from "@/lib/models";
 
 /** Binds an office QR attendance screen to this browser — only while the screen is not bound yet. */
@@ -17,7 +17,7 @@ export async function activateKiosk(token: string): Promise<ActionResult<null>> 
     const deviceId = newId();
     const [kiosk] = await db()
       .update(AttendanceKiosk)
-      .set({ deviceId, boundAt: now, lastSeenAt: now, networks: withNetwork([], await clientNetwork(), now) })
+      .set({ deviceId, boundAt: now, lastSeenAt: now })
       .where(and(eq(AttendanceKiosk.tokenHash, hashKioskToken(token)), isNull(AttendanceKiosk.deviceId)))
       .returning({ id: AttendanceKiosk._id, name: AttendanceKiosk.name });
     if (!kiosk) throw new ActionError("This link is no longer valid or is already active on another screen. Ask an admin for a new link.");

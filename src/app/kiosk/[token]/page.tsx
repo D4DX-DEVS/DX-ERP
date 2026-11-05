@@ -7,7 +7,7 @@ import { Monitor } from "lucide-react";
 import { ActionButton } from "@/components/ui/actions";
 import { KIOSK_COOKIE } from "@/lib/auth/token";
 import { db } from "@/lib/db";
-import { kioskFromCookie, networkCheckOrigin } from "@/lib/domain/kiosk";
+import { kioskFromCookie } from "@/lib/domain/kiosk";
 import { hashKioskToken } from "@/lib/domain/kiosk-code";
 import { AttendanceKiosk } from "@/lib/models";
 import { activateKiosk } from "../actions";
@@ -34,7 +34,7 @@ export default async function KioskPage({ params }: PageProps<"/kiosk/[token]">)
   }
 
   const bound = await kioskFromCookie((await cookies()).get(KIOSK_COOKIE)?.value);
-  if (bound?.kiosk._id === kiosk._id) return <KioskDisplay networkOrigin={await networkCheckOrigin()} />;
+  if (bound?.kiosk._id === kiosk._id) return <KioskDisplay />;
   if (kiosk.deviceId) {
     return (
       <Notice title="Already active on another screen">
