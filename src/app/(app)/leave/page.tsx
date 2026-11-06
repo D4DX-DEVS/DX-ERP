@@ -114,7 +114,7 @@ export default async function MyLeavePage({ searchParams }: { searchParams: Prom
           <EmptyState title="No leave types are set up for you" description="Ask HR to configure leave types for your role." />
         </Card>
       ) : (
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-2 sm:gap-3 md:grid-cols-3 xl:grid-cols-5">
           {balances.map((b) => {
             const total = b.accrued + b.carriedForward + b.adjustment;
             const t = typeById.get(b.leaveTypeId);
@@ -131,14 +131,15 @@ export default async function MyLeavePage({ searchParams }: { searchParams: Prom
               t?.requiresAttachmentAfterDays != null && `Document needed after ${t.requiresAttachmentAfterDays} days`,
             ].filter(Boolean) as string[];
             return (
-              <div key={b.leaveTypeId} className="flex min-w-0 flex-col gap-2 rounded-[14px] border border-line bg-white p-4">
-                <span className="text-[13px] font-semibold text-ink-2">{b.name}</span>
-                <span className="font-display text-[26px] leading-none font-semibold tabular">
+              // Phones: name and count only, three to a row.
+              <div key={b.leaveTypeId} className="flex min-w-0 flex-col justify-between gap-1.5 rounded-[14px] border border-line bg-white p-3 sm:justify-start sm:gap-2 sm:p-4">
+                <span className="text-xs leading-tight font-semibold text-ink-2 sm:text-[13px]">{b.name}</span>
+                <span className="font-display text-xl leading-none font-semibold tabular sm:text-[26px]">
                   {b.unlimited ? b.used : b.available}
-                  <span className="ml-1 text-[13px] font-medium text-muted">{b.unlimited ? "used" : `of ${total}`}</span>
+                  <span className="ml-1 text-[11px] font-medium text-muted sm:text-[13px]">{b.unlimited ? "used" : `of ${total}`}</span>
                 </span>
-                <Progress value={usedPct} tone={usedPct >= 100 ? "red" : "brand"} />
-                <span className="text-xs text-muted">{notes.length ? notes.join(" · ") : `${b.used} used`}</span>
+                <Progress value={usedPct} tone={usedPct >= 100 ? "red" : "brand"} className="max-sm:hidden" />
+                <span className="text-xs text-muted max-sm:hidden">{notes.length ? notes.join(" · ") : `${b.used} used`}</span>
               </div>
             );
           })}

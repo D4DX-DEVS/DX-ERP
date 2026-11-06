@@ -38,6 +38,16 @@ export function PageBody({ className, children }: { className?: string; children
   return <div className={cn("mx-auto flex w-full max-w-[1280px] flex-col gap-4 px-4 pt-4 pb-24 sm:gap-5 sm:px-6 sm:pt-5 md:pb-12 lg:px-8 lg:pt-7", className)}>{children}</div>;
 }
 
+/** Shows `short` on phones and `children` from `sm` up (labels that must fit a narrow row). */
+export function ShortOnPhone({ short, children }: { short: ReactNode; children: ReactNode }) {
+  return (
+    <>
+      <span className="sm:hidden">{short}</span>
+      <span className="max-sm:hidden">{children}</span>
+    </>
+  );
+}
+
 export function StatCard({
   label,
   value,
@@ -45,6 +55,7 @@ export function StatCard({
   icon,
   href,
   tone = "default",
+  compact = false,
   className,
 }: {
   label: ReactNode;
@@ -53,12 +64,14 @@ export function StatCard({
   icon?: ReactNode;
   href?: string;
   tone?: "default" | "alert" | "brand";
+  /** Phones: tighter card with a smaller value and no sub-line, so four fit on one row. */
+  compact?: boolean;
   className?: string;
 }) {
   const body = (
     <>
       <div className="flex items-start justify-between gap-2">
-        <span className="text-xs font-medium text-muted sm:text-[13px]">{label}</span>
+        <span className={cn("text-xs font-medium text-muted sm:text-[13px]", compact && "max-sm:text-[11px] max-sm:leading-tight")}>{label}</span>
         {icon && (
           <span
             className={cn(
@@ -70,11 +83,16 @@ export function StatCard({
           </span>
         )}
       </div>
-      <div className={cn("mt-1 font-display text-[22px] leading-none font-semibold tabular sm:text-[28px]", tone === "alert" ? "text-outside" : "text-ink")}>{value}</div>
-      {sub && <div className="mt-1.5 text-[11px] text-muted sm:mt-2 sm:text-xs">{sub}</div>}
+      <div className={cn("mt-1 font-display text-[22px] leading-none font-semibold tabular sm:text-[28px]", compact && "max-sm:text-sm", tone === "alert" ? "text-outside" : "text-ink")}>{value}</div>
+      {sub && <div className={cn("mt-1.5 text-[11px] text-muted sm:mt-2 sm:text-xs", compact && "max-sm:hidden")}>{sub}</div>}
     </>
   );
-  const cls = cn("flex min-w-0 flex-col rounded-[14px] border border-line bg-white p-3 sm:p-5", href && "transition-colors hover:border-brand-200", className);
+  const cls = cn(
+    "flex min-w-0 flex-col rounded-[14px] border border-line bg-white p-3 sm:p-5",
+    compact && "max-sm:justify-between max-sm:rounded-xl max-sm:p-2",
+    href && "transition-colors hover:border-brand-200",
+    className,
+  );
   return href ? (
     <Link href={href} className={cls}>
       {body}

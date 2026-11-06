@@ -188,6 +188,7 @@ export function PwaPrompt() {
       open
       onOpenChange={(open) => !open && !busy && close()}
       size="sm"
+      centered
       title={mode === "update" ? "Update available" : "Install D4DX ERP"}
       description={mode === "update" ? "A new version of D4DX ERP is ready." : "Use the ERP like an app: its own icon, full screen and quicker to open."}
       footer={footer}

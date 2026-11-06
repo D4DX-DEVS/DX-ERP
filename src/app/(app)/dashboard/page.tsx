@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { CalendarPlus, FileBarChart, LogOut } from "lucide-react";
+import { CalendarPlus, FileBarChart } from "lucide-react";
 import { can, canAny, isInternLike, isStaff, requireUser, type CurrentUser } from "@/lib/auth/session";
 import { param, withParams, type SearchParams } from "@/lib/query";
 import { fmtLongDate, greeting } from "@/lib/time";
@@ -8,6 +8,7 @@ import { ButtonLink } from "@/components/ui/button";
 import { PageBody, PageHeader } from "@/components/ui/page";
 import { Segmented } from "@/components/ui/tabs";
 import { CurrentMovementCard } from "@/app/(app)/movement/current-movement-card";
+import { TodayCheckButton } from "@/app/(app)/attendance/check-in-button";
 import { TodayAttendanceCard } from "@/app/(app)/attendance/today-card";
 import { isReportingManager } from "./_lib/queries";
 import { FinanceChartCard, MonthGlanceCard } from "./_components/org-finance";
@@ -247,18 +248,18 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           <>
             {staff && (
               <>
-                <ButtonLink href="/movement/new" variant="secondary" icon={<LogOut className="size-4" aria-hidden />}>
-                  Record movement
-                </ButtonLink>
+                <Suspense fallback={null}>
+                  <TodayCheckButton userId={user.id} />
+                </Suspense>
                 {view === "personal" && (
-                  <ButtonLink href="/leave" variant={can(user, "reports.view") ? "secondary" : "primary"} icon={<CalendarPlus className="size-4" aria-hidden />}>
+                  <ButtonLink href="/leave" variant="secondary" icon={<CalendarPlus className="size-4" aria-hidden />}>
                     Apply for leave
                   </ButtonLink>
                 )}
               </>
             )}
             {can(user, "reports.view") && view === "org" && (
-              <ButtonLink href="/reports" icon={<FileBarChart className="size-4" aria-hidden />}>
+              <ButtonLink href="/reports" variant={staff ? "secondary" : "primary"} icon={<FileBarChart className="size-4" aria-hidden />}>
                 Reports
               </ButtonLink>
             )}

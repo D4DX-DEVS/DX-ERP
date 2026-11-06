@@ -200,7 +200,7 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
 
       <Card>
         <div className="flex flex-col gap-3 border-b border-line-soft px-4 py-3.5">
-          <ChipFilters param="type" options={typeOptions} />
+          <ChipFilters param="type" options={typeOptions} nowrap />
           <FilterBar>
             <SearchInput placeholder="Name, email or employee ID" />
             <SelectFilter param="department" label="Department" allLabel="All departments" options={departments.map((d) => ({ value: d._id, label: d.name }))} />

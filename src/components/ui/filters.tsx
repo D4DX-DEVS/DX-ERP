@@ -297,12 +297,23 @@ export function DateFilter({ param, label, type = "date", className }: { param: 
 }
 
 /** Pill filters (design: "Active 9 · In progress 4 …"). */
-export function ChipFilters({ param, options, allLabel }: { param: string; options: { value: string; label: string; count?: number }[]; allLabel?: string }) {
+export function ChipFilters({
+  param,
+  options,
+  allLabel,
+  nowrap = false,
+}: {
+  param: string;
+  options: { value: string; label: string; count?: number }[];
+  allLabel?: string;
+  /** Keep the chips on one row: tighter on phones, scrolling sideways if they still do not fit. */
+  nowrap?: boolean;
+}) {
   const { set, params } = useSetParams();
   const active = params.get(param) ?? "";
   const all = allLabel ? [{ value: "", label: allLabel }, ...options] : options;
   return (
-    <div className="flex flex-wrap gap-1.5 sm:gap-2" role="group">
+    <div className={cn("flex gap-1.5 sm:gap-2", nowrap ? "-m-1 overflow-x-auto p-1 [scrollbar-width:none] max-sm:gap-1" : "flex-wrap")} role="group">
       {all.map((o) => {
         const on = active === o.value;
         return (
@@ -313,6 +324,7 @@ export function ChipFilters({ param, options, allLabel }: { param: string; optio
             onClick={() => set({ [param]: o.value || null })}
             className={cn(
               "flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs whitespace-nowrap transition-colors sm:h-8 sm:px-3 sm:text-[13px]",
+              nowrap && "max-sm:px-2",
               on ? "bg-brand-600 font-semibold text-white" : "border border-line-strong bg-white font-medium text-ink-2 hover:bg-field",
             )}
           >

@@ -25,19 +25,7 @@ export function TodayActions({
   if (state === "unavailable") return unavailableNote ? <p className="text-[13px] text-muted">{unavailableNote}</p> : null;
   if (state === "done") return <p className="text-[13px] text-muted">You&apos;re checked out for today. Use a correction request if a time is wrong.</p>;
 
-  if (state === "can_check_in") {
-    return (
-      <div className="flex flex-wrap gap-2.5">
-        {qr ? (
-          <ScanDialog mode="in" />
-        ) : (
-          <ActionButton action={checkIn} icon={<LogIn className="size-4" />} successMessage={false}>
-            Check in
-          </ActionButton>
-        )}
-      </div>
-    );
-  }
+  if (state === "can_check_in") return <CheckInOutButton state={state} qr={qr} />;
 
   return (
     <div className="flex flex-col gap-2">
@@ -74,5 +62,36 @@ export function TodayActions({
       </div>
       {openMovementId && <p className="text-xs text-muted">You&apos;re out on a movement. It doesn&apos;t end your day — record your return, then check out.</p>}
     </div>
+  );
+}
+
+/**
+ * The one attendance button for the moment: Check in, Check out, or Record return while out on a movement (the
+ * return comes before check-out). Nothing once the day is done or self check-in is unavailable.
+ */
+export function CheckInOutButton({ state, openMovementId, qr = false }: { state: TodayState; openMovementId?: string; qr?: boolean }) {
+  if (state === "can_check_in") {
+    return qr ? (
+      <ScanDialog mode="in" />
+    ) : (
+      <ActionButton action={checkIn} icon={<LogIn className="size-4" />} successMessage={false}>
+        Check in
+      </ActionButton>
+    );
+  }
+  if (state !== "working" && state !== "on_break") return null;
+  if (openMovementId) {
+    return (
+      <ButtonLink href={`/movement/${openMovementId}`} icon={<MoveUpRight className="size-4" />}>
+        Record return
+      </ButtonLink>
+    );
+  }
+  return qr ? (
+    <ScanDialog mode="out" />
+  ) : (
+    <ActionButton action={checkOut} variant="secondary" icon={<LogOut className="size-4" />} confirm="Check out for today? Your working day ends now." successMessage={false}>
+      Check out
+    </ActionButton>
   );
 }

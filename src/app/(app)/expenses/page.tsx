@@ -9,10 +9,10 @@ import { inList, jsonHasField } from "@/lib/sql";
 import { getSettings } from "@/lib/settings";
 import { namesFor, peopleOptions } from "@/lib/people";
 import { pageParam, PAGE_SIZE, param, sortParam, type SearchParams, type SortChoices } from "@/lib/query";
-import { inr, plural } from "@/lib/format";
+import { inr, inrCompact, plural } from "@/lib/format";
 import { fmtDate, monthKey, monthRange, todayKey } from "@/lib/time";
 import { statusLabel } from "@/lib/status";
-import { PageBody, PageHeader, StatCard } from "@/components/ui/page";
+import { PageBody, PageHeader, ShortOnPhone, StatCard } from "@/components/ui/page";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ButtonLink, buttonClass } from "@/components/ui/button";
 import { Chip, StatusChip } from "@/components/ui/chip";
@@ -49,6 +49,11 @@ const SORTS = {
   number: { label: "Expense number", order: [asc(Expense.expenseNo)] },
   updated: { label: "Recently updated", order: [desc(Expense.updatedAt)] },
 } satisfies SortChoices<SQL[]>;
+
+/** ₹12.3 L on phones (stat cards share one row there), ₹12,34,500 from `sm` up. */
+function money(amount: number) {
+  return <ShortOnPhone short={inrCompact(amount)}>{inr(amount)}</ShortOnPhone>;
+}
 
 export default async function ExpensesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requireUser();
@@ -178,11 +183,27 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
 
       {tabs.length > 1 && <LinkTabs items={tabs} />}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label={`Recorded · ${fmtDate(month.from, "MMMM")}`} value={inr(recorded.amount)} sub={`${plural(recorded.count, "entry", "entries")} · ${scopeLabel.toLowerCase()}`} />
-        <StatCard label="Waiting for approval" value={<span className="text-warning">{inr(waiting.amount)}</span>} sub={plural(waiting.count, "claim")} />
-        <StatCard label="To reimburse" value={inr(toReimburse.amount)} sub={`${plural(toReimburse.count, "approved claim")} · direct or with payroll`} />
-        <StatCard label="Charged to projects" value={inr(chargedTotal)} sub={`${plural(charged.length, "project")} this month`} />
+      {/* Phones: all four on one row, with short labels and compact amounts. */}
+      <div className="grid grid-cols-4 gap-2 sm:grid-cols-2 sm:gap-3 lg:grid-cols-4">
+        <StatCard
+          compact
+          label={<ShortOnPhone short="Recorded">Recorded · {fmtDate(month.from, "MMMM")}</ShortOnPhone>}
+          value={money(recorded.amount)}
+          sub={`${plural(recorded.count, "entry", "entries")} · ${scopeLabel.toLowerCase()}`}
+        />
+        <StatCard
+          compact
+          label={<ShortOnPhone short="Pending">Waiting for approval</ShortOnPhone>}
+          value={<span className="text-warning">{money(waiting.amount)}</span>}
+          sub={plural(waiting.count, "claim")}
+        />
+        <StatCard
+          compact
+          label={<ShortOnPhone short="Reimburse">To reimburse</ShortOnPhone>}
+          value={money(toReimburse.amount)}
+          sub={`${plural(toReimburse.count, "approved claim")} · direct or with payroll`}
+        />
+        <StatCard compact label={<ShortOnPhone short="Projects">Charged to projects</ShortOnPhone>} value={money(chargedTotal)} sub={`${plural(charged.length, "project")} this month`} />
       </div>
 
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">

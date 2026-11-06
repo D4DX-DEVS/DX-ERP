@@ -1,18 +1,19 @@
 import Link from "next/link";
-import { and, desc, eq, gte, lte, ne } from "drizzle-orm";
+import { and, eq, gte, lte, ne } from "drizzle-orm";
 import { Card } from "@/components/ui/card";
 import { Chip } from "@/components/ui/chip";
 import { Progress } from "@/components/ui/page";
 import type { Tone } from "@/lib/config-defaults";
 import { db } from "@/lib/db";
-import { Attendance, Holiday, LeaveRequest, Movement } from "@/lib/models";
+import { Attendance, Movement } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
 import { inList } from "@/lib/sql";
 import { addDays, fmtDate, fmtTime, formatDuration, hmToMinutes, isWorkingWeekday, minutesBetween, todayKey, weekStart } from "@/lib/time";
 import { LiveDuration } from "./_components/live-duration";
-import { TodayActions, type TodayState } from "./_components/today-actions";
+import { CheckInOutButton, TodayActions } from "./_components/today-actions";
 import { currentTime } from "./_lib/clock";
 import { classifyDay, dayChipInfo, provisionalWork } from "./_lib/day";
+import { loadToday, todayState } from "./_lib/today";
 
 function minutesToHm(total: number): string {
   const t = ((total % 1440) + 1440) % 1440;
@@ -31,37 +32,8 @@ export async function TodayAttendanceCard({ userId }: { userId: string }) {
   const from = weekStart(today);
   const to = addDays(from, 6);
 
-  const [[att], [openMovement], [leave], [holiday], weekAtt, weekMoves] = await Promise.all([
-    db()
-      .select({
-        checkIn: Attendance.checkIn,
-        checkOut: Attendance.checkOut,
-        breaks: Attendance.breaks,
-        workMinutes: Attendance.workMinutes,
-        status: Attendance.status,
-        late: Attendance.late,
-        lateMinutes: Attendance.lateMinutes,
-        earlyDeparture: Attendance.earlyDeparture,
-      })
-      .from(Attendance)
-      .where(and(eq(Attendance.user, userId), eq(Attendance.date, today)))
-      .limit(1),
-    db()
-      .select({ _id: Movement._id, categoryLabel: Movement.categoryLabel, official: Movement.official, outTime: Movement.outTime })
-      .from(Movement)
-      .where(and(eq(Movement.user, userId), eq(Movement.status, "out")))
-      .orderBy(desc(Movement.outTime))
-      .limit(1),
-    db()
-      .select({ halfDay: LeaveRequest.halfDay })
-      .from(LeaveRequest)
-      .where(and(eq(LeaveRequest.user, userId), eq(LeaveRequest.status, "approved"), lte(LeaveRequest.startDate, today), gte(LeaveRequest.endDate, today)))
-      .limit(1),
-    db()
-      .select({ id: Holiday._id })
-      .from(Holiday)
-      .where(and(eq(Holiday.date, today), eq(Holiday.optional, false)))
-      .limit(1),
+  const [t, weekAtt, weekMoves] = await Promise.all([
+    loadToday(userId),
     db()
       .select({ date: Attendance.date, checkIn: Attendance.checkIn, checkOut: Attendance.checkOut, workMinutes: Attendance.workMinutes })
       .from(Attendance)
@@ -85,10 +57,9 @@ export async function TodayAttendanceCard({ userId }: { userId: string }) {
         ),
       ),
   ]);
+  const { att, openMovement, holiday } = t;
 
-  // Leave only counts on days that are leave days (working days, unless weekends count).
-  const countsAsLeaveDay = settings.leave.countWeekendsInLeave || (isWorkingWeekday(today, a) && !holiday);
-  const leaveToday = leave && countsAsLeaveDay ? (leave.halfDay ? "half" : "full") : null;
+  const { state, note, leaveToday } = todayState(t, settings);
   const cls = classifyDay({ date: today, today, now, att, leave: leaveToday, holiday: Boolean(holiday), settings });
 
   const open = Boolean(att?.checkIn && !att.checkOut);
@@ -99,17 +70,6 @@ export async function TodayAttendanceCard({ userId }: { userId: string }) {
     onBreak ||
     Boolean(openMovement && (openMovement.official ? !a.officialMovementCountsAsWork : a.personalMovementDeducted));
   const running = open && !clockStopped;
-
-  let state: TodayState;
-  let note: string | undefined;
-  if (att?.checkIn) state = att.checkOut ? "done" : onBreak ? "on_break" : "working";
-  else if (leaveToday === "full") {
-    state = "unavailable";
-    note = "You're on approved leave today.";
-  } else if (!a.allowSelfCheckIn) {
-    state = "unavailable";
-    note = "Self check-in is turned off. Ask HR to record your attendance.";
-  } else state = "can_check_in";
 
   const breakSoFar = (att?.breaks ?? []).reduce((s, b) => s + minutesBetween(b.start, b.end ?? now), 0);
   const expectedOut = att?.checkIn ? new Date(att.checkIn.getTime() + (a.fullDayMinutes + breakSoFar) * 60_000) : null;
@@ -156,6 +116,11 @@ export async function TodayAttendanceCard({ userId }: { userId: string }) {
               {presence.label}
             </Chip>
           )}
+          {state === "can_check_in" && (
+            <div className="ml-auto">
+              <CheckInOutButton state={state} qr={a.qrCheckIn} />
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-x-8 gap-y-3">
@@ -188,7 +153,7 @@ export async function TodayAttendanceCard({ userId }: { userId: string }) {
           </div>
         )}
 
-        <TodayActions state={state} openMovementId={openMovement?._id} unavailableNote={note} qr={a.qrCheckIn} />
+        {state !== "can_check_in" && <TodayActions state={state} openMovementId={openMovement?._id} unavailableNote={note} qr={a.qrCheckIn} />}
         {state === "can_check_in" && (holiday || cls.key === "weekend") && <p className="text-xs text-muted">Today is a {holiday ? "holiday" : "weekend"}. Check in only if you are working.</p>}
       </div>
 

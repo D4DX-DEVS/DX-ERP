@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
 
 /**
  * Modal dialog. Controlled (`open` + `onOpenChange`) or uncontrolled with a `trigger`.
- * On phones it becomes a bottom sheet.
+ * On phones it becomes a bottom sheet, unless `centered` (a popup that rises into the middle of the screen).
  */
 export function Dialog({
   open,
@@ -18,6 +18,7 @@ export function Dialog({
   children,
   footer,
   size = "md",
+  centered = false,
 }: {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -27,6 +28,7 @@ export function Dialog({
   children?: ReactNode;
   footer?: ReactNode;
   size?: "sm" | "md" | "lg" | "xl";
+  centered?: boolean;
 }) {
   return (
     <D.Root open={open} onOpenChange={onOpenChange}>
@@ -36,7 +38,7 @@ export function Dialog({
         <D.Content
           className={cn(
             "fixed z-50 flex max-h-[92dvh] w-full flex-col bg-white shadow-modal focus:outline-none",
-            "inset-x-0 bottom-0 animate-slide-up rounded-t-[20px]",
+            centered ? "inset-x-4 top-1/2 w-auto -translate-y-1/2 animate-pop-rise rounded-[20px] sm:w-full" : "inset-x-0 bottom-0 animate-slide-up rounded-t-[20px]",
             "sm:inset-x-auto sm:top-1/2 sm:bottom-auto sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[20px]",
             size === "sm" && "sm:max-w-md",
             size === "md" && "sm:max-w-lg",

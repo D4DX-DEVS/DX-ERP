@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ShortOnPhone } from "@/components/ui/page";
 import { cn } from "@/lib/cn";
 import { addMonths, fmtDate } from "@/lib/time";
 
@@ -32,7 +33,9 @@ export function MonthNav({
       <Link href={href(prev)} aria-label="Previous month" className={cn(btn, "hover:bg-field")}>
         <ChevronLeft className="size-4" />
       </Link>
-      <span className="min-w-28 px-2 text-center text-sm font-semibold text-ink">{fmtDate(`${month}-01`, "MMMM yyyy")}</span>
+      <span className="px-2 text-center text-sm font-semibold text-ink sm:min-w-28">
+        <ShortOnPhone short={fmtDate(`${month}-01`, "MMM yyyy")}>{fmtDate(`${month}-01`, "MMMM yyyy")}</ShortOnPhone>
+      </span>
       {nextDisabled ? (
         <span className={cn(btn, "opacity-40")} aria-hidden>
           <ChevronRight className="size-4" />
