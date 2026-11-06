@@ -133,8 +133,13 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         actions={
           <>
             <a href={`/api/pdf/invoice/${id}`} target="_blank" rel="noopener noreferrer" className={buttonClass("secondary")}>
-              <Download className="size-4" aria-hidden /> PDF
+              <Download className="size-4" aria-hidden /> Invoice PDF
             </a>
+            {!isDraft && inv.amountPaid > 0 && (
+              <a href={`/api/pdf/receipt/${id}`} target="_blank" rel="noopener noreferrer" className={buttonClass("secondary")}>
+                <Download className="size-4" aria-hidden /> Receipt PDF
+              </a>
+            )}
             {manage && isDraft && (
               <ButtonLink variant="secondary" href={`/invoices/${id}/edit`} icon={<Pencil className="size-4" aria-hidden />}>
                 Edit
