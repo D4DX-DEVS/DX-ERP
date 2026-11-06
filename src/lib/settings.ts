@@ -3,7 +3,7 @@ import { cache } from "react";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { Settings } from "@/lib/models";
-import { DEFAULT_SETTINGS, type AppSettings } from "@/lib/config-defaults";
+import { DEFAULT_SETTINGS, normalizeTaxes, type AppSettings } from "@/lib/config-defaults";
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Date);
@@ -26,7 +26,8 @@ function merge<T>(base: T, override: unknown): T {
 /** Effective configuration for this request (defaults + stored overrides). */
 export const getSettings = cache(async (): Promise<AppSettings> => {
   const [row] = await db().select({ value: Settings.value }).from(Settings).where(eq(Settings._id, "global")).limit(1);
-  return merge(structuredClone(DEFAULT_SETTINGS), row?.value ?? {});
+  const settings = merge(structuredClone(DEFAULT_SETTINGS), row?.value ?? {});
+  return { ...settings, taxes: normalizeTaxes(settings.taxes) };
 });
 
 /** Replaces one top-level settings section. */

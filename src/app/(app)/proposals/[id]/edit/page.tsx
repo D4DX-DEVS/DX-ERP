@@ -4,6 +4,7 @@ import { can, requirePagePermission } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { Client } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
+import { proposalTaxOptions } from "@/lib/config-defaults";
 import { statusLabel } from "@/lib/status";
 import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -38,7 +39,8 @@ export default async function EditProposalPage({ params }: { params: Promise<{ i
 
   const settings = await getSettings();
   const clients = await db().select({ _id: Client._id, name: Client.name, clientNo: Client.clientNo }).from(Client).where(clientScope(user)).orderBy(asc(Client.name)).limit(1000);
-  const defaultTax = settings.taxes.find((t) => t.rate === 18)?.rate ?? settings.taxes[0]?.rate ?? 0;
+  const taxes = proposalTaxOptions(settings.taxes);
+  const defaultTax = taxes.find((t) => t.rate === 18)?.rate ?? taxes[0]?.rate ?? 0;
 
   return (
     <PageBody className="max-w-5xl">
@@ -46,7 +48,7 @@ export default async function EditProposalPage({ params }: { params: Promise<{ i
       <ProposalForm
         mode="edit"
         clients={clients.map((c) => ({ id: c._id, name: c.name, clientNo: c.clientNo }))}
-        taxes={settings.taxes}
+        taxes={taxes}
         defaultTaxRate={defaultTax}
         clientLocked={p.status !== "draft" || Boolean(p.lead)}
         editingSent={Boolean(p.sentAt)}

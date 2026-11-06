@@ -5,9 +5,11 @@ export type InvoiceStatus = "draft" | "issued" | "partially_paid" | "paid" | "ov
 
 export interface BillingSnapshot {
   name: string;
+  contactPerson?: string;
   address?: string;
   gstin?: string;
   email?: string;
+  phone?: string;
 }
 
 export const Invoice = sqliteTable(
@@ -51,7 +53,7 @@ export const Invoice = sqliteTable(
     ...timestamps(),
   },
   (t) => [
-    // Drafts have no invoiceNo (NULL); NULLs are distinct in SQLite unique indexes.
+    // Drafts saved before invoice numbers were entered by hand have no invoiceNo (NULL); NULLs are distinct in SQLite unique indexes.
     uniqueIndex("invoices_invoice_no").on(t.invoiceNo),
     uniqueIndex("invoices_draft_no").on(t.draftNo),
     index("invoices_client").on(t.client),

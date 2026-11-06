@@ -4,7 +4,7 @@ import { and, count, eq, isNotNull, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { actionPermission, ActionError, parse, runAction, type ActionResult } from "@/lib/actions";
 import { can } from "@/lib/auth/session";
-import { NOTIFICATION_EVENTS, type AppSettings, type PayrollComponent } from "@/lib/config-defaults";
+import { NOTIFICATION_EVENTS, taxLabel, type AppSettings, type PayrollComponent } from "@/lib/config-defaults";
 import { db } from "@/lib/db";
 import { AttendanceKiosk, Movement, StoredFile } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
@@ -36,8 +36,6 @@ const companySchema = z.object({
   email: zs.optEmail(),
   phone: zs.optText(40),
   website: z.preprocess((v) => (typeof v === "string" ? v.trim() || undefined : v), z.url({ error: "Enter a full web address, e.g. https://d4dx.co" }).max(200).optional()),
-  gstin: optUpper(/^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/, "Enter a valid 15-character GSTIN"),
-  pan: optUpper(/^[A-Z]{5}\d{4}[A-Z]$/, "Enter a valid 10-character PAN"),
   logoFile: zs.ids(),
   resetLogo: zs.bool(),
 });
@@ -65,13 +63,47 @@ export async function saveCompany(input: Record<string, unknown>): Promise<Saved
       email: data.email ?? "",
       phone: data.phone ?? "",
       website: data.website ?? "",
-      gstin: data.gstin ?? "",
-      pan: data.pan ?? "",
+      // Edited under GST & bank details.
+      gstin: before.gstin,
+      pan: before.pan,
     };
     // Omitting the key falls back to the default D4DX logo.
     if (logo && !data.resetLogo) next.logo = logo;
     return saveConfig(user, "company", "Company profile", next);
   }, "Company profile saved");
+}
+
+/* ───────────────────────────── GST & bank details ───────────────────────────── */
+
+const gstBankSchema = z.object({
+  gstin: optUpper(/^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/, "Enter a valid 15-character GSTIN"),
+  pan: optUpper(/^[A-Z]{5}\d{4}[A-Z]$/, "Enter a valid 10-character PAN"),
+  accountName: zs.optText(160),
+  bankName: zs.optText(120),
+  branch: zs.optText(120),
+  accountNumber: optUpper(/^[0-9A-Z]{6,20}$/, "Enter the account number (6–20 letters or digits, no spaces)"),
+  ifsc: optUpper(/^[A-Z]{4}0[A-Z0-9]{6}$/, "Enter a valid 11-character IFSC, e.g. SBIN0001234"),
+  upiId: z.preprocess((v) => (typeof v === "string" ? v.trim() || undefined : v), z.string().regex(/^[\w.-]{2,256}@[a-zA-Z]{2,64}$/, "Enter a valid UPI ID, e.g. d4dx@okaxis").optional()),
+  bankDetails: zs.optText(1000),
+});
+
+export async function saveGstAndBank(input: Record<string, unknown>): Promise<Saved> {
+  return runAction(async () => {
+    const user = await actionPermission("settings.manage");
+    const data = parse(gstBankSchema, input);
+    const before = await getSettings();
+    const company = await saveConfig(user, "company", "GST details", { ...before.company, gstin: data.gstin ?? "", pan: data.pan ?? "" });
+    const bank = await saveConfig(user, "bank", "Bank details", {
+      accountName: data.accountName ?? "",
+      bankName: data.bankName ?? "",
+      branch: data.branch ?? "",
+      accountNumber: data.accountNumber ?? "",
+      ifsc: data.ifsc ?? "",
+      upiId: data.upiId ?? "",
+    });
+    const note = await saveConfig(user, "documents", "Payment details", { ...before.documents, bankDetails: data.bankDetails ?? "" });
+    return { changed: company.changed + bank.changed + note.changed };
+  }, "GST and bank details saved");
 }
 
 /* ───────────────────────────── Attendance ───────────────────────────── */
@@ -371,7 +403,7 @@ export async function saveNumbering(input: Record<string, unknown>): Promise<Sav
 }
 
 const taxesSchema = z.object({
-  taxes: rows(z.object({ name: zs.text("Tax name", 40), rate: zs.num("Tax rate", { min: 0, max: 100 }), split: zs.bool() }), 30),
+  taxes: rows(z.object({ name: zs.text("Tax name", 40), rate: zs.num("Tax rate", { min: 0.01, max: 100 }) }), 30),
   paymentTerms: rows(z.object({ label: zs.text("Term name", 40), days: zs.num("Days", { min: 0, max: 365 }) }), 30),
 });
 
@@ -379,9 +411,8 @@ export async function saveTaxesAndTerms(input: Record<string, unknown>): Promise
   return runAction(async () => {
     const user = await actionPermission("settings.manage");
     const data = parse(taxesSchema, input);
-    if (data.taxes.length === 0) throw new ActionError("Keep at least one tax rate (use \"No tax\" for 0%).");
     if (data.paymentTerms.length === 0) throw new ActionError("Keep at least one payment term.");
-    assertUniqueLabels(data.taxes.map((t) => t.name), "tax rate");
+    assertUniqueLabels(data.taxes.map(taxLabel), "tax rate");
     assertUniqueLabels(data.paymentTerms.map((t) => t.label), "payment term");
     const taxes = await saveConfig(user, "taxes", "Tax rates", data.taxes);
     const terms = await saveConfig(
@@ -402,7 +433,6 @@ const documentsSchema = z.object({
   proposalTerms: zs.optText(2000),
   payslipFooter: zs.optText(500),
   certificateText: zs.text("Certificate text", 2000),
-  bankDetails: zs.optText(1000),
 });
 
 export async function saveDocumentTemplates(input: Record<string, unknown>): Promise<Saved> {
@@ -411,13 +441,15 @@ export async function saveDocumentTemplates(input: Record<string, unknown>): Pro
     const data = parse(documentsSchema, input);
     const unknown = [...data.certificateText.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).filter((p) => !ALLOWED_PLACEHOLDERS.has(p));
     if (unknown.length > 0) fieldError("certificateText", `Unknown placeholder ${[...new Set(unknown)].map((p) => `{${p}}`).join(", ")}`);
+    const before = (await getSettings()).documents;
     return saveConfig(user, "documents", "Document templates", {
       invoiceNotes: data.invoiceNotes ?? "",
       invoiceTerms: data.invoiceTerms ?? "",
       proposalTerms: data.proposalTerms ?? "",
       payslipFooter: data.payslipFooter ?? "",
       certificateText: data.certificateText,
-      bankDetails: data.bankDetails ?? "",
+      // Edited under GST & bank details.
+      bankDetails: before.bankDetails,
     });
   }, "Templates saved");
 }

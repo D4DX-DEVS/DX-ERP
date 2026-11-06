@@ -102,7 +102,9 @@ export interface LineItem {
   quantity: number;
   rate: number;
   taxRate: number;
-  /** Tax chosen from Settings → Taxes, and whether it is intra-state GST (CGST + SGST, half each). Invoices only. */
+  /** Invoices only: the taxes ticked on the line (e.g. CGST 9% + SGST 9%); `taxRate` is their sum. */
+  taxes?: { name: string; rate: number }[];
+  /** Invoice lines saved before taxes were ticked separately: the one tax chosen, and whether it was CGST + SGST (half each). */
   taxName?: string;
   taxSplit?: boolean;
   amount: number;

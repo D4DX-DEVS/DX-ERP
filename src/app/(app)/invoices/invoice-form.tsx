@@ -3,15 +3,18 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Popover } from "radix-ui";
 import { Plus, Trash2 } from "lucide-react";
 import { ActionForm, Field, FormActions, FormGrid, SubmitButton, useFormState } from "@/components/ui/form";
-import { Input, Select, Textarea } from "@/components/ui/input";
+import { Checkbox, Input, Select, Textarea } from "@/components/ui/input";
 import { Button, buttonClass } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import type { TaxRate } from "@/lib/config-defaults";
+import { Alert } from "@/components/ui/page";
+import { taxLabel, type TaxRate } from "@/lib/config-defaults";
 import { inr } from "@/lib/format";
 import { addDays, fmtDate } from "@/lib/time";
 import { saveInvoice } from "./actions";
+import type { BillingInfo } from "./billing-info";
 import { computeTotals, CUSTOM_TERM } from "./totals";
 
 export interface ClientOption {
@@ -43,6 +46,7 @@ export interface ContractOption {
 
 export interface InvoiceFormInitial {
   id?: string;
+  invoiceNo: string;
   client: string;
   project: string;
   contract: string;
@@ -54,34 +58,22 @@ export interface InvoiceFormInitial {
   placeOfSupply: string;
   notes: string;
   terms: string;
-  /** `tax` is the Settings tax name ("" on lines saved before names were kept: `taxRate` / `taxSplit` then describe it). */
-  items: { description: string; quantity: string; rate: string; tax: string; taxRate?: number; taxSplit?: boolean }[];
+  items: { description: string; quantity: string; rate: string; taxes: TaxRate[] }[];
 }
 
 interface Line {
   description: string;
   quantity: string;
   rate: string;
-  /** Name of the chosen tax option. */
-  tax: string;
+  /** Labels of the ticked taxes, e.g. ["CGST 9%", "SGST 9%"]; empty = no tax. */
+  taxes: string[];
 }
 
-/** A tax a draft line was saved with that Settings no longer offers; `legacy` when it predates tax names. */
-type TaxOption = TaxRate & { legacy?: boolean };
-
-/** Tax choices for the line selects: Settings → Taxes plus any tax a saved line still uses, so editing never changes it silently. */
-function taxChoices(taxes: TaxRate[], items: InvoiceFormInitial["items"]): { options: TaxOption[]; keys: string[] } {
-  const options: TaxOption[] = [...taxes];
-  const keys = items.map((it) => {
-    if (it.tax && taxes.some((t) => t.name === it.tax)) return it.tax;
-    const rate = it.taxRate ?? 0;
-    const none = taxes.find((t) => t.rate === 0);
-    if (!it.tax && rate === 0 && none) return none.name;
-    const name = it.tax || `${rate}%`;
-    if (!options.some((o) => o.name === name)) options.push({ name, rate, split: it.taxSplit, legacy: !it.tax });
-    return name;
-  });
-  return { options, keys };
+/** Tax tick-boxes: Settings → Taxes plus any tax a saved line still uses, so editing never changes it silently. */
+function taxChoices(taxes: TaxRate[], items: InvoiceFormInitial["items"]): TaxRate[] {
+  const options = [...taxes];
+  for (const t of items.flatMap((it) => it.taxes)) if (!options.some((o) => taxLabel(o) === taxLabel(t))) options.push(t);
+  return options;
 }
 
 export function InvoiceForm({
@@ -91,6 +83,8 @@ export function InvoiceForm({
   contracts,
   taxes,
   paymentTerms,
+  billing,
+  lastInvoiceNo,
 }: {
   initial: InvoiceFormInitial;
   clients: ClientOption[];
@@ -99,15 +93,17 @@ export function InvoiceForm({
   contracts: ContractOption[] | null;
   taxes: TaxRate[];
   paymentTerms: { label: string; days: number }[];
+  billing: BillingInfo & { canConfigure: boolean };
+  lastInvoiceNo?: string;
 }) {
   const router = useRouter();
-  const defaultTax = (taxes.find((t) => t.rate > 0) ?? taxes[0]).name;
-  const [choices] = useState(() => taxChoices(taxes, initial.items));
-  const taxOf = (name: string): TaxOption => choices.options.find((o) => o.name === name) ?? choices.options[0];
-  const lineItem = (l: Line) => {
-    const t = taxOf(l.tax);
-    return { description: l.description, quantity: Number(l.quantity) || 0, rate: Number(l.rate) || 0, taxRate: t.rate, taxName: t.legacy ? undefined : t.name, taxSplit: Boolean(t.split) };
-  };
+  const [options] = useState(() => taxChoices(taxes, initial.items));
+  const lineItem = (l: Line) => ({
+    description: l.description,
+    quantity: Number(l.quantity) || 0,
+    rate: Number(l.rate) || 0,
+    taxes: options.filter((o) => l.taxes.includes(taxLabel(o))),
+  });
   const [client, setClient] = useState(initial.client);
   const [project, setProject] = useState(initial.project);
   const [contract, setContract] = useState(initial.contract);
@@ -118,8 +114,10 @@ export function InvoiceForm({
   const [discount, setDiscount] = useState(initial.discount);
   const [placeOfSupply, setPlaceOfSupply] = useState(initial.placeOfSupply);
   const [lines, setLines] = useState<Line[]>(() =>
-    initial.items.length ? initial.items.map((it, i) => ({ description: it.description, quantity: it.quantity, rate: it.rate, tax: choices.keys[i] })) : [{ description: "", quantity: "1", rate: "", tax: defaultTax }],
+    initial.items.map((it) => ({ description: it.description, quantity: it.quantity, rate: it.rate, taxes: it.taxes.map(taxLabel) })),
   );
+  // New lines start with the taxes of the last line.
+  const newLine = (patch: Partial<Line> = {}): Line => ({ description: "", quantity: "1", rate: "", taxes: lines[lines.length - 1]?.taxes ?? [], ...patch });
 
   const clientProjects = projects.filter((p) => p.client === client);
   const clientContracts = (contracts ?? []).filter((c) => c.client === client);
@@ -127,6 +125,7 @@ export function InvoiceForm({
   const milestones = selectedProject?.milestones ?? [];
 
   const totals = computeTotals(lines.map(lineItem), Number(discount) || 0);
+  const taxed = totals.items.some((i) => i.taxParts.length > 0);
   const termDays = term === CUSTOM_TERM ? null : Number(term);
   const computedDue = termDays !== null && issueDate ? addDays(issueDate, termDays) : null;
 
@@ -151,7 +150,7 @@ export function InvoiceForm({
     setMilestone(id);
     const m = milestones.find((x) => x.id === id);
     if (!m) return;
-    const line: Line = { description: m.title, quantity: "1", rate: m.amount ? String(m.amount) : "", tax: defaultTax };
+    const line = newLine({ description: m.title, rate: m.amount ? String(m.amount) : "" });
     setLines((ls) => (ls.length === 1 && !ls[0].description && !ls[0].rate ? [line] : [...ls, line]));
   }
 
@@ -171,6 +170,9 @@ export function InvoiceForm({
         <CardHeader title="Billing details" subtitle="Who is being billed and what the invoice relates to." />
         <CardBody>
           <FormGrid>
+            <Field label="Invoice number" name="invoiceNo" required hint={`Up to 16 letters, digits, - or /.${lastInvoiceNo ? ` Last used: ${lastInvoiceNo}` : ""}`}>
+              <Input id="invoiceNo" name="invoiceNo" defaultValue={initial.invoiceNo} maxLength={16} className="uppercase" autoComplete="off" />
+            </Field>
             <Field label="Client" name="client" required>
               <Select id="client" name="client" value={client} onChange={(e) => pickClient(e.target.value)}>
                 <option value="">Select client</option>
@@ -249,13 +251,13 @@ export function InvoiceForm({
           title="Line items"
           subtitle="Amounts are before tax. Totals are recalculated on the server when you save."
           action={
-            <Button variant="secondary" size="sm" icon={<Plus className="size-4" />} onClick={() => setLines((ls) => [...ls, { description: "", quantity: "1", rate: "", tax: defaultTax }])}>
+            <Button variant="secondary" size="sm" icon={<Plus className="size-4" />} onClick={() => setLines((ls) => [...ls, newLine()])}>
               Add line
             </Button>
           }
         />
         <CardBody className="flex flex-col gap-4">
-          <LineEditor lines={lines} computed={totals.items.map((i) => i.amount)} onChange={updateLine} onRemove={(i) => setLines((ls) => (ls.length > 1 ? ls.filter((_, idx) => idx !== i) : ls))} taxes={choices.options} />
+          <LineEditor lines={lines} computed={totals.items.map((i) => i.amount)} onChange={updateLine} onRemove={(i) => setLines((ls) => (ls.length > 1 ? ls.filter((_, idx) => idx !== i) : ls))} taxes={options} />
 
           <div className="grid gap-5 border-t border-line-soft pt-4 xl:grid-cols-[1fr_320px]">
             <div className="flex flex-col gap-4">
@@ -300,6 +302,8 @@ export function InvoiceForm({
         </CardBody>
       </Card>
 
+      <BillingCard billing={billing} taxed={taxed} />
+
       <FormActions>
         <Link href={initial.id ? `/invoices/${initial.id}` : "/invoices"} className={buttonClass("secondary")}>
           Cancel
@@ -320,6 +324,89 @@ function DiscountInput({ value, onChange }: { value: string; onChange: (v: strin
   );
 }
 
+/** The supplier GST and bank details the PDF will print (only when a line is taxed), read from Configuration. */
+function BillingCard({ billing, taxed }: { billing: BillingInfo & { canConfigure: boolean }; taxed: boolean }) {
+  const configure = billing.canConfigure ? (
+    <Link href="/settings?section=gst" className="font-semibold text-brand-600 hover:text-brand-800">
+      Configuration → GST &amp; bank details
+    </Link>
+  ) : (
+    "Configuration → GST & bank details (ask an administrator)"
+  );
+  return (
+    <Card>
+      <CardHeader title="GST & bank details" subtitle={taxed ? "Printed on this tax invoice, from Configuration." : "No line is taxed, so the invoice leaves out GST and bank details."} />
+      {taxed && (
+        <CardBody className="flex flex-col gap-4">
+          {(billing.gst.length === 0 || billing.bank.length === 0) && (
+            <Alert tone="warning">
+              {billing.gst.length === 0 ? "No GSTIN" : "No bank account"} is set up yet. Add it under {configure}.
+            </Alert>
+          )}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <DetailList title="GST" rows={billing.gst} />
+            <DetailList title="Bank" rows={billing.bank} note={billing.note} />
+          </div>
+          {billing.canConfigure && billing.gst.length > 0 && billing.bank.length > 0 && <p className="text-xs text-muted">Change these under {configure}.</p>}
+        </CardBody>
+      )}
+    </Card>
+  );
+}
+
+function DetailList({ title, rows, note }: { title: string; rows: [string, string][]; note?: string }) {
+  return (
+    <div className="rounded-xl bg-field p-4 text-sm">
+      <div className="mb-2 text-[11px] font-semibold tracking-[0.08em] text-muted uppercase">{title}</div>
+      {rows.length === 0 && !note && <p className="text-muted">Not set up</p>}
+      <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1">
+        {rows.map(([k, v]) => (
+          <div key={k} className="contents">
+            <dt className="text-muted">{k}</dt>
+            <dd className="font-medium break-words text-ink">{v}</dd>
+          </div>
+        ))}
+      </dl>
+      {note && <p className="mt-2 whitespace-pre-line text-muted">{note}</p>}
+    </div>
+  );
+}
+
+/** Tick-boxes for a line's taxes: none (No tax), or e.g. CGST 9% + SGST 9% within the state, IGST 18% across states. */
+function TaxPicker({ label, value, options, onChange }: { label: string; value: string[]; options: TaxRate[]; onChange: (taxes: string[]) => void }) {
+  const toggle = (key: string, on: boolean) => onChange(options.map(taxLabel).filter((k) => (k === key ? on : value.includes(k))));
+  return (
+    <Popover.Root>
+      <Popover.Trigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          title={value.join(" + ") || undefined}
+          className="field-chevron h-10 w-full truncate rounded-[10px] border border-line-strong bg-white pr-9 pl-3 text-left text-base text-ink focus:border-brand-500 focus:ring-[3px] focus:ring-brand-100 focus:outline-none sm:pl-3.5 sm:text-sm"
+        >
+          {value.length ? value.join(" + ") : "No tax"}
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content align="start" sideOffset={6} className="z-50 flex min-w-52 animate-fade-in flex-col gap-1 rounded-xl border border-line bg-white p-2 shadow-popover">
+          <TaxOptionRow label="No tax" checked={value.length === 0} onChange={() => onChange([])} />
+          {options.map((o) => (
+            <TaxOptionRow key={taxLabel(o)} label={taxLabel(o)} checked={value.includes(taxLabel(o))} onChange={(on) => toggle(taxLabel(o), on)} />
+          ))}
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+}
+
+function TaxOptionRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <div className="rounded-lg px-2 py-1.5 hover:bg-field [&>label]:w-full">
+      <Checkbox label={label} checked={checked} onChange={(e) => onChange(e.target.checked)} />
+    </div>
+  );
+}
+
 function LineEditor({
   lines,
   computed,
@@ -331,14 +418,14 @@ function LineEditor({
   computed: number[];
   onChange: (index: number, patch: Partial<Line>) => void;
   onRemove: (index: number) => void;
-  taxes: TaxOption[];
+  taxes: TaxRate[];
 }) {
   const { errors } = useFormState();
   const err = (i: number, key: string) => errors[`items.${i}.${key}`];
   return (
     <div className="flex flex-col gap-3">
       {errors.items && <p className="text-xs font-medium text-danger">{errors.items}</p>}
-      <div className="hidden grid-cols-[minmax(0,1fr)_76px_112px_180px_110px_36px] gap-2 px-1 text-xs font-semibold text-muted md:grid">
+      <div className="hidden grid-cols-[minmax(0,1fr)_76px_112px_200px_110px_36px] gap-2 px-1 text-xs font-semibold text-muted md:grid">
         <span>Description</span>
         <span>Qty</span>
         <span>Rate (₹)</span>
@@ -347,7 +434,7 @@ function LineEditor({
         <span />
       </div>
       {lines.map((l, i) => (
-        <div key={i} className="grid grid-cols-2 gap-2 rounded-xl border border-line-soft p-3 md:grid-cols-[minmax(0,1fr)_76px_112px_180px_110px_36px] md:items-start md:border-0 md:p-0">
+        <div key={i} className="grid grid-cols-2 gap-2 rounded-xl border border-line-soft p-3 md:grid-cols-[minmax(0,1fr)_76px_112px_200px_110px_36px] md:items-start md:border-0 md:p-0">
           <div className="col-span-2 md:col-span-1">
             <Input aria-label={`Line ${i + 1} description`} placeholder="Description" value={l.description} onChange={(e) => onChange(i, { description: e.target.value })} maxLength={500} aria-invalid={Boolean(err(i, "description"))} />
             {err(i, "description") && <p className="mt-1 text-xs font-medium text-danger">{err(i, "description")}</p>}
@@ -361,13 +448,7 @@ function LineEditor({
             {err(i, "rate") && <p className="mt-1 text-xs font-medium text-danger">{err(i, "rate")}</p>}
           </div>
           <div>
-            <Select aria-label={`Line ${i + 1} tax`} value={l.tax} onChange={(e) => onChange(i, { tax: e.target.value })}>
-              {taxes.map((t) => (
-                <option key={t.name} value={t.name}>
-                  {t.name}
-                </option>
-              ))}
-            </Select>
+            <TaxPicker label={`Line ${i + 1} tax`} value={l.taxes} options={taxes} onChange={(t) => onChange(i, { taxes: t })} />
           </div>
           <div className="flex h-10 items-center justify-end text-sm font-semibold text-ink tabular">{inr(computed[i] ?? 0, true)}</div>
           <button

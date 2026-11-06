@@ -13,6 +13,7 @@ import {
   saveCompany,
   saveDataSecurity,
   saveDocumentTemplates,
+  saveGstAndBank,
   saveLeaveSettings,
   saveNotifications,
   saveNumbering,
@@ -43,12 +44,6 @@ export function CompanyForm({ company, storageConfigured }: { company: AppSettin
             <Input id="website" name="website" type="url" defaultValue={company.website} placeholder="https://" />
           </Field>
           <div className="hidden @lg:block" />
-          <Field label="GSTIN" name="gstin" hint="15 characters, e.g. 32ABCDE1234F1Z5">
-            <Input id="gstin" name="gstin" defaultValue={company.gstin} className="uppercase" maxLength={15} />
-          </Field>
-          <Field label="PAN" name="pan" hint="10 characters, e.g. ABCDE1234F">
-            <Input id="pan" name="pan" defaultValue={company.pan} className="uppercase" maxLength={10} />
-          </Field>
           <Field label="Address" name="address" className="@lg:col-span-2">
             <Textarea id="address" name="address" defaultValue={company.address} rows={3} maxLength={500} />
           </Field>
@@ -83,6 +78,51 @@ export function CompanyForm({ company, storageConfigured }: { company: AppSettin
           </div>
           <Checkbox name="resetLogo" label="Use the default D4DX logo instead" />
         </div>
+        <SaveRow />
+      </ActionForm>
+    </SettingsCard>
+  );
+}
+
+/* ───────────────────────────── GST & bank details ───────────────────────────── */
+
+export function GstBankForm({ company, bank, bankDetails }: { company: AppSettings["company"]; bank: AppSettings["bank"]; bankDetails: string }) {
+  return (
+    <SettingsCard title="GST & bank details" description="Printed on invoices that charge tax (CGST, SGST or IGST). Invoices with no tax leave them out.">
+      <ActionForm action={saveGstAndBank}>
+        <div className="text-[13px] font-semibold text-ink-2">GST registration</div>
+        <CGrid>
+          <Field label="GSTIN" name="gstin" hint="15 characters, e.g. 32ABCDE1234F1Z5. The first two digits are the state code.">
+            <Input id="gstin" name="gstin" defaultValue={company.gstin} className="uppercase" maxLength={15} autoComplete="off" />
+          </Field>
+          <Field label="PAN" name="pan" hint="10 characters, e.g. ABCDE1234F">
+            <Input id="pan" name="pan" defaultValue={company.pan} className="uppercase" maxLength={10} autoComplete="off" />
+          </Field>
+        </CGrid>
+        <div className="border-t border-line-soft pt-4 text-[13px] font-semibold text-ink-2">Bank account for payments</div>
+        <CGrid>
+          <Field label="Account name" name="accountName">
+            <Input id="accountName" name="accountName" defaultValue={bank.accountName} maxLength={160} autoComplete="off" />
+          </Field>
+          <Field label="Bank" name="bankName">
+            <Input id="bankName" name="bankName" defaultValue={bank.bankName} maxLength={120} autoComplete="off" />
+          </Field>
+          <Field label="Branch" name="branch">
+            <Input id="branch" name="branch" defaultValue={bank.branch} maxLength={120} autoComplete="off" />
+          </Field>
+          <Field label="Account number" name="accountNumber">
+            <Input id="accountNumber" name="accountNumber" defaultValue={bank.accountNumber} className="uppercase" maxLength={20} inputMode="numeric" autoComplete="off" />
+          </Field>
+          <Field label="IFSC" name="ifsc" hint="11 characters, e.g. SBIN0001234">
+            <Input id="ifsc" name="ifsc" defaultValue={bank.ifsc} className="uppercase" maxLength={11} autoComplete="off" />
+          </Field>
+          <Field label="UPI ID" name="upiId" hint="Optional, e.g. d4dx@okaxis">
+            <Input id="upiId" name="upiId" defaultValue={bank.upiId} maxLength={120} autoComplete="off" />
+          </Field>
+          <Field label="Other payment details" name="bankDetails" hint="Optional, printed under the bank account, e.g. cheque instructions." className="@lg:col-span-2">
+            <Textarea id="bankDetails" name="bankDetails" defaultValue={bankDetails} rows={3} maxLength={1000} />
+          </Field>
+        </CGrid>
         <SaveRow />
       </ActionForm>
     </SettingsCard>
@@ -242,9 +282,6 @@ export function TemplatesForm({ documents }: { documents: AppSettings["documents
           </Field>
           <Field label="Payslip footer" name="payslipFooter">
             <Textarea id="payslipFooter" name="payslipFooter" defaultValue={documents.payslipFooter} rows={3} maxLength={500} />
-          </Field>
-          <Field label="Bank details" name="bankDetails" hint="Printed on invoices so clients know where to pay." className="@lg:col-span-2">
-            <Textarea id="bankDetails" name="bankDetails" defaultValue={documents.bankDetails} rows={4} maxLength={1000} placeholder={"Account name\nBank and branch\nAccount number · IFSC"} />
           </Field>
           <Field
             label="Internship certificate text"

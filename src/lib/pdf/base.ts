@@ -22,7 +22,12 @@ const moneyFmt = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maxi
 
 export function pdfMoney(amount: number | null | undefined): string {
   if (amount == null || Number.isNaN(amount)) return "-";
-  return `Rs. ${moneyFmt.format(amount)}`;
+  return `Rs. ${pdfAmount(amount)}`;
+}
+
+/** Amount without the currency, for table columns headed "(Rs.)": "18,42,500.00". */
+export function pdfAmount(amount: number): string {
+  return moneyFmt.format(amount);
 }
 
 /** Strips characters Helvetica cannot render (keeps the PDF from showing garbage glyphs). */

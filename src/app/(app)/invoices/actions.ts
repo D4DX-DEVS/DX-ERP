@@ -21,13 +21,21 @@ const itemSchema = z.object({
   description: zs.text("Description", 500),
   quantity: zs.num("Quantity", { min: 0.01 }),
   rate: zs.num("Rate", { min: 0 }),
-  taxRate: zs.num("Tax rate", { min: 0, max: 100 }),
-  taxName: zs.optText(40),
-  taxSplit: zs.bool(),
+  taxes: z
+    .array(z.object({ name: zs.text("Tax", 40), rate: zs.num("Tax rate", { min: 0.01, max: 100 }) }))
+    .max(5, "Too many taxes on one line")
+    .refine((t) => new Set(t.map((x) => `${x.name} ${x.rate}`)).size === t.length, "A tax is ticked twice"),
 });
+
+/** GST rule 46: up to 16 characters, letters, digits, hyphen and slash. Stored upper-case. */
+const invoiceNoSchema = z.preprocess(
+  (v) => (typeof v === "string" ? v.trim().toUpperCase() : v),
+  z.string({ error: "Invoice number is required" }).min(1, "Invoice number is required").regex(/^[A-Z0-9/-]{1,16}$/, "Up to 16 letters, digits, - or /"),
+);
 
 const draftSchema = z.object({
   id: zs.optId(),
+  invoiceNo: invoiceNoSchema,
   client: zs.id("Client"),
   project: zs.optId(),
   contract: zs.optId(),
@@ -143,7 +151,11 @@ export async function saveInvoice(input: Record<string, unknown>): Promise<Actio
     const totals = computeTotals(data.items, data.discount ?? 0);
     if ((data.discount ?? 0) > totals.subtotal) throw new ActionError("The discount cannot exceed the subtotal.", { discount: "Cannot exceed the subtotal" });
 
+    const [taken] = await db().select({ id: Invoice._id }).from(Invoice).where(eq(Invoice.invoiceNo, data.invoiceNo)).limit(1);
+    if (taken && taken.id !== data.id) throw new ActionError(`Invoice number ${data.invoiceNo} is already used.`, { invoiceNo: "Already used by another invoice" });
+
     const fields = {
+      invoiceNo: data.invoiceNo,
       client: data.client,
       project: data.project ?? null,
       contract: data.contract ?? null,
@@ -151,7 +163,7 @@ export async function saveInvoice(input: Record<string, unknown>): Promise<Actio
       issueDate: data.issueDate,
       dueDate,
       paymentTermDays,
-      items: totals.items.map((i) => ({ description: i.description, quantity: i.quantity, rate: i.rate, taxRate: i.taxRate, taxName: i.taxName, taxSplit: i.taxSplit || undefined, amount: i.amount })),
+      items: totals.items.map((i) => ({ description: i.description, quantity: i.quantity, rate: i.rate, taxRate: i.taxRate, taxes: i.taxes, amount: i.amount })),
       subtotal: totals.subtotal,
       discount: totals.discount,
       taxTotal: totals.taxTotal,
@@ -175,10 +187,10 @@ export async function saveInvoice(input: Record<string, unknown>): Promise<Actio
         action: "update",
         entity: "invoice",
         entityId: updated._id,
-        ref: updated.draftNo,
-        summary: `Updated draft ${updated.draftNo}`,
+        ref: label(updated),
+        summary: `Updated draft ${label(updated)}`,
         // Amounts are intentionally left out of the audit trail (`audit.view` does not imply `invoices.view`).
-        changes: diff(before as Record<string, unknown>, updated as Record<string, unknown>, ["client", "issueDate", "dueDate", "subtotal", "discount", "taxTotal", "total"], ["subtotal", "discount", "taxTotal", "total"]),
+        changes: diff(before as Record<string, unknown>, updated as Record<string, unknown>, ["invoiceNo", "client", "issueDate", "dueDate", "subtotal", "discount", "taxTotal", "total"], ["subtotal", "discount", "taxTotal", "total"]),
       });
       return { id: updated._id };
     }
@@ -194,7 +206,7 @@ export async function saveInvoice(input: Record<string, unknown>): Promise<Actio
         history: [{ _id: newId(), action: "created", by: user._id, byName: user.name, at: new Date() }],
       })
       .returning();
-    await audit(user, { action: "create", entity: "invoice", entityId: doc._id, ref: draftNo, summary: `Created draft invoice ${draftNo} for ${client.name}` });
+    await audit(user, { action: "create", entity: "invoice", entityId: doc._id, ref: data.invoiceNo, summary: `Created draft invoice ${data.invoiceNo} for ${client.name}` });
     return { id: doc._id };
   }, "Draft saved");
 }
@@ -206,12 +218,15 @@ export async function deleteDraftInvoice(id: string): Promise<ActionResult<null>
     const inv = await loadInvoice(id);
     const deleted = await db().delete(Invoice).where(and(eq(Invoice._id, id), eq(Invoice.status, "draft"))).returning({ id: Invoice._id });
     if (deleted.length === 0) throw new ActionError("Only draft invoices can be deleted.");
-    await audit(user, { action: "delete", entity: "invoice", entityId: inv._id, ref: inv.draftNo, summary: `Deleted draft invoice ${inv.draftNo}` });
+    await audit(user, { action: "delete", entity: "invoice", entityId: inv._id, ref: label(inv), summary: `Deleted draft invoice ${label(inv)}` });
     return null;
   }, "Draft deleted");
 }
 
-/** Issues a draft: assigns the final number, snapshots the billing details and marks the milestone invoiced. */
+/**
+ * Issues a draft: locks its number (drafts saved before numbers were entered by hand get the next automatic one),
+ * snapshots the billing details and marks the milestone invoiced.
+ */
 export async function issueInvoice(id: string): Promise<ActionResult<{ invoiceNo: string }>> {
   return runAction(async () => {
     const user = await actionPermission("invoices.manage");
@@ -219,7 +234,7 @@ export async function issueInvoice(id: string): Promise<ActionResult<{ invoiceNo
     if (inv.status !== "draft") throw new ActionError("This invoice has already been issued.");
     if (inv.items.length === 0 || inv.total <= 0) throw new ActionError("Add line items with a total above zero before issuing.");
 
-    const billingColumns = { name: Client.name, address: Client.address, gstin: Client.gstin, email: Client.email };
+    const billingColumns = { name: Client.name, contactPerson: Client.contactPerson, address: Client.address, gstin: Client.gstin, email: Client.email, phone: Client.phone };
     const [client] = await db().select(billingColumns).from(Client).where(eq(Client._id, inv.client)).limit(1);
     if (!client) throw new ActionError("The client of this invoice no longer exists.");
 
@@ -247,25 +262,35 @@ export async function issueInvoice(id: string): Promise<ActionResult<{ invoiceNo
         billedTo = latest;
       }
       if (claimed.items.length === 0 || claimed.total <= 0) throw new ActionError("Add line items with a total above zero before issuing.");
-      const settings = await getSettings();
-      const n = settings.numbering;
-      const fy = fiscalYear(zonedDateTime(claimed.issueDate, "12:00"));
-      const seq = await nextSeq(n.invoiceIncludeFiscalYear ? `invoice:${fy}` : "invoice");
-      invoiceNo = `${n.invoicePrefix}${n.invoiceIncludeFiscalYear ? `${fy}-` : ""}${String(seq).padStart(n.invoicePadding, "0")}`;
+      if (claimed.invoiceNo) invoiceNo = claimed.invoiceNo;
+      else {
+        const n = (await getSettings()).numbering;
+        const fy = fiscalYear(zonedDateTime(claimed.issueDate, "12:00"));
+        const seq = await nextSeq(n.invoiceIncludeFiscalYear ? `invoice:${fy}` : "invoice");
+        invoiceNo = `${n.invoicePrefix}${n.invoiceIncludeFiscalYear ? `${fy}-` : ""}${String(seq).padStart(n.invoicePadding, "0")}`;
+      }
       await db()
         .update(Invoice)
         .set({
           invoiceNo,
           balance: balanceOf({ total: claimed.total, amountPaid: 0, amountRefunded: 0, adjustments: 0 }),
-          billingSnapshot: { name: billedTo.name, address: formatAddress(billedTo.address ?? undefined), gstin: billedTo.gstin ?? undefined, email: billedTo.email ?? undefined },
+          billingSnapshot: {
+            name: billedTo.name,
+            contactPerson: billedTo.contactPerson ?? undefined,
+            address: formatAddress(billedTo.address ?? undefined),
+            gstin: billedTo.gstin ?? undefined,
+            email: billedTo.email ?? undefined,
+            phone: billedTo.phone ?? undefined,
+          },
           history: jsonPush(Invoice.history, { _id: newId(), action: "issued", by: user._id, byName: user.name, at: new Date(), note: invoiceNo }),
         })
         .where(eq(Invoice._id, id));
     } catch (error) {
+      // Only drafts lack a billing snapshot, so this undoes the claim only when issuing did not complete.
       await db()
         .update(Invoice)
         .set({ status: "draft", issuedAt: null })
-        .where(and(eq(Invoice._id, id), eq(Invoice.status, "issued"), isNull(Invoice.invoiceNo)));
+        .where(and(eq(Invoice._id, id), eq(Invoice.status, "issued"), isNull(Invoice.billingSnapshot)));
       throw error;
     }
 

@@ -7,7 +7,7 @@ import { PageBody, PageHeader } from "@/components/ui/page";
 import { isObjectId } from "@/lib/validation";
 import { loadInvoiceFormOptions } from "../../form-data";
 import { InvoiceForm, type InvoiceFormInitial } from "../../invoice-form";
-import { CUSTOM_TERM } from "../../totals";
+import { CUSTOM_TERM, taxPartsOf } from "../../totals";
 
 export const metadata = { title: "Edit draft invoice" };
 
@@ -23,6 +23,7 @@ export default async function EditInvoicePage({ params }: { params: Promise<{ id
   const matching = options.paymentTerms.find((t) => t.days === inv.paymentTermDays);
   const initial: InvoiceFormInitial = {
     id,
+    invoiceNo: inv.invoiceNo ?? "",
     client: inv.client,
     project: inv.project ?? "",
     contract: inv.contract ?? "",
@@ -34,13 +35,23 @@ export default async function EditInvoicePage({ params }: { params: Promise<{ id
     placeOfSupply: inv.placeOfSupply ?? "",
     notes: inv.notes ?? "",
     terms: inv.terms ?? "",
-    items: inv.items.map((i) => ({ description: i.description, quantity: String(i.quantity), rate: String(i.rate), tax: i.taxName ?? "", taxRate: i.taxRate, taxSplit: i.taxSplit })),
+    items: inv.items.map((i) => ({ description: i.description, quantity: String(i.quantity), rate: String(i.rate), taxes: taxPartsOf(i) })),
   };
+  const label = inv.invoiceNo ?? inv.draftNo;
 
   return (
     <PageBody>
-      <PageHeader back={{ href: `/invoices/${id}`, label: inv.draftNo }} title={`Edit ${inv.draftNo}`} description="Only drafts can be edited. Issued invoices are locked." />
-      <InvoiceForm initial={initial} clients={options.clients} projects={options.projects} contracts={options.contracts} taxes={options.taxes} paymentTerms={options.paymentTerms} />
+      <PageHeader back={{ href: `/invoices/${id}`, label }} title={`Edit ${label}`} description="Only drafts can be edited. Issued invoices are locked." />
+      <InvoiceForm
+        initial={initial}
+        clients={options.clients}
+        projects={options.projects}
+        contracts={options.contracts}
+        taxes={options.taxes}
+        paymentTerms={options.paymentTerms}
+        billing={options.billing}
+        lastInvoiceNo={options.lastInvoiceNo}
+      />
     </PageBody>
   );
 }

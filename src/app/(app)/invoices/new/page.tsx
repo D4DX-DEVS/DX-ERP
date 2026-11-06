@@ -17,10 +17,12 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: P
   const project = options.projects.find((p) => p.id === projectId);
   const milestone = project?.milestones.find((m) => m.id === idParam(sp, "milestone"));
   const clientId = project?.client ?? idParam(sp, "client") ?? "";
-  const defaultTax = (options.taxes.find((t) => t.rate > 0) ?? options.taxes[0]).name;
+  // Sales within the state: CGST + SGST.
+  const defaultTaxes = options.taxes.filter((t) => ["CGST", "SGST"].includes(t.name.toUpperCase()));
   const net15 = options.paymentTerms.find((t) => t.days === 15) ?? options.paymentTerms[0];
 
   const initial: InvoiceFormInitial = {
+    invoiceNo: "",
     client: options.clients.some((c) => c.id === clientId) ? clientId : "",
     project: project?.id ?? "",
     contract: project?.contract && options.contracts?.some((c) => c.id === project.contract) ? project.contract : "",
@@ -33,14 +35,23 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: P
     notes: options.defaults.notes,
     terms: options.defaults.terms,
     items: milestone
-      ? [{ description: milestone.title, quantity: "1", rate: milestone.amount ? String(milestone.amount) : "", tax: defaultTax }]
-      : [{ description: "", quantity: "1", rate: "", tax: defaultTax }],
+      ? [{ description: milestone.title, quantity: "1", rate: milestone.amount ? String(milestone.amount) : "", taxes: defaultTaxes }]
+      : [{ description: "", quantity: "1", rate: "", taxes: defaultTaxes }],
   };
 
   return (
     <PageBody>
-      <PageHeader back={{ href: "/invoices", label: "Invoices" }} title="New invoice" description="Saved as a draft. The invoice number is assigned when you issue it." />
-      <InvoiceForm initial={initial} clients={options.clients} projects={options.projects} contracts={options.contracts} taxes={options.taxes} paymentTerms={options.paymentTerms} />
+      <PageHeader back={{ href: "/invoices", label: "Invoices" }} title="New invoice" description="Saved as a draft. It is locked when you issue it." />
+      <InvoiceForm
+        initial={initial}
+        clients={options.clients}
+        projects={options.projects}
+        contracts={options.contracts}
+        taxes={options.taxes}
+        paymentTerms={options.paymentTerms}
+        billing={options.billing}
+        lastInvoiceNo={options.lastInvoiceNo}
+      />
     </PageBody>
   );
 }

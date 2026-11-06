@@ -10,7 +10,8 @@ export interface SectionDef {
 }
 
 export const SECTIONS: SectionDef[] = [
-  { key: "company", label: "Company profile & logo", description: "Name, address, tax identifiers and branding shown on documents.", permission: "settings.manage" },
+  { key: "company", label: "Company profile & logo", description: "Name, address, contact details and branding shown on documents.", permission: "settings.manage" },
+  { key: "gst", label: "GST & bank details", description: "GSTIN, PAN and the bank account printed on tax invoices.", permission: "settings.manage" },
   { key: "organization", label: "Departments & designations", description: "The organisation structure used across staff records and assets.", permission: "settings.manage" },
   { key: "attendance", label: "Working days & attendance", description: "Working days, office hours and attendance rules.", permission: "settings.manage" },
   { key: "holidays", label: "Holidays", description: "Company holidays and optional holidays by year.", permission: "settings.manage" },

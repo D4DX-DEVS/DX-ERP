@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { Client } from "@/lib/models";
 import { idParam, type SearchParams } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
+import { proposalTaxOptions } from "@/lib/config-defaults";
 import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState, PageBody, PageHeader } from "@/components/ui/page";
@@ -48,7 +49,8 @@ export default async function NewProposalPage({ searchParams }: { searchParams: 
   const clients = await db().select({ _id: Client._id, name: Client.name, clientNo: Client.clientNo }).from(Client).where(clientScope(user)).orderBy(asc(Client.name)).limit(1000);
   const prefillClient = idParam(sp, "client");
   const clientId = lead?.client ?? (prefillClient && clients.some((c) => c._id === prefillClient) ? prefillClient : "");
-  const defaultTax = settings.taxes.find((t) => t.rate === 18)?.rate ?? settings.taxes[0]?.rate ?? 0;
+  const taxes = proposalTaxOptions(settings.taxes);
+  const defaultTax = taxes.find((t) => t.rate === 18)?.rate ?? taxes[0]?.rate ?? 0;
 
   return (
     <PageBody className="max-w-5xl">
@@ -56,7 +58,7 @@ export default async function NewProposalPage({ searchParams }: { searchParams: 
       <ProposalForm
         mode="create"
         clients={clients.map((c) => ({ id: c._id, name: c.name, clientNo: c.clientNo }))}
-        taxes={settings.taxes}
+        taxes={taxes}
         defaultTaxRate={defaultTax}
         clientLocked={Boolean(lead?.client)}
         leadCompany={lead && !lead.client ? lead.companyName : undefined}

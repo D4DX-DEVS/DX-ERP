@@ -23,7 +23,7 @@ import { saveEmploymentStatuses, savePipelineStages, saveProjectStatuses, saveTa
 import { DocumentCategoriesEditor, MovementForm, PayrollForm, StatusEditor, StringListEditor, TaxesForm, type StatusRow } from "./list-forms";
 import { LinkSelect } from "./ui";
 import { DepartmentsCard, DesignationsCard, HolidaysCard, LeaveTypesCard } from "./org-forms";
-import { AttendanceForm, CompanyForm, DataSecurityForm, LeaveSettingsForm, NotificationsForm, NumberingForm, TemplatesForm } from "./simple-forms";
+import { AttendanceForm, CompanyForm, DataSecurityForm, GstBankForm, LeaveSettingsForm, NotificationsForm, NumberingForm, TemplatesForm } from "./simple-forms";
 
 export const metadata = { title: "Configuration" };
 // Backup / restore run inside server actions of this page and can take a while on large databases.
@@ -55,7 +55,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
         description={`${active.description} Every change is written to the audit trail.`}
       />
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-        <nav aria-label="Settings sections" className="hidden w-56 shrink-0 flex-col gap-0.5 rounded-[14px] border border-line bg-white p-2 lg:flex">
+        <nav aria-label="Settings sections" className="scrollbar-thin hidden w-56 shrink-0 flex-col gap-0.5 rounded-[14px] border border-line bg-white p-2 lg:sticky lg:top-24 lg:flex lg:max-h-[calc(100dvh-7rem)] lg:overflow-y-auto">
           {visible.map((s) => (
             <Link
               key={s.key}
@@ -86,6 +86,9 @@ async function SectionBody({ section, sp, user }: { section: string; sp: SearchP
   switch (section) {
     case "company":
       return <CompanyForm key={stamp(settings.company)} company={settings.company} storageConfigured={env.storage.configured} />;
+
+    case "gst":
+      return <GstBankForm key={stamp([settings.company, settings.bank, settings.documents.bankDetails])} company={settings.company} bank={settings.bank} bankDetails={settings.documents.bankDetails} />;
 
     case "organization": {
       const [depts, desigs, deptPeople, desigPeople, people] = await Promise.all([

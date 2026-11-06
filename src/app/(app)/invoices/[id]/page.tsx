@@ -16,6 +16,7 @@ import { buttonClass, ButtonLink } from "@/components/ui/button";
 import { StatusChip } from "@/components/ui/chip";
 import { cn } from "@/lib/cn";
 import { canSeeClient } from "@/app/(app)/crm/_lib/access";
+import { billingInfo } from "../billing-info";
 import { computeTotals, effectiveStatus, lineTaxLabel } from "../totals";
 import { AdjustmentDialog, CancelInvoiceButton, DeleteDraftButton, IssueInvoiceButton, RecordPaymentDialog, RefundDialog } from "../invoice-actions";
 
@@ -47,7 +48,17 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   const [settings, [client], [project], [contract], payments] = await Promise.all([
     getSettings(),
     db()
-      .select({ name: Client.name, clientNo: Client.clientNo, address: Client.address, gstin: Client.gstin, email: Client.email, confidential: Client.confidential, owner: Client.owner })
+      .select({
+        name: Client.name,
+        clientNo: Client.clientNo,
+        contactPerson: Client.contactPerson,
+        address: Client.address,
+        gstin: Client.gstin,
+        email: Client.email,
+        phone: Client.phone,
+        confidential: Client.confidential,
+        owner: Client.owner,
+      })
       .from(Client)
       .where(eq(Client._id, inv.client))
       .limit(1),
@@ -71,11 +82,22 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   const netPaid = round2(inv.amountPaid - inv.amountRefunded);
   const label = inv.invoiceNo ?? inv.draftNo;
   const totals = computeTotals(inv.items, inv.discount);
+  // GST and bank details are shown only when a line is taxed.
+  const taxed = totals.items.some((i) => i.taxParts.length > 0);
+  const info = billingInfo(settings);
   const milestone = project?.milestones.find((m) => m._id === inv.milestone);
 
-  const billing = inv.billingSnapshot
-    ? { name: inv.billingSnapshot.name, lines: inv.billingSnapshot.address ? [inv.billingSnapshot.address] : [], gstin: inv.billingSnapshot.gstin, email: inv.billingSnapshot.email }
-    : { name: client?.name ?? "Unknown client", lines: formatAddress(client?.address ?? undefined), gstin: client?.gstin ?? undefined, email: client?.email ?? undefined };
+  const snap = inv.billingSnapshot;
+  const billing = snap
+    ? { name: snap.name, contactPerson: snap.contactPerson, lines: snap.address ? [snap.address] : [], gstin: snap.gstin, email: snap.email, phone: snap.phone }
+    : {
+        name: client?.name ?? "Unknown client",
+        contactPerson: client?.contactPerson ?? undefined,
+        lines: formatAddress(client?.address ?? undefined),
+        gstin: client?.gstin ?? undefined,
+        email: client?.email ?? undefined,
+        phone: client?.phone ?? undefined,
+      };
 
   const events: TimelineEvent[] = [
     ...payments.map<TimelineEvent>((p) => ({
@@ -124,7 +146,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         }
       />
 
-      {isDraft && <Alert tone="info" title="Draft.">This invoice has not been issued yet. It gets its number and is locked when you issue it.</Alert>}
+      {isDraft && <Alert tone="info" title="Draft.">This invoice has not been issued yet. It is locked when you issue it.</Alert>}
       {cancelled && (
         <Alert tone="danger" title="Cancelled.">
           {inv.cancelReason ? `Reason: ${inv.cancelReason}` : "This invoice was cancelled."}
@@ -148,11 +170,11 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
               <div className="text-xs leading-relaxed text-ink-2">
                 <strong className="text-sm text-ink">{settings.company.legalName || settings.company.name}</strong>
                 {settings.company.address && <div className="whitespace-pre-line">{settings.company.address}</div>}
-                {settings.company.gstin && <div>GSTIN {settings.company.gstin}</div>}
+                {taxed && settings.company.gstin && <div>GSTIN {settings.company.gstin}</div>}
               </div>
             </div>
             <div className="text-right">
-              <div className="font-display text-[22px] font-bold tracking-[0.06em] text-brand-600">{isDraft ? "DRAFT INVOICE" : settings.company.gstin ? "TAX INVOICE" : "INVOICE"}</div>
+              <div className="font-display text-[22px] font-bold tracking-[0.06em] text-brand-600">{isDraft ? "DRAFT INVOICE" : taxed ? "TAX INVOICE" : "INVOICE"}</div>
               <div className="mt-1 text-xs leading-relaxed text-ink-2">
                 {label}
                 <br />
@@ -165,11 +187,13 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
             <div className="text-xs leading-relaxed text-ink-2">
               <div className="text-[11px] font-semibold tracking-[0.08em] text-muted uppercase">Bill to</div>
               <strong className="text-sm text-ink">{billing.name}</strong>
+              {billing.contactPerson && <div>Attn: {billing.contactPerson}</div>}
               {billing.lines.map((l, i) => (
                 <div key={i}>{l}</div>
               ))}
-              {billing.gstin && <div>GSTIN {billing.gstin}</div>}
+              {billing.phone && <div>{billing.phone}</div>}
               {billing.email && <div>{billing.email}</div>}
+              {billing.gstin && <div>GSTIN {billing.gstin}</div>}
             </div>
             <div className="text-xs leading-relaxed text-ink-2 sm:text-right">
               <div className="text-[11px] font-semibold tracking-[0.08em] text-muted uppercase">Reference</div>
@@ -241,10 +265,10 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
             </dl>
           </div>
 
-          {settings.documents.bankDetails && (
-            <div className="border-t border-line-soft pt-4 text-xs leading-relaxed text-muted">
-              <div className="mb-1 text-[11px] font-semibold tracking-[0.08em] uppercase">Bank details</div>
-              <div className="whitespace-pre-line">{settings.documents.bankDetails}</div>
+          {taxed && (info.gst.length > 0 || info.bank.length > 0 || info.note) && (
+            <div className="grid gap-4 border-t border-line-soft pt-4 text-xs leading-relaxed text-muted sm:grid-cols-2">
+              {info.gst.length > 0 && <DetailRows title="GST details" rows={info.gst} />}
+              {(info.bank.length > 0 || info.note) && <DetailRows title="Bank details" rows={info.bank} note={info.note} />}
             </div>
           )}
           {(inv.notes || inv.terms) && (
@@ -329,6 +353,20 @@ function Row({ label, value, tone }: { label: string; value: string; tone?: stri
     <div className="flex justify-between">
       <dt className="text-muted">{label}</dt>
       <dd className={cn("tabular", tone)}>{value}</dd>
+    </div>
+  );
+}
+
+function DetailRows({ title, rows, note }: { title: string; rows: [string, string][]; note?: string }) {
+  return (
+    <div>
+      <div className="mb-1 text-[11px] font-semibold tracking-[0.08em] uppercase">{title}</div>
+      {rows.map(([k, v]) => (
+        <div key={k}>
+          {k}: <span className="text-ink-2">{v}</span>
+        </div>
+      ))}
+      {note && <div className="mt-1 whitespace-pre-line">{note}</div>}
     </div>
   );
 }

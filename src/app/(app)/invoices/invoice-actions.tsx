@@ -13,7 +13,7 @@ import { INVOICE_PAYMENT_METHODS } from "./totals";
 
 export function IssueInvoiceButton({ id }: { id: string }) {
   return (
-    <ActionButton action={() => issueInvoice(id)} confirm="Issue this invoice? It gets its final number, the billing details are frozen and it can no longer be edited." successMessage="Invoice issued">
+    <ActionButton action={() => issueInvoice(id)} confirm="Issue this invoice? Its number and billing details are frozen and it can no longer be edited." successMessage="Invoice issued">
       Issue invoice
     </ActionButton>
   );

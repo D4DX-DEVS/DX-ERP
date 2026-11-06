@@ -45,11 +45,51 @@ export interface PayrollComponent {
   active: boolean;
 }
 
+/** One tax that can be ticked on an invoice line, e.g. CGST 9%, SGST 9% or IGST 18% ("No tax" is always offered). */
 export interface TaxRate {
   name: string;
   rate: number;
-  /** Intra-state GST: invoices show it as CGST + SGST at half the rate each (otherwise one tax, e.g. IGST). */
-  split?: boolean;
+}
+
+export const taxLabel = (t: TaxRate) => `${t.name} ${t.rate}%`;
+
+/** "IGST 18%" → "IGST": the tax type of a name saved with its rate. */
+export const taxType = (name: string) => name.replace(/\s*@?\s*\d+(\.\d+)?\s*%$/, "").trim() || name;
+
+/**
+ * Taxes as stored before they were ticked separately were whole options: "No tax", "CGST 9% + SGST 9%"
+ * (rate 18, `split`) and "IGST 18%". Those become CGST 9% + SGST 9% and IGST 18%; zero rates are dropped.
+ */
+export function normalizeTaxes(taxes: (TaxRate & { split?: boolean })[]): TaxRate[] {
+  const out: TaxRate[] = [];
+  const add = (name: string, rate: number) => {
+    if (rate > 0 && !out.some((t) => t.name === name && t.rate === rate)) out.push({ name, rate });
+  };
+  for (const t of taxes) {
+    if (t.split) {
+      add("CGST", t.rate / 2);
+      add("SGST", t.rate / 2);
+    } else add(taxType(t.name), t.rate);
+  }
+  return out;
+}
+
+/** Single-rate choices for proposals (one rate per line): no tax, CGST + SGST together, then the other taxes. */
+export function proposalTaxOptions(taxes: TaxRate[]): TaxRate[] {
+  const cgst = taxes.find((t) => t.name.toUpperCase() === "CGST");
+  const sgst = taxes.find((t) => t.name.toUpperCase() === "SGST");
+  const pair = cgst && sgst ? [{ name: `${taxLabel(cgst)} + ${taxLabel(sgst)}`, rate: cgst.rate + sgst.rate }] : [];
+  return [{ name: "No tax", rate: 0 }, ...pair, ...taxes.filter((t) => t !== cgst && t !== sgst).map((t) => ({ name: taxLabel(t), rate: t.rate }))];
+}
+
+/** Account printed on tax invoices (Configuration → GST & bank details). */
+export interface BankDetails {
+  accountName: string;
+  bankName: string;
+  branch: string;
+  accountNumber: string;
+  ifsc: string;
+  upiId: string;
 }
 
 export interface PaymentTerm {
@@ -128,12 +168,14 @@ export interface AppSettings {
   };
   taxes: TaxRate[];
   paymentTerms: PaymentTerm[];
+  bank: BankDetails;
   documents: {
     invoiceNotes: string;
     invoiceTerms: string;
     proposalTerms: string;
     payslipFooter: string;
     certificateText: string;
+    /** Free-text payment details printed under the bank account (e.g. cheque instructions). */
     bankDetails: string;
   };
   notifications: {
@@ -290,9 +332,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
     certificatePrefix: "D4DX/INT/",
   },
   taxes: [
-    { name: "No tax", rate: 0 },
-    { name: "CGST 9% + SGST 9%", rate: 18, split: true },
-    { name: "IGST 18%", rate: 18 },
+    { name: "CGST", rate: 9 },
+    { name: "SGST", rate: 9 },
+    { name: "IGST", rate: 18 },
   ],
   paymentTerms: [
     { label: "Due on receipt", days: 0 },
@@ -301,6 +343,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     { label: "Net 30", days: 30 },
     { label: "Net 45", days: 45 },
   ],
+  bank: { accountName: "", bankName: "", branch: "", accountNumber: "", ifsc: "", upiId: "" },
   documents: {
     invoiceNotes: "Thank you for your business.",
     invoiceTerms: "Payment is due by the due date shown. Please quote the invoice number with your payment.",
