@@ -4,6 +4,7 @@ import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ActionForm, Field, useServerAction } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { SearchSelect } from "@/components/ui/search-select";
 import { cn } from "@/lib/cn";
 import { addObjective, updateObjective } from "../actions";
 
@@ -41,19 +42,19 @@ export function ObjectivesPanel({ userId, objectives, canEdit }: { userId: strin
             </span>
             <span className={cn("min-w-0 flex-1 basis-48 text-[13px] leading-snug", o.status === "achieved" || o.status === "dropped" ? "text-muted" : "font-medium text-ink", o.status === "dropped" && "line-through")}>{o.text}</span>
             {canEdit ? (
-              <select
+              <SearchSelect
                 aria-label={`Status of objective: ${o.text}`}
                 value={o.status}
                 disabled={pending}
                 onChange={(e) => run(() => updateObjective(userId, o.id, e.target.value), { successMessage: "Objective updated" })}
-                className="h-8 rounded-lg border border-line-strong bg-white px-2 text-xs font-medium text-ink-2 focus:border-brand-500 focus:outline-none"
+                className="h-8 rounded-lg border border-line-strong bg-white field-chevron pr-7 pl-2 text-xs font-medium text-ink-2 focus:border-brand-500 focus:outline-none"
               >
                 {(Object.keys(STATUS_LABELS) as ObjectiveView["status"][]).map((s) => (
                   <option key={s} value={s}>
                     {STATUS_LABELS[s]}
                   </option>
                 ))}
-              </select>
+              </SearchSelect>
             ) : (
               <span className="text-xs font-semibold text-ink-2">{STATUS_LABELS[o.status]}</span>
             )}

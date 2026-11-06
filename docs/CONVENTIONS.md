@@ -193,7 +193,8 @@ import { createThing } from "./actions";
 `PageBody`, `PageHeader`, `StatCard`, `MiniStat`, `Progress`, `EmptyState`, `Alert`, `SectionTitle` (page.tsx) ·
 `Card`, `CardHeader`, `CardBody`, `CardFooter`, `DetailList` (card.tsx) · `TableWrap`, `THead`, `Th`, `Tr`, `Td`,
 `EmptyRow` (table.tsx) · `Chip`, `StatusChip domain=… value=…`, `OptionChip options=… value=…`, `Tag` (chip.tsx) ·
-`Avatar`, `AvatarStack`, `PersonCell` · `Button`, `ButtonLink`, `buttonClass` · `Input`, `Select`, `Textarea`,
+`Avatar`, `AvatarStack`, `PersonCell` · `Button`, `ButtonLink`, `buttonClass` · `Input`, `Select` (searchable; same props and
+`<option>` children as a native select — never use a bare `<select>`), `Textarea`,
 `Checkbox`, `Radio`, `Switch` · `Dialog` · `Menu` (⋯ menu) · `LinkTabs`, `Segmented` · `Timeline` ·
 `GroupedBarChart`, `DonutChart`, `HBarList` (charts.tsx) · `FileUpload`, `AttachmentList` · `PeoplePicker`.
 

@@ -98,7 +98,7 @@ function RolesTab({ sp, roles }: { sp: SearchParams; roles: RoleView[] }) {
         value={selected.key}
         items={roles.map((r) => ({ value: r.key, label: `${r.name} (${r.userCount})`, href: `/roles?role=${r.key}` }))}
       />
-      <nav aria-label="Roles" className="hidden w-64 shrink-0 flex-col gap-0.5 rounded-[14px] border border-line bg-white p-2 lg:flex">
+      <nav aria-label="Roles" className="scrollbar-thin hidden w-64 shrink-0 flex-col gap-0.5 rounded-[14px] border border-line bg-white p-2 lg:sticky lg:top-24 lg:flex lg:max-h-[calc(100dvh-7rem)] lg:overflow-y-auto">
         {roles.map((r) => (
           <Link
             key={r.key}

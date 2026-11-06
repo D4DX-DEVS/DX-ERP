@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Popover } from "radix-ui";
 import { ArrowUpDown, ChevronDown, ChevronLeft, ChevronRight, Loader2, Search, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { SearchSelect } from "./search-select";
 
 /** Returns a function that updates URL search params (resetting pagination). */
 export function useSetParams() {
@@ -234,7 +235,7 @@ export function SelectFilter({
 }) {
   const { set, params } = useSetParams();
   return (
-    <select
+    <SearchSelect
       aria-label={label ?? allLabel}
       value={params.get(param) ?? ""}
       onChange={(e) => set({ [param]: e.target.value || null })}
@@ -249,7 +250,7 @@ export function SelectFilter({
           {o.label}
         </option>
       ))}
-    </select>
+    </SearchSelect>
   );
 }
 
@@ -264,7 +265,7 @@ export function SortSelect({ options, className }: { options: { value: string; l
       className={cn("flex h-10 shrink-0 items-center gap-2 rounded-[10px] border border-line-strong bg-white pl-3 text-muted focus-within:border-brand-500 focus-within:ring-[3px] focus-within:ring-brand-100", className)}
     >
       <ArrowUpDown className="size-4 shrink-0" aria-hidden />
-      <select
+      <SearchSelect
         aria-label="Sort by"
         value={value}
         onChange={(e) => set({ sort: e.target.value === options[0]?.value ? null : e.target.value })}
@@ -275,7 +276,7 @@ export function SortSelect({ options, className }: { options: { value: string; l
             {o.label}
           </option>
         ))}
-      </select>
+      </SearchSelect>
     </label>
   );
 }

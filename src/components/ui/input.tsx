@@ -1,5 +1,6 @@
 import type { ComponentProps } from "react";
 import { cn } from "@/lib/cn";
+import { SearchSelect } from "./search-select";
 
 const fieldBase =
   "w-full rounded-[10px] border border-line-strong bg-white px-3 text-base text-ink placeholder:text-subtle transition-shadow sm:px-3.5 " +
@@ -14,9 +15,10 @@ export function Textarea({ className, rows = 3, ...props }: ComponentProps<"text
   return <textarea rows={rows} className={cn(fieldBase, "py-2 leading-relaxed sm:py-2.5", className)} {...props} />;
 }
 
-export function Select({ className, children, ...props }: ComponentProps<"select">) {
+/** Dropdown with a search box; takes the same props and `<option>` children as a native `<select>`. */
+export function Select({ className, children, ...props }: Omit<ComponentProps<"select">, "ref">) {
   return (
-    <select
+    <SearchSelect
       className={cn(
         fieldBase,
         "h-10 appearance-none field-chevron pr-9 sm:h-10",
@@ -25,7 +27,7 @@ export function Select({ className, children, ...props }: ComponentProps<"select
       {...props}
     >
       {children}
-    </select>
+    </SearchSelect>
   );
 }
 

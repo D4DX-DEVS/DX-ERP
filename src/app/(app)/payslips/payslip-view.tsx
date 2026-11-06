@@ -36,7 +36,7 @@ export function PayslipView({ data, company, footer }: { data: PayslipPageData; 
   return (
     <div className="flex flex-wrap items-start gap-4">
       {list.length > 1 && (
-        <nav aria-label="Pay months" className="flex max-h-[28rem] w-full min-w-[180px] flex-col gap-0.5 overflow-y-auto rounded-[14px] border border-line bg-white p-2 sm:w-[200px] sm:flex-none">
+        <nav aria-label="Pay months" className="flex max-h-[28rem] w-full min-w-[180px] flex-col gap-0.5 overflow-y-auto rounded-[14px] border border-line bg-white p-2 sm:w-[200px] sm:flex-none xl:sticky xl:top-24">
           {list.map((m) => (
             <Link
               key={m.id}
