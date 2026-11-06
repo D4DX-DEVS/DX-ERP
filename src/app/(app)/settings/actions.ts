@@ -29,11 +29,17 @@ function fieldError(field: string, message: string): never {
 
 /* ───────────────────────────── Company ───────────────────────────── */
 
+// One or more addresses, comma separated ("info@d4dx.co, mail@d4dx.co"); the first is the sign-in page's support address.
+const emailList = z.preprocess(
+  (v) => (typeof v === "string" ? v.split(/[\s,;]+/).map((e) => e.toLowerCase()).filter(Boolean) : v),
+  z.array(z.email({ error: "Enter valid email addresses, separated by commas" })).max(5, "Up to 5 email addresses"),
+);
+
 const companySchema = z.object({
   name: zs.text("Company name", 120),
   legalName: zs.text("Legal name", 160),
   address: zs.optText(500),
-  email: zs.optEmail(),
+  email: emailList,
   phone: zs.optText(40),
   website: z.preprocess((v) => (typeof v === "string" ? v.trim() || undefined : v), z.url({ error: "Enter a full web address, e.g. https://d4dx.co" }).max(200).optional()),
   logoFile: zs.ids(),
@@ -60,7 +66,7 @@ export async function saveCompany(input: Record<string, unknown>): Promise<Saved
       name: data.name,
       legalName: data.legalName,
       address: data.address ?? "",
-      email: data.email ?? "",
+      email: data.email.join(", "),
       phone: data.phone ?? "",
       website: data.website ?? "",
       // Edited under GST & bank details.

@@ -79,7 +79,8 @@ export function createDoc(opts: DocOptions): BrandedDoc {
   doc.setTextColor(...PDF_COLORS.muted);
   const companyLines = [
     opts.company.address,
-    [opts.company.email, opts.company.phone].filter(Boolean).join("  |  "),
+    opts.company.email ? `Email: ${opts.company.email}` : "",
+    opts.company.phone ? `Phone: ${opts.company.phone}` : "",
     [opts.company.website, opts.company.gstin ? `GSTIN ${opts.company.gstin}` : ""].filter(Boolean).join("  |  "),
   ]
     .filter(Boolean)

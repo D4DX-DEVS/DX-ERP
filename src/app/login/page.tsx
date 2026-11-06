@@ -32,7 +32,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   const error = typeof sp.error === "string" ? ERRORS[sp.error] : undefined;
   let supportEmail = "hr@d4dx.co";
   try {
-    supportEmail = (await getSettings()).company.email || supportEmail;
+    supportEmail = (await getSettings()).company.email.split(",")[0].trim() || supportEmail;
   } catch {
     // Database unavailable — the page still renders so the error is visible after sign-in attempts.
   }

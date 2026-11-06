@@ -34,8 +34,8 @@ export function CompanyForm({ company, storageConfigured }: { company: AppSettin
           <Field label="Legal name" name="legalName" required hint="Printed on invoices and certificates.">
             <Input id="legalName" name="legalName" defaultValue={company.legalName} maxLength={160} />
           </Field>
-          <Field label="Email" name="email">
-            <Input id="email" name="email" type="email" defaultValue={company.email} />
+          <Field label="Email" name="email" hint="Separate several with commas. The first is shown on the sign-in page.">
+            <Input id="email" name="email" type="email" multiple defaultValue={company.email} />
           </Field>
           <Field label="Phone" name="phone">
             <Input id="phone" name="phone" type="tel" defaultValue={company.phone} maxLength={40} />
