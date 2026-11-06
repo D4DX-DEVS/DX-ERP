@@ -1,4 +1,4 @@
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { requirePagePermission } from "@/lib/auth/session";
 import { db } from "@/lib/db";
@@ -9,7 +9,13 @@ import { loadInvoiceFormOptions } from "../../form-data";
 import { InvoiceForm, type InvoiceFormInitial } from "../../invoice-form";
 import { CUSTOM_TERM, taxPartsOf } from "../../totals";
 
-export const metadata = { title: "Edit draft invoice" };
+export const metadata = { title: "Edit invoice" };
+
+const DESCRIPTIONS = {
+  draft: "Changes are saved to the draft.",
+  issued: "This invoice has been issued. Saving updates it, its PDF and the balance due; recorded payments stay as they are.",
+  cancelled: "This invoice is cancelled. Saving updates its details; it stays cancelled.",
+};
 
 export default async function EditInvoicePage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePagePermission("invoices.manage");
@@ -17,7 +23,6 @@ export default async function EditInvoicePage({ params }: { params: Promise<{ id
   if (!isObjectId(id)) notFound();
   const [inv] = await db().select().from(Invoice).where(eq(Invoice._id, id)).limit(1);
   if (!inv) notFound();
-  if (inv.status !== "draft") redirect(`/invoices/${id}`);
   const options = await loadInvoiceFormOptions(user, id);
 
   const matching = options.paymentTerms.find((t) => t.days === inv.paymentTermDays);
@@ -41,7 +46,7 @@ export default async function EditInvoicePage({ params }: { params: Promise<{ id
 
   return (
     <PageBody>
-      <PageHeader back={{ href: `/invoices/${id}`, label }} title={`Edit ${label}`} description="Only drafts can be edited. Issued invoices are locked." />
+      <PageHeader back={{ href: `/invoices/${id}`, label }} title={`Edit ${label}`} description={DESCRIPTIONS[inv.status === "draft" || inv.status === "cancelled" ? inv.status : "issued"]} />
       <InvoiceForm
         initial={initial}
         clients={options.clients}
@@ -51,6 +56,7 @@ export default async function EditInvoicePage({ params }: { params: Promise<{ id
         paymentTerms={options.paymentTerms}
         billing={options.billing}
         lastInvoiceNo={options.lastInvoiceNo}
+        issued={inv.status !== "draft"}
       />
     </PageBody>
   );

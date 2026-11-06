@@ -3,6 +3,7 @@
 import { z } from "zod";
 import { runAction, actionPermission, ActionError, parse, type ActionResult } from "@/lib/actions";
 import { zs, isObjectId } from "@/lib/validation";
+import type { CurrentUser } from "@/lib/auth/session";
 import { audit, diff } from "@/lib/audit";
 import { notify, notifyPermission, usersWithPermission } from "@/lib/notify";
 import { ID_PREFIX, fiscalYear, nextNumber, nextSeq } from "@/lib/counters";
@@ -110,13 +111,20 @@ async function setMilestoneInvoiced(project: Id, milestone: Id, invoice: Id, inv
 
 const label = (inv: Pick<IInvoice, "invoiceNo" | "draftNo">) => inv.invoiceNo ?? inv.draftNo;
 
-/** Create a draft invoice, or update an existing draft. Totals are always recomputed here. */
+/**
+ * Create a draft invoice, or update an existing one — drafts and issued, paid or cancelled invoices alike. Totals are
+ * always recomputed here; an issued invoice keeps its payments, so its total cannot drop below what is already settled.
+ */
 export async function saveInvoice(input: Record<string, unknown>): Promise<ActionResult<{ id: string }>> {
   return runAction(async () => {
     const user = await actionPermission("invoices.manage");
     const data = parse(draftSchema, input);
 
-    const [client] = await db().select({ name: Client.name, confidential: Client.confidential, owner: Client.owner }).from(Client).where(eq(Client._id, data.client)).limit(1);
+    const [client] = await db()
+      .select({ name: Client.name, confidential: Client.confidential, owner: Client.owner, contactPerson: Client.contactPerson, address: Client.address, gstin: Client.gstin, email: Client.email, phone: Client.phone })
+      .from(Client)
+      .where(eq(Client._id, data.client))
+      .limit(1);
     if (!client || !canSeeClient(user, client)) throw new ActionError("Client not found.", { client: "Choose a client" });
 
     let projectDoc: { milestones: { _id: Id; invoiced?: boolean; invoice?: Id }[] } | null = null;
@@ -176,7 +184,7 @@ export async function saveInvoice(input: Record<string, unknown>): Promise<Actio
 
     if (data.id) {
       const before = await loadInvoice(data.id);
-      if (before.status !== "draft") throw new ActionError("Only draft invoices can be edited.");
+      if (before.status !== "draft") return { id: await updateIssuedInvoice(user, before, fields, client) };
       const [updated] = await db()
         .update(Invoice)
         .set({ ...fields, history: jsonPush(Invoice.history, { _id: newId(), action: "edited", by: user._id, byName: user.name, at: new Date() }) })
@@ -208,7 +216,81 @@ export async function saveInvoice(input: Record<string, unknown>): Promise<Actio
       .returning();
     await audit(user, { action: "create", entity: "invoice", entityId: doc._id, ref: data.invoiceNo, summary: `Created draft invoice ${data.invoiceNo} for ${client.name}` });
     return { id: doc._id };
-  }, "Draft saved");
+  }, "Invoice saved");
+}
+
+type InvoiceFields = Pick<IInvoice, "invoiceNo" | "client" | "project" | "milestone" | "dueDate" | "total">;
+type BillingClient = { name: string; contactPerson: string | null; address: Address | null; gstin: string | null; email: string | null; phone: string | null };
+
+/**
+ * Saves edits to an issued (or paid, or cancelled) invoice. Payments stay as recorded: the balance and status are
+ * recomputed from them, the billing snapshot is refreshed from the client, and recorded payments follow a change of
+ * client or project. A cancelled invoice stays cancelled with nothing due.
+ */
+async function updateIssuedInvoice(
+  user: CurrentUser,
+  before: IInvoice,
+  fields: Partial<typeof Invoice.$inferInsert> & InvoiceFields,
+  client: BillingClient,
+): Promise<Id> {
+  const cancelled = before.status === "cancelled";
+  const money = { total: fields.total, amountPaid: before.amountPaid, amountRefunded: before.amountRefunded, adjustments: before.adjustments };
+  const settled = round2(before.amountPaid - before.amountRefunded + before.adjustments);
+  if (!cancelled && fields.total <= 0) throw new ActionError("An issued invoice needs a total above zero.");
+  if (!cancelled && fields.total < settled - 0.004) {
+    throw new ActionError(`The new total (${inr(fields.total, true)}) is less than the ${inr(settled, true)} already received or adjusted. Record a refund first.`);
+  }
+  let status = cancelled ? before.status : settledStatus(money);
+  // Keep an overdue invoice overdue (the daily job only announces the change once).
+  if (status !== "paid" && before.status === "overdue" && fields.dueDate < todayKey()) status = "overdue";
+
+  const [updated] = await db()
+    .update(Invoice)
+    .set({
+      ...fields,
+      balance: cancelled ? 0 : balanceOf(money),
+      status,
+      billingSnapshot: {
+        name: client.name,
+        contactPerson: client.contactPerson ?? undefined,
+        address: formatAddress(client.address ?? undefined),
+        gstin: client.gstin ?? undefined,
+        email: client.email ?? undefined,
+        phone: client.phone ?? undefined,
+      },
+      history: jsonPush(Invoice.history, { _id: newId(), action: "edited", by: user._id, byName: user.name, at: new Date() }),
+    })
+    // Only while no payment, refund or status change slipped in since the invoice was loaded.
+    .where(
+      and(
+        eq(Invoice._id, before._id),
+        eq(Invoice.status, before.status),
+        eq(Invoice.amountPaid, before.amountPaid),
+        eq(Invoice.amountRefunded, before.amountRefunded),
+        eq(Invoice.adjustments, before.adjustments),
+      ),
+    )
+    .returning();
+  if (!updated) throw new ActionError("This invoice was just updated by someone else. Refresh and try again.");
+
+  if (updated.client !== before.client || updated.project !== before.project) {
+    await db().update(Payment).set({ client: updated.client, project: updated.project }).where(eq(Payment.invoice, before._id));
+  }
+  // A live invoice holds its milestone; a cancelled one released it when it was cancelled.
+  if (!cancelled && (updated.project !== before.project || updated.milestone !== before.milestone)) {
+    if (before.project && before.milestone) await setMilestoneInvoiced(before.project, before.milestone, before._id, false);
+    if (updated.project && updated.milestone) await setMilestoneInvoiced(updated.project, updated.milestone, updated._id, true);
+  }
+  await audit(user, {
+    action: "update",
+    entity: "invoice",
+    entityId: updated._id,
+    ref: label(updated),
+    summary: `Edited ${before.status === "cancelled" ? "cancelled" : "issued"} invoice ${label(updated)}`,
+    // Amounts are intentionally left out of the audit trail (`audit.view` does not imply `invoices.view`).
+    changes: diff(before as Record<string, unknown>, updated as Record<string, unknown>, ["invoiceNo", "client", "issueDate", "dueDate", "status", "subtotal", "discount", "taxTotal", "total"], ["subtotal", "discount", "taxTotal", "total"]),
+  });
+  return updated._id;
 }
 
 /** Discards a draft invoice that was never issued. */

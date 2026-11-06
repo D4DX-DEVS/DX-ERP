@@ -36,7 +36,7 @@ interface TimelineEvent {
   tone?: "green" | "red" | "purple";
 }
 
-const HISTORY_TITLES: Record<string, string> = { created: "Draft created", edited: "Draft edited", issued: "Issued", cancelled: "Cancelled" };
+const HISTORY_TITLES: Record<string, string> = { created: "Draft created", edited: "Edited", issued: "Issued", cancelled: "Cancelled" };
 
 export default async function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePagePermission("invoices.view");
@@ -140,7 +140,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                 <Download className="size-4" aria-hidden /> Receipt PDF
               </a>
             )}
-            {manage && isDraft && (
+            {manage && (
               <ButtonLink variant="secondary" href={`/invoices/${id}/edit`} icon={<Pencil className="size-4" aria-hidden />}>
                 Edit
               </ButtonLink>
@@ -151,7 +151,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         }
       />
 
-      {isDraft && <Alert tone="info" title="Draft.">This invoice has not been issued yet. It is locked when you issue it.</Alert>}
+      {isDraft && <Alert tone="info" title="Draft.">This invoice has not been issued yet.</Alert>}
       {cancelled && (
         <Alert tone="danger" title="Cancelled.">
           {inv.cancelReason ? `Reason: ${inv.cancelReason}` : "This invoice was cancelled."}

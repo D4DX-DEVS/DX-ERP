@@ -58,7 +58,7 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
   const rightX = b.width - b.margin;
 
   // --- invoice to / invoice details ---------------------------------------------------------------------
-  // Once issued, only the frozen snapshot is used so a printed invoice never changes after the client record is edited.
+  // Once issued, only the snapshot is used: editing the client record does not change a printed invoice (editing the invoice refreshes it).
   const snap = inv.billingSnapshot;
   const billTo = snap
     ? { name: snap.name, contactPerson: snap.contactPerson, address: snap.address ? [snap.address] : [], phone: snap.phone, email: snap.email, gstin: snap.gstin }

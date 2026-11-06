@@ -41,7 +41,7 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: P
 
   return (
     <PageBody>
-      <PageHeader back={{ href: "/invoices", label: "Invoices" }} title="New invoice" description="Saved as a draft. It is locked when you issue it." />
+      <PageHeader back={{ href: "/invoices", label: "Invoices" }} title="New invoice" description="Saved as a draft until you issue it." />
       <InvoiceForm
         initial={initial}
         clients={options.clients}

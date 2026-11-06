@@ -85,6 +85,7 @@ export function InvoiceForm({
   paymentTerms,
   billing,
   lastInvoiceNo,
+  issued = false,
 }: {
   initial: InvoiceFormInitial;
   clients: ClientOption[];
@@ -95,6 +96,8 @@ export function InvoiceForm({
   paymentTerms: { label: string; days: number }[];
   billing: BillingInfo & { canConfigure: boolean };
   lastInvoiceNo?: string;
+  /** Editing an invoice that has already been issued (or paid, or cancelled). */
+  issued?: boolean;
 }) {
   const router = useRouter();
   const [options] = useState(() => taxChoices(taxes, initial.items));
@@ -308,7 +311,7 @@ export function InvoiceForm({
         <Link href={initial.id ? `/invoices/${initial.id}` : "/invoices"} className={buttonClass("secondary")}>
           Cancel
         </Link>
-        <SubmitButton>Save draft</SubmitButton>
+        <SubmitButton>{issued ? "Save changes" : "Save draft"}</SubmitButton>
       </FormActions>
     </ActionForm>
   );
