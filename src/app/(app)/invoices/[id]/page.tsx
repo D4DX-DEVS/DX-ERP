@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { forbidden, notFound } from "next/navigation";
 import { Download, Pencil } from "lucide-react";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, isNotNull } from "drizzle-orm";
 import { can, requirePagePermission } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { Client, Contract, Invoice, Payment, Project } from "@/lib/models";
@@ -45,7 +45,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   const [inv] = await db().select().from(Invoice).where(eq(Invoice._id, id)).limit(1);
   if (!inv) notFound();
 
-  const [settings, [client], [project], [contract], payments] = await Promise.all([
+  const [settings, [client], [project], [contract], payments, [lastReceipt]] = await Promise.all([
     getSettings(),
     db()
       .select({
@@ -69,6 +69,8 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
       ? db().select({ contractNo: Contract.contractNo, title: Contract.title }).from(Contract).where(eq(Contract._id, inv.contract)).limit(1)
       : [],
     db().select().from(Payment).where(eq(Payment.invoice, inv._id)).orderBy(desc(Payment.createdAt)),
+    // Most recent receipt number in use, shown as a hint for the next one.
+    db().select({ receiptNo: Payment.receiptNo }).from(Payment).where(isNotNull(Payment.receiptNo)).orderBy(desc(Payment.createdAt)).limit(1),
   ]);
   if (client && !canSeeClient(user, client)) forbidden();
 
@@ -103,7 +105,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
     ...payments.map<TimelineEvent>((p) => ({
       at: new Date(p.createdAt).getTime(),
       title: p.type === "payment" ? `Payment · ${p.method}` : p.type === "refund" ? `Refund · ${p.method}` : "Adjustment / write-off",
-      sub: [fmtDate(p.date), p.reference ? `ref ${p.reference}` : undefined, p.note, p.paymentNo, p.recordedByName ? `by ${p.recordedByName}` : undefined].filter(Boolean).join(" · "),
+      sub: [fmtDate(p.date), p.reference ? `ref ${p.reference}` : undefined, p.note, p.receiptNo ? `Receipt ${p.receiptNo}` : p.paymentNo, p.recordedByName ? `by ${p.recordedByName}` : undefined].filter(Boolean).join(" · "),
       amount: `${p.type === "refund" ? "−" : ""}${inr(p.amount, true)}`,
       tone: p.type === "payment" ? "green" : p.type === "refund" ? "red" : "purple",
     })),
@@ -146,7 +148,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
               </ButtonLink>
             )}
             {manage && isDraft && <IssueInvoiceButton id={id} />}
-            {money && payable && <RecordPaymentDialog id={id} balance={inv.balance} today={today} />}
+            {money && payable && <RecordPaymentDialog id={id} balance={inv.balance} today={today} lastReceiptNo={lastReceipt?.receiptNo ?? undefined} />}
           </>
         }
       />

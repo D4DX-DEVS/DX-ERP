@@ -215,6 +215,7 @@ const receivablesAging = defineReport<AgingRow>({
 interface PaymentRow {
   date: string;
   paymentNo: string;
+  receiptNo: string;
   client: string;
   invoice: string;
   type: string;
@@ -244,6 +245,7 @@ const clientPayments = defineReport<PaymentRow>({
       .select({
         date: Payment.date,
         paymentNo: Payment.paymentNo,
+        receiptNo: Payment.receiptNo,
         client: Payment.client,
         invoice: Payment.invoice,
         type: Payment.type,
@@ -268,6 +270,7 @@ const clientPayments = defineReport<PaymentRow>({
     const rows: PaymentRow[] = docs.map((d) => ({
       date: d.date,
       paymentNo: d.paymentNo,
+      receiptNo: d.receiptNo ?? "",
       client: clients.get(d.client) ?? "",
       invoice: invoiceNo.get(d.invoice) ?? "",
       type: statusLabel("payment", d.type),
@@ -283,6 +286,7 @@ const clientPayments = defineReport<PaymentRow>({
       columns: [
         { header: "Date", value: (r) => fmtDate(r.date) },
         { header: "Payment", value: (r) => r.paymentNo },
+        { header: "Receipt no.", value: (r) => r.receiptNo },
         { header: "Client", value: (r) => r.client, width: 28 },
         { header: "Invoice", value: (r) => r.invoice },
         { header: "Type", value: (r) => r.type },

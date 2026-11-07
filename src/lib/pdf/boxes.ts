@@ -1,9 +1,11 @@
 import "server-only";
+import type { AppSettings, CompanyImage } from "@/lib/config-defaults";
+import { getObjectBuffer } from "@/lib/storage";
 import { pdfText, PDF_COLORS, type BrandedDoc } from "./base";
 
 /**
  * Layout pieces shared by the invoice and receipt PDFs: bordered info boxes, the amount-in-words +
- * totals block and the hand-signed signature block.
+ * totals block and the signature block (with the company seal and signature from Configuration).
  */
 
 export function addressLines(a?: { line1?: string; line2?: string; city?: string; state?: string; postalCode?: string; country?: string }): string[] {
@@ -146,10 +148,67 @@ export function wordsAndTotals(b: BrandedDoc, y: number, words: string, rows: [s
   return Math.max(y + wordsH, ty) + 6;
 }
 
-/** "For <company>", a blank line to sign on after printing, and "Authorised Signatory". */
-export function signatureBlock(b: BrandedDoc, y: number, companyName: string): void {
+/** An image ready for jsPDF. */
+export interface PdfImage {
+  data: Uint8Array;
+  format: "PNG" | "JPEG";
+}
+
+export interface SignImages {
+  seal?: PdfImage;
+  signature?: PdfImage;
+}
+
+/** PNG or JPEG, from the file's first bytes; null for anything else. */
+function imageFormat(bytes: Uint8Array): PdfImage["format"] | null {
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "PNG";
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "JPEG";
+  return null;
+}
+
+/**
+ * Reads the company seal and signature (Configuration → Company profile) from storage for a PDF. An image that can't be
+ * read is logged and left out, so the document still downloads.
+ */
+export async function loadSignImages(company: AppSettings["company"]): Promise<SignImages> {
+  const read = async (image: CompanyImage | undefined, what: string): Promise<PdfImage | undefined> => {
+    if (!image) return undefined;
+    try {
+      const data = await getObjectBuffer(image.key, true);
+      const format = imageFormat(data);
+      if (!format) throw new Error("not a PNG or JPEG image");
+      return { data, format };
+    } catch (error) {
+      console.error(`PDF: could not read the company ${what} (${image.key})`, error);
+      return undefined;
+    }
+  };
+  const [seal, signature] = await Promise.all([read(company.seal, "seal"), read(company.signature, "signature")]);
+  return { seal, signature };
+}
+
+/** Draws `image` scaled to fit maxW × maxH, anchored by `place` (given the drawn size); logs and skips an image jsPDF rejects. */
+function drawFitted(b: BrandedDoc, image: PdfImage, maxW: number, maxH: number, place: (w: number, h: number) => { x: number; y: number }): void {
+  try {
+    const props = b.doc.getImageProperties(image.data);
+    const scale = Math.min(maxW / props.width, maxH / props.height);
+    const [w, h] = [props.width * scale, props.height * scale];
+    const { x, y } = place(w, h);
+    // jsPDF stores PNG pixels uncompressed unless told otherwise (a seal alone would add megabytes).
+    b.doc.addImage(image.data, image.format, x, y, w, h, undefined, "MEDIUM");
+  } catch (error) {
+    console.error("PDF: could not draw a company image", error);
+  }
+}
+
+/**
+ * "For <company>", the signature line with "Authorised Signatory" under it and, from Configuration, the signature
+ * printed on the line (else it is left blank to sign by hand) and the company seal to its left.
+ */
+export function signatureBlock(b: BrandedDoc, y: number, companyName: string, images: SignImages = {}): void {
   const { doc } = b;
   const rightX = b.width - b.margin;
+  const lineW = 70;
   y = ensureSpace(b, y + 4, 32);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
@@ -157,9 +216,12 @@ export function signatureBlock(b: BrandedDoc, y: number, companyName: string): v
   doc.text(pdfText(`For ${companyName}`), rightX, y + 4, { align: "right" });
   doc.setDrawColor(...PDF_COLORS.muted);
   doc.setLineWidth(0.3);
-  doc.line(rightX - 70, y + 24, rightX, y + 24);
+  doc.line(rightX - lineW, y + 24, rightX, y + 24);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8.5);
   doc.setTextColor(...PDF_COLORS.muted);
   doc.text("Authorised Signatory", rightX, y + 28.5, { align: "right" });
+  // The signature sits on the line, centred over it; the seal stands to the left of the line, level with the block.
+  if (images.signature) drawFitted(b, images.signature, lineW - 10, 17, (w, h) => ({ x: rightX - lineW / 2 - w / 2, y: y + 24.5 - h }));
+  if (images.seal) drawFitted(b, images.seal, 27, 27, (w, h) => ({ x: rightX - lineW - 6 - w, y: y + 15 - h / 2 }));
 }

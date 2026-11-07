@@ -7,7 +7,7 @@ import { isObjectId } from "@/lib/validation";
 import { fmtDate } from "@/lib/time";
 import { round2 } from "@/lib/format";
 import { createDoc, finalize, paragraph, pdfAmount, pdfMoney, pdfResponse, PDF_COLORS, table } from "@/lib/pdf/base";
-import { addressLines, boxPair, signatureBlock, wordsAndTotals } from "@/lib/pdf/boxes";
+import { addressLines, boxPair, loadSignImages, signatureBlock, wordsAndTotals } from "@/lib/pdf/boxes";
 import { rupeesInWords } from "@/lib/payroll/words";
 import { computeTotals } from "@/app/(app)/invoices/totals";
 import { canSeeClient } from "@/app/(app)/crm/_lib/access";
@@ -55,11 +55,14 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
   const netReceived = round2(inv.amountPaid - inv.amountRefunded);
   // Same rule as the invoice: the company GSTIN is printed only for taxed invoices.
   const taxed = computeTotals(inv.items, inv.discount).items.some((i) => i.taxParts.length > 0);
-  const lastPaid = payments.filter((p) => p.type === "payment").at(-1)?.date;
+  const lastPayment = payments.filter((p) => p.type === "payment").at(-1);
+  const lastPaid = lastPayment?.date;
+  // The latest payment's receipt number heads the receipt; each payment's own number is listed in the table.
+  const receiptNo = lastPayment?.receiptNo ?? undefined;
   const b = createDoc({
     title: "RECEIPT",
     company: taxed ? settings.company : { ...settings.company, gstin: "" },
-    meta: [`Against invoice ${label}`],
+    meta: [receiptNo ? `Receipt no. ${receiptNo}` : "", `Against invoice ${label}`].filter(Boolean),
   });
   const { doc } = b;
 
@@ -95,6 +98,7 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
       title: "RECEIPT DETAILS",
       labelW: 27,
       rows: [
+        { label: "Receipt no.", value: receiptNo, bold: true },
         { label: "Receipt date", value: lastPaid ? fmtDate(lastPaid) : undefined, bold: true },
         { label: "Invoice no.", value: label },
         { label: "Invoice date", value: fmtDate(inv.issueDate) },
@@ -117,10 +121,11 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
   y =
     table(b, {
       startY: y,
-      head: [["Sl. No.", "Payment no.", "Date", "Mode", "Reference", { content: "Amount", styles: { halign: "right" } }]],
+      head: [["Sl. No.", "Receipt no.", "Date", "Mode", "Reference", { content: "Amount", styles: { halign: "right" } }]],
       body: payments.map((p, idx) => [
         String(idx + 1),
-        p.paymentNo,
+        // Refunds and payments recorded before receipt numbers keep their payment number.
+        p.receiptNo ?? p.paymentNo,
         fmtDate(p.date),
         p.type === "refund" ? `Refund - ${p.method}` : p.method,
         p.reference || "-",
@@ -151,7 +156,7 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
   rows.push(["Balance due", pdfMoney(inv.balance), true]);
   y = wordsAndTotals(b, y, rupeesInWords(netReceived), rows);
 
-  signatureBlock(b, y, settings.company.legalName || settings.company.name);
+  signatureBlock(b, y, settings.company.legalName || settings.company.name, await loadSignImages(settings.company));
 
   finalize(b, "This is a computer-generated receipt");
   return pdfResponse(doc, `Receipt-${label}.pdf`);

@@ -97,11 +97,20 @@ export interface PaymentTerm {
   days: number;
 }
 
+/** An image in the public file bucket: `url` to show it, `key` to read it from storage (PDFs embed it). */
+export interface CompanyImage {
+  url: string;
+  key: string;
+}
+
 export interface AppSettings {
   company: {
     name: string;
     legalName: string;
     logo?: string;
+    /** Company seal and authorised signature, printed on issued invoices and on receipts. */
+    seal?: CompanyImage;
+    signature?: CompanyImage;
     address: string;
     email: string;
     phone: string;

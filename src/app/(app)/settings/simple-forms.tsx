@@ -5,7 +5,7 @@ import { ActionForm, Field } from "@/components/ui/form";
 import { Checkbox, Input, Select, Switch, Textarea } from "@/components/ui/input";
 import { FileUpload } from "@/components/ui/file-upload";
 import { Alert } from "@/components/ui/page";
-import { NOTIFICATION_EVENTS, type AppSettings } from "@/lib/config-defaults";
+import { NOTIFICATION_EVENTS, type AppSettings, type CompanyImage } from "@/lib/config-defaults";
 import { formatDuration } from "@/lib/time";
 import { MAX_UPLOAD_LABEL } from "@/lib/upload-limit";
 import {
@@ -78,9 +78,52 @@ export function CompanyForm({ company, storageConfigured }: { company: AppSettin
           </div>
           <Checkbox name="resetLogo" label="Use the default D4DX logo instead" />
         </div>
+
+        <div className="flex flex-col gap-3 border-t border-line-soft pt-4">
+          <div>
+            <div className="text-[13px] font-semibold text-ink-2">Seal &amp; signature</div>
+            <p className="mt-0.5 text-xs text-muted">Printed above &ldquo;Authorised Signatory&rdquo; on issued invoices and on receipts.</p>
+          </div>
+          {storageConfigured ? (
+            <CGrid>
+              <PrintedImageField title="Company seal" name="sealFile" removeName="removeSeal" current={company.seal} />
+              <PrintedImageField title="Signature" name="signatureFile" removeName="removeSignature" current={company.signature} />
+            </CGrid>
+          ) : (
+            <Alert tone="warning">File storage is not configured, so the seal and signature can&apos;t be uploaded.</Alert>
+          )}
+        </div>
         <SaveRow />
       </ActionForm>
     </SettingsCard>
+  );
+}
+
+/** Upload slot for an image printed on documents (seal, signature): the current one, a new upload and a remove option. */
+function PrintedImageField({ title, name, removeName, current }: { title: string; name: string; removeName: string; current?: CompanyImage }) {
+  const what = title.toLowerCase();
+  return (
+    <div className="flex min-w-0 flex-col gap-2.5">
+      <div className="text-[13px] font-medium text-ink-2">{title}</div>
+      <span className="flex h-24 items-center justify-center rounded-xl border border-line bg-white p-2">
+        {current ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={current.url} alt={`Current ${what}`} className="max-h-full max-w-full object-contain" />
+        ) : (
+          <span className="text-xs text-muted">No {what} yet</span>
+        )}
+      </span>
+      <FileUpload
+        name={name}
+        multiple={false}
+        accept="image/png,image/jpeg"
+        keepPng
+        label={current ? `Replace ${what}` : `Upload ${what}`}
+        hint={`PNG with a transparent background (or JPG) · up to ${MAX_UPLOAD_LABEL}`}
+        context={{ entityType: "company", isPublic: true }}
+      />
+      {current && <Checkbox name={removeName} label={`Remove the ${what}`} />}
+    </div>
   );
 }
 

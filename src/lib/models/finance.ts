@@ -71,6 +71,8 @@ export const Payment = sqliteTable(
   {
     _id: pk(),
     paymentNo: text().notNull(),
+    /** Receipt number entered when a payment is recorded (refunds, adjustments and older payments have none). */
+    receiptNo: text(),
     invoice: ref().notNull(),
     client: ref().notNull(),
     project: ref(),
@@ -86,6 +88,7 @@ export const Payment = sqliteTable(
   },
   (t) => [
     uniqueIndex("payments_payment_no").on(t.paymentNo),
+    uniqueIndex("payments_receipt_no").on(t.receiptNo),
     index("payments_invoice").on(t.invoice),
     index("payments_client").on(t.client),
     index("payments_date").on(t.date),

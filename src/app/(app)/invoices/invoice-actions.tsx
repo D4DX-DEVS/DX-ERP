@@ -43,7 +43,7 @@ export function CancelInvoiceButton({ id }: { id: string }) {
   );
 }
 
-export function RecordPaymentDialog({ id, balance, today, label = "Record payment" }: { id: string; balance: number; today: string; label?: string }) {
+export function RecordPaymentDialog({ id, balance, today, lastReceiptNo, label = "Record payment" }: { id: string; balance: number; today: string; lastReceiptNo?: string; label?: string }) {
   const [open, setOpen] = useState(false);
   return (
     <Dialog
@@ -55,6 +55,9 @@ export function RecordPaymentDialog({ id, balance, today, label = "Record paymen
       trigger={<Button>{label}</Button>}
     >
       <ActionForm action={(input) => recordPayment(id, input)} successMessage="Payment recorded" onSuccess={() => setOpen(false)}>
+        <Field label="Receipt number" name="receiptNo" required hint={`Up to 16 letters, digits, - or /.${lastReceiptNo ? ` Last used: ${lastReceiptNo}` : ""}`}>
+          <Input id="receiptNo" name="receiptNo" maxLength={16} className="uppercase" autoComplete="off" />
+        </Field>
         <FormGrid>
           <Field label="Amount (₹)" name="amount" required>
             <Input id="amount" name="amount" type="number" inputMode="decimal" min={0.01} max={balance} step="0.01" defaultValue={balance} />

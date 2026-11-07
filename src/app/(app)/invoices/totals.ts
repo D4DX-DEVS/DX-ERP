@@ -102,6 +102,28 @@ export function computeTotals(items: ItemInput[], discountInput: number): Invoic
   };
 }
 
+const gstKind = (t: TaxRate) => {
+  const name = taxType(t.name).toUpperCase();
+  return name === "CGST" || name === "SGST" || name === "IGST" ? name : null;
+};
+
+/**
+ * GST rule for one line's taxes: IGST (sale to another state) is charged alone; CGST and SGST (sale within the state)
+ * are charged together, one of each at the same rate. Returns what is wrong, or null when the taxes are fine.
+ */
+export function gstComboError(taxes: TaxRate[]): string | null {
+  const of = (kind: string) => taxes.filter((t) => gstKind(t) === kind);
+  const [igst, cgst, sgst] = [of("IGST"), of("CGST"), of("SGST")];
+  if (igst.length > 0 && taxes.length > 1) return "IGST is charged alone, not with another tax";
+  if (cgst.length > 1 || sgst.length > 1) return "Tick one CGST and one SGST rate";
+  if (cgst.length !== sgst.length) return cgst.length ? "CGST needs SGST too" : "SGST needs CGST too";
+  if (cgst.length && cgst[0].rate !== sgst[0].rate) return "CGST and SGST must be at the same rate";
+  return null;
+}
+
+/** IGST stands alone: once it is ticked, no other tax can be ticked on the line. */
+export const isIgst = (t: TaxRate) => gstKind(t) === "IGST";
+
 /** A line's taxes for item tables: "CGST 9% + SGST 9%", "IGST 18%", or null when untaxed. */
 export function lineTaxLabel(item: ItemInput): string | null {
   const parts = taxPartsOf(item);

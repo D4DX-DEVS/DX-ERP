@@ -15,7 +15,7 @@ import { db } from "@/lib/db";
 import { Client, Contract, Invoice, Payment, Project, newId, type Id, type IInvoice } from "@/lib/models";
 import type { Address } from "@/lib/models/_base";
 import { jsonPush } from "@/lib/sql";
-import { balanceOf, computeTotals, CUSTOM_TERM, INVOICE_PAYMENT_METHODS, settledStatus } from "./totals";
+import { balanceOf, computeTotals, CUSTOM_TERM, gstComboError, INVOICE_PAYMENT_METHODS, settledStatus, taxPartsOf } from "./totals";
 import { canSeeClient } from "@/app/(app)/crm/_lib/access";
 
 const itemSchema = z.object({
@@ -25,18 +25,23 @@ const itemSchema = z.object({
   taxes: z
     .array(z.object({ name: zs.text("Tax", 40), rate: zs.num("Tax rate", { min: 0.01, max: 100 }) }))
     .max(5, "Too many taxes on one line")
-    .refine((t) => new Set(t.map((x) => `${x.name} ${x.rate}`)).size === t.length, "A tax is ticked twice"),
+    .refine((t) => new Set(t.map((x) => `${x.name} ${x.rate}`)).size === t.length, "A tax is ticked twice")
+    .superRefine((t, ctx) => {
+      const error = gstComboError(t);
+      if (error) ctx.addIssue({ code: "custom", message: error });
+    }),
 });
 
-/** GST rule 46: up to 16 characters, letters, digits, hyphen and slash. Stored upper-case. */
-const invoiceNoSchema = z.preprocess(
-  (v) => (typeof v === "string" ? v.trim().toUpperCase() : v),
-  z.string({ error: "Invoice number is required" }).min(1, "Invoice number is required").regex(/^[A-Z0-9/-]{1,16}$/, "Up to 16 letters, digits, - or /"),
-);
+/** GST rule 46: up to 16 characters, letters, digits, hyphen and slash. Stored upper-case. Receipt numbers follow it too. */
+const docNoSchema = (label: string) =>
+  z.preprocess(
+    (v) => (typeof v === "string" ? v.trim().toUpperCase() : v),
+    z.string({ error: `${label} is required` }).min(1, `${label} is required`).regex(/^[A-Z0-9/-]{1,16}$/, "Up to 16 letters, digits, - or /"),
+  );
 
 const draftSchema = z.object({
   id: zs.optId(),
-  invoiceNo: invoiceNoSchema,
+  invoiceNo: docNoSchema("Invoice number"),
   client: zs.id("Client"),
   project: zs.optId(),
   contract: zs.optId(),
@@ -54,6 +59,7 @@ const draftSchema = z.object({
 const method = z.enum(INVOICE_PAYMENT_METHODS, { error: "Choose a payment method" });
 
 const paymentSchema = z.object({
+  receiptNo: docNoSchema("Receipt number"),
   date: zs.date("Date"),
   amount: zs.num("Amount", { min: 0.01 }),
   method,
@@ -315,6 +321,9 @@ export async function issueInvoice(id: string): Promise<ActionResult<{ invoiceNo
     const inv = await loadInvoice(id);
     if (inv.status !== "draft") throw new ActionError("This invoice has already been issued.");
     if (inv.items.length === 0 || inv.total <= 0) throw new ActionError("Add line items with a total above zero before issuing.");
+    // Drafts saved before the GST rule was enforced: edit them before they become tax invoices.
+    const badLine = inv.items.findIndex((i) => gstComboError(taxPartsOf(i)));
+    if (badLine >= 0) throw new ActionError(`Line ${badLine + 1}: ${gstComboError(taxPartsOf(inv.items[badLine]))}. Edit the invoice to fix its tax before issuing.`);
 
     const billingColumns = { name: Client.name, contactPerson: Client.contactPerson, address: Client.address, gstin: Client.gstin, email: Client.email, phone: Client.phone };
     const [client] = await db().select(billingColumns).from(Client).where(eq(Client._id, inv.client)).limit(1);
@@ -415,7 +424,7 @@ export async function cancelInvoice(id: string, reason: string): Promise<ActionR
   }, "Invoice cancelled");
 }
 
-type MoneyEvent = { type: "payment" | "refund" | "adjustment"; date: string; amount: number; method: string; reference?: string; note?: string };
+type MoneyEvent = { type: "payment" | "refund" | "adjustment"; receiptNo?: string; date: string; amount: number; method: string; reference?: string; note?: string };
 
 /**
  * Applies one money movement atomically: the invoice totals only change when nobody else changed them in the
@@ -455,6 +464,7 @@ async function applyMoneyEvent(
           .select({
             _id: sql<string>`${newId()}`.as("_id"),
             paymentNo: sql<string>`${paymentNo}`.as("paymentNo"),
+            receiptNo: sql<string | null>`${event.receiptNo ?? null}`.as("receiptNo"),
             invoice: Invoice._id,
             client: Invoice.client,
             project: Invoice.project,
@@ -495,13 +505,16 @@ export async function recordPayment(id: string, input: Record<string, unknown>):
     assertDateNotFuture(data.date);
     const amount = round2(data.amount);
     if (amount > inv.balance + 0.004) throw new ActionError(`The amount exceeds the balance due (${inr(inv.balance, true)}).`, { amount: `Maximum ${inr(inv.balance, true)}` });
+    // The unique index catches a race; this gives the usual case a clear message.
+    const [taken] = await db().select({ id: Payment._id }).from(Payment).where(eq(Payment.receiptNo, data.receiptNo)).limit(1);
+    if (taken) throw new ActionError(`Receipt number ${data.receiptNo} is already used.`, { receiptNo: "Already used by another payment" });
 
-    const res = await applyMoneyEvent(inv, { type: "payment", date: data.date, amount, method: data.method, reference: data.reference, note: data.note }, user);
-    await audit(user, { action: "payment", entity: "payment", entityId: inv._id, ref: label(inv), summary: `Recorded payment ${res.paymentNo} (${data.method}) on ${label(inv)}` });
+    const res = await applyMoneyEvent(inv, { type: "payment", receiptNo: data.receiptNo, date: data.date, amount, method: data.method, reference: data.reference, note: data.note }, user);
+    await audit(user, { action: "payment", entity: "payment", entityId: inv._id, ref: label(inv), summary: `Recorded payment ${res.paymentNo} (receipt ${data.receiptNo}, ${data.method}) on ${label(inv)}` });
     const recipients = await usersWithPermission("invoices.manage");
     await notify(
       recipients,
-      { type: "invoice", title: `Payment received: ${inr(amount, true)}`, body: `${label(inv)} · ${data.method}${data.reference ? ` · ${data.reference}` : ""}. Balance ${inr(res.balance, true)}.`, link: `/invoices/${inv._id}` },
+      { type: "invoice", title: `Payment received: ${inr(amount, true)}`, body: `${label(inv)} · Receipt ${data.receiptNo} · ${data.method}${data.reference ? ` · ${data.reference}` : ""}. Balance ${inr(res.balance, true)}.`, link: `/invoices/${inv._id}` },
       [user._id],
     );
     return { paymentNo: res.paymentNo };

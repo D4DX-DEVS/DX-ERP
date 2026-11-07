@@ -6,7 +6,7 @@ import { getSettings } from "@/lib/settings";
 import { isObjectId } from "@/lib/validation";
 import { fmtDate } from "@/lib/time";
 import { createDoc, finalize, heading, paragraph, pdfAmount, pdfMoney, pdfResponse, PDF_COLORS, table } from "@/lib/pdf/base";
-import { addressLines, boxPair, ensureSpace, signatureBlock, wordsAndTotals, type BoxRow } from "@/lib/pdf/boxes";
+import { addressLines, boxPair, ensureSpace, loadSignImages, signatureBlock, wordsAndTotals, type BoxRow } from "@/lib/pdf/boxes";
 import { rupeesInWords } from "@/lib/payroll/words";
 import { billingInfo } from "@/app/(app)/invoices/billing-info";
 import { computeTotals } from "@/app/(app)/invoices/totals";
@@ -185,8 +185,8 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
     y = paragraph(b, inv.terms, y, { size: 8.5, color: PDF_COLORS.muted });
   }
 
-  // --- signature (signed by hand after printing) ------------------------------------------------------------
-  signatureBlock(b, y, settings.company.legalName || settings.company.name);
+  // --- signature: the seal and signature from Configuration (not on drafts, which are not valid invoices) -------------
+  signatureBlock(b, y, settings.company.legalName || settings.company.name, isDraft ? {} : await loadSignImages(settings.company));
 
   finalize(b, isDraft ? "Draft - not a valid tax invoice until issued" : "This is a computer-generated invoice");
   return pdfResponse(doc, `${label}.pdf`);

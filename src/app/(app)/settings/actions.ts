@@ -4,7 +4,7 @@ import { and, count, eq, isNotNull, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { actionPermission, ActionError, parse, runAction, type ActionResult } from "@/lib/actions";
 import { can } from "@/lib/auth/session";
-import { NOTIFICATION_EVENTS, taxLabel, type AppSettings, type PayrollComponent } from "@/lib/config-defaults";
+import { NOTIFICATION_EVENTS, taxLabel, type AppSettings, type CompanyImage, type PayrollComponent } from "@/lib/config-defaults";
 import { db } from "@/lib/db";
 import { AttendanceKiosk, Movement, StoredFile } from "@/lib/models";
 import { getSettings } from "@/lib/settings";
@@ -44,7 +44,25 @@ const companySchema = z.object({
   website: z.preprocess((v) => (typeof v === "string" ? v.trim() || undefined : v), z.url({ error: "Enter a full web address, e.g. https://d4dx.co" }).max(200).optional()),
   logoFile: zs.ids(),
   resetLogo: zs.bool(),
+  sealFile: zs.ids(),
+  removeSeal: zs.bool(),
+  signatureFile: zs.ids(),
+  removeSignature: zs.bool(),
 });
+
+/** The company image uploaded with the form (the last one picked), or null when none was. */
+async function uploadedCompanyImage(ids: string[], field: string, what: string, forPdf = false): Promise<CompanyImage | null> {
+  if (ids.length === 0) return null;
+  const [file] = await db()
+    .select({ url: StoredFile.url, key: StoredFile.key, mime: StoredFile.mime })
+    .from(StoredFile)
+    .where(and(eq(StoredFile._id, ids[ids.length - 1]), eq(StoredFile.entityType, "company"), eq(StoredFile.isPublic, true), isNull(StoredFile.deletedAt)))
+    .limit(1);
+  if (!file?.url) fieldError(field, `The uploaded ${what} could not be found. Upload it again.`);
+  // PDFs embed PNG and JPEG as they are; other formats would print badly (WebP loses its transparency).
+  if (forPdf && file.mime !== "image/png" && file.mime !== "image/jpeg") fieldError(field, `Upload the ${what} as a PNG or JPG image.`);
+  return { url: file.url, key: file.key };
+}
 
 export async function saveCompany(input: Record<string, unknown>): Promise<Saved> {
   return runAction(async () => {
@@ -52,16 +70,14 @@ export async function saveCompany(input: Record<string, unknown>): Promise<Saved
     const data = parse(companySchema, input);
     const before = (await getSettings()).company;
 
-    let logo = before.logo;
-    if (data.logoFile.length > 0) {
-      const [file] = await db()
-        .select({ url: StoredFile.url })
-        .from(StoredFile)
-        .where(and(eq(StoredFile._id, data.logoFile[data.logoFile.length - 1]), eq(StoredFile.entityType, "company"), eq(StoredFile.isPublic, true), isNull(StoredFile.deletedAt)))
-        .limit(1);
-      if (!file?.url) fieldError("logoFile", "The uploaded logo could not be found. Upload it again.");
-      logo = file.url;
-    }
+    const [newLogo, newSeal, newSignature] = await Promise.all([
+      uploadedCompanyImage(data.logoFile, "logoFile", "logo"),
+      uploadedCompanyImage(data.sealFile, "sealFile", "seal", true),
+      uploadedCompanyImage(data.signatureFile, "signatureFile", "signature", true),
+    ]);
+    const logo = newLogo?.url ?? before.logo;
+    const seal = data.removeSeal ? undefined : (newSeal ?? before.seal);
+    const signature = data.removeSignature ? undefined : (newSignature ?? before.signature);
     const next: AppSettings["company"] = {
       name: data.name,
       legalName: data.legalName,
@@ -75,6 +91,8 @@ export async function saveCompany(input: Record<string, unknown>): Promise<Saved
     };
     // Omitting the key falls back to the default D4DX logo.
     if (logo && !data.resetLogo) next.logo = logo;
+    if (seal) next.seal = seal;
+    if (signature) next.signature = signature;
     return saveConfig(user, "company", "Company profile", next);
   }, "Company profile saved");
 }

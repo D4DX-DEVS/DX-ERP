@@ -11,11 +11,12 @@ import { Button, buttonClass } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Alert } from "@/components/ui/page";
 import { taxLabel, type TaxRate } from "@/lib/config-defaults";
+import { cn } from "@/lib/cn";
 import { inr } from "@/lib/format";
 import { addDays, fmtDate } from "@/lib/time";
 import { saveInvoice } from "./actions";
 import type { BillingInfo } from "./billing-info";
-import { computeTotals, CUSTOM_TERM } from "./totals";
+import { computeTotals, CUSTOM_TERM, gstComboError, isIgst } from "./totals";
 
 export interface ClientOption {
   id: string;
@@ -375,9 +376,17 @@ function DetailList({ title, rows, note }: { title: string; rows: [string, strin
   );
 }
 
-/** Tick-boxes for a line's taxes: none (No tax), or e.g. CGST 9% + SGST 9% within the state, IGST 18% across states. */
+/**
+ * Tick-boxes for a line's taxes: none (No tax), CGST 9% + SGST 9% within the state, or IGST 18% across states.
+ * IGST is charged alone: ticking it clears the other taxes, and while it is ticked the others can't be ticked.
+ */
 function TaxPicker({ label, value, options, onChange }: { label: string; value: string[]; options: TaxRate[]; onChange: (taxes: string[]) => void }) {
-  const toggle = (key: string, on: boolean) => onChange(options.map(taxLabel).filter((k) => (k === key ? on : value.includes(k))));
+  const igstTicked = options.some((o) => isIgst(o) && value.includes(taxLabel(o)));
+  const toggle = (o: TaxRate, on: boolean) => {
+    const key = taxLabel(o);
+    if (on && isIgst(o)) return onChange([key]);
+    onChange(options.map(taxLabel).filter((k) => (k === key ? on : value.includes(k))));
+  };
   return (
     <Popover.Root>
       <Popover.Trigger asChild>
@@ -393,19 +402,21 @@ function TaxPicker({ label, value, options, onChange }: { label: string; value: 
       <Popover.Portal>
         <Popover.Content align="start" sideOffset={6} className="z-50 flex min-w-52 animate-fade-in flex-col gap-1 rounded-xl border border-line bg-white p-2 shadow-popover">
           <TaxOptionRow label="No tax" checked={value.length === 0} onChange={() => onChange([])} />
-          {options.map((o) => (
-            <TaxOptionRow key={taxLabel(o)} label={taxLabel(o)} checked={value.includes(taxLabel(o))} onChange={(on) => toggle(taxLabel(o), on)} />
-          ))}
+          {options.map((o) => {
+            const checked = value.includes(taxLabel(o));
+            return <TaxOptionRow key={taxLabel(o)} label={taxLabel(o)} checked={checked} disabled={igstTicked && !checked} onChange={(on) => toggle(o, on)} />;
+          })}
+          <p className="max-w-52 px-2 pt-1 text-xs text-muted">Within the state: CGST + SGST. Another state: IGST alone.</p>
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
   );
 }
 
-function TaxOptionRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+function TaxOptionRow({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) {
   return (
-    <div className="rounded-lg px-2 py-1.5 hover:bg-field [&>label]:w-full">
-      <Checkbox label={label} checked={checked} onChange={(e) => onChange(e.target.checked)} />
+    <div className={cn("rounded-lg px-2 py-1.5 [&>label]:w-full", disabled ? "opacity-45 [&_*]:cursor-not-allowed" : "hover:bg-field")}>
+      <Checkbox label={label} checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
     </div>
   );
 }
@@ -425,6 +436,8 @@ function LineEditor({
 }) {
   const { errors } = useFormState();
   const err = (i: number, key: string) => errors[`items.${i}.${key}`];
+  // Shown while editing, before the server would refuse the save.
+  const taxError = (l: Line) => gstComboError(taxes.filter((o) => l.taxes.includes(taxLabel(o))));
   return (
     <div className="flex flex-col gap-3">
       {errors.items && <p className="text-xs font-medium text-danger">{errors.items}</p>}
@@ -452,6 +465,7 @@ function LineEditor({
           </div>
           <div>
             <TaxPicker label={`Line ${i + 1} tax`} value={l.taxes} options={taxes} onChange={(t) => onChange(i, { taxes: t })} />
+            {(taxError(l) ?? err(i, "taxes")) && <p className="mt-1 text-xs font-medium text-danger">{taxError(l) ?? err(i, "taxes")}</p>}
           </div>
           <div className="flex h-10 items-center justify-end text-sm font-semibold text-ink tabular">{inr(computed[i] ?? 0, true)}</div>
           <button

@@ -11,10 +11,11 @@ function encode(canvas: HTMLCanvasElement, type: string, quality: number): Promi
 /**
  * Browser-side: shrinks a photo that is over `maxBytes` (downscale + re-encode, which also drops EXIF/GPS data) so it
  * passes the upload limit. PNG/WebP stay WebP to keep transparency where the browser can encode it (Safari can't →
- * JPEG on white). Returns the original file when it already fits, isn't a photo, can't be decoded or can't be shrunk
- * enough — the caller's size check then rejects it.
+ * JPEG on white); with `keepPng` a PNG stays PNG (for images embedded in PDFs, which can't keep WebP transparency).
+ * Returns the original file when it already fits, isn't a photo, can't be decoded or can't be shrunk enough — the
+ * caller's size check then rejects it.
  */
-export async function shrinkImage(file: File, maxBytes: number): Promise<File> {
+export async function shrinkImage(file: File, maxBytes: number, { keepPng = false }: { keepPng?: boolean } = {}): Promise<File> {
   if (file.size <= maxBytes || !SHRINKABLE.test(file.type)) return file;
   let bitmap: ImageBitmap;
   try {
@@ -27,20 +28,22 @@ export async function shrinkImage(file: File, maxBytes: number): Promise<File> {
     const ctx = canvas.getContext("2d");
     if (!ctx) return file;
     canvas.width = canvas.height = 1;
-    const webp = (file.type === "image/png" || file.type === "image/webp") && (await encode(canvas, "image/webp", 0.8))?.type === "image/webp";
-    const type = webp ? "image/webp" : "image/jpeg";
-    const name = `${file.name.replace(/\.[^.]*$/, "") || "photo"}.${webp ? "webp" : "jpg"}`;
+    const png = keepPng && file.type === "image/png";
+    const webp = !png && (file.type === "image/png" || file.type === "image/webp") && (await encode(canvas, "image/webp", 0.8))?.type === "image/webp";
+    const type = png ? "image/png" : webp ? "image/webp" : "image/jpeg";
+    const name = `${file.name.replace(/\.[^.]*$/, "") || "photo"}.${png ? "png" : webp ? "webp" : "jpg"}`;
     const longest = Math.max(bitmap.width, bitmap.height);
     for (let side = Math.min(MAX_SIDE, longest); ; side = Math.round(side * 0.75)) {
       const scale = side / longest;
       canvas.width = Math.max(1, Math.round(bitmap.width * scale));
       canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-      if (!webp) {
+      if (type === "image/jpeg") {
         ctx.fillStyle = "#fff";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
       }
       ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-      for (const quality of QUALITIES) {
+      // PNG is lossless: only a smaller size helps.
+      for (const quality of png ? [1] : QUALITIES) {
         const blob = await encode(canvas, type, quality);
         if (blob && blob.size <= maxBytes) return new File([blob], name, { type, lastModified: file.lastModified });
       }

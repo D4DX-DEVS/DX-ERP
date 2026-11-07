@@ -26,8 +26,8 @@ export interface UploadContext {
 }
 
 /** Uploads one file to /api/files/upload (photos over the limit are shrunk first) and resolves with its stored-file record. */
-export async function uploadFile(file: File, ctx: UploadContext): Promise<UploadedFile> {
-  const toSend = await shrinkImage(file, MAX_UPLOAD_BYTES);
+export async function uploadFile(file: File, ctx: UploadContext, shrink?: { keepPng?: boolean }): Promise<UploadedFile> {
+  const toSend = await shrinkImage(file, MAX_UPLOAD_BYTES, shrink);
   if (toSend.size > MAX_UPLOAD_BYTES) throw new Error(`File is larger than ${MAX_UPLOAD_LABEL}`);
   const body = new FormData();
   body.set("file", toSend);
@@ -56,6 +56,7 @@ export function FileUpload({
   hint = `PDF, images, Office documents · up to ${MAX_UPLOAD_LABEL} each · larger photos are shrunk automatically`,
   initial = [],
   onChange,
+  keepPng,
   className,
 }: {
   name?: string;
@@ -66,6 +67,8 @@ export function FileUpload({
   hint?: string;
   initial?: UploadedFile[];
   onChange?: (files: UploadedFile[]) => void;
+  /** Shrink oversized PNGs as PNG, not WebP (images that are embedded in PDFs). */
+  keepPng?: boolean;
   className?: string;
 }) {
   const [files, setFiles] = useState<UploadedFile[]>(initial);
@@ -84,7 +87,7 @@ export function FileUpload({
     const added: UploadedFile[] = [];
     for (const f of selected) {
       try {
-        added.push(await uploadFile(f, context));
+        added.push(await uploadFile(f, context, { keepPng }));
       } catch (error) {
         toast.error(`${f.name}: ${(error as Error).message}`);
       } finally {
