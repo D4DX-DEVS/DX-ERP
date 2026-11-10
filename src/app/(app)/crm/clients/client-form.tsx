@@ -124,7 +124,7 @@ export function ClientForm({
               <Field label="Designation" name="contactDesignation">
                 <Input id="contactDesignation" name="contactDesignation" defaultValue={initial.contactDesignation} maxLength={200} autoComplete="off" />
               </Field>
-              <Field label="Email" name="email">
+              <Field label="Email" name="email" required hint="Invoices are emailed to this address.">
                 <Input id="email" name="email" type="email" defaultValue={initial.email} autoComplete="off" />
               </Field>
               <Field label="Phone" name="phone">

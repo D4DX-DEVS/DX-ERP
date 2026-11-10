@@ -6,17 +6,19 @@ import { zs, isObjectId } from "@/lib/validation";
 import type { CurrentUser } from "@/lib/auth/session";
 import { audit, diff } from "@/lib/audit";
 import { notify, notifyPermission, usersWithPermission } from "@/lib/notify";
-import { ID_PREFIX, fiscalYear, nextNumber, nextSeq } from "@/lib/counters";
-import { getSettings } from "@/lib/settings";
+import { ID_PREFIX, nextNumber } from "@/lib/counters";
 import { round2, inr } from "@/lib/format";
-import { addDays, diffDays, todayKey, zonedDateTime } from "@/lib/time";
+import { addDays, diffDays, todayKey } from "@/lib/time";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { Client, Contract, Invoice, Payment, Project, newId, type Id, type IInvoice } from "@/lib/models";
 import type { Address } from "@/lib/models/_base";
 import { jsonPush } from "@/lib/sql";
+import { deliverMail } from "@/lib/mailer";
 import { balanceOf, computeTotals, CUSTOM_TERM, gstComboError, INVOICE_PAYMENT_METHODS, settledStatus, taxPartsOf } from "./totals";
 import { canSeeClient } from "@/app/(app)/crm/_lib/access";
+import { invoicePdf } from "./invoice-pdf";
+import { withNextNumber } from "./numbering";
 
 const itemSchema = z.object({
   description: zs.text("Description", 500),
@@ -32,16 +34,8 @@ const itemSchema = z.object({
     }),
 });
 
-/** GST rule 46: up to 16 characters, letters, digits, hyphen and slash. Stored upper-case. Receipt numbers follow it too. */
-const docNoSchema = (label: string) =>
-  z.preprocess(
-    (v) => (typeof v === "string" ? v.trim().toUpperCase() : v),
-    z.string({ error: `${label} is required` }).min(1, `${label} is required`).regex(/^[A-Z0-9/-]{1,16}$/, "Up to 16 letters, digits, - or /"),
-  );
-
 const draftSchema = z.object({
   id: zs.optId(),
-  invoiceNo: docNoSchema("Invoice number"),
   client: zs.id("Client"),
   project: zs.optId(),
   contract: zs.optId(),
@@ -59,7 +53,6 @@ const draftSchema = z.object({
 const method = z.enum(INVOICE_PAYMENT_METHODS, { error: "Choose a payment method" });
 
 const paymentSchema = z.object({
-  receiptNo: docNoSchema("Receipt number"),
   date: zs.date("Date"),
   amount: zs.num("Amount", { min: 0.01 }),
   method,
@@ -73,6 +66,13 @@ const refundSchema = z.object({
   method,
   reference: zs.optText(120),
   note: zs.text("Reason", 500),
+});
+
+const emailSchema = z.object({
+  to: zs.email("Recipient email"),
+  cc: zs.optEmail(),
+  subject: zs.text("Subject", 200),
+  message: zs.text("Message", 5000),
 });
 
 const adjustmentSchema = z.object({
@@ -165,11 +165,8 @@ export async function saveInvoice(input: Record<string, unknown>): Promise<Actio
     const totals = computeTotals(data.items, data.discount ?? 0);
     if ((data.discount ?? 0) > totals.subtotal) throw new ActionError("The discount cannot exceed the subtotal.", { discount: "Cannot exceed the subtotal" });
 
-    const [taken] = await db().select({ id: Invoice._id }).from(Invoice).where(eq(Invoice.invoiceNo, data.invoiceNo)).limit(1);
-    if (taken && taken.id !== data.id) throw new ActionError(`Invoice number ${data.invoiceNo} is already used.`, { invoiceNo: "Already used by another invoice" });
-
+    // The invoice number is not edited here: drafts get theirs when issued, and an issued invoice keeps its own.
     const fields = {
-      invoiceNo: data.invoiceNo,
       client: data.client,
       project: data.project ?? null,
       contract: data.contract ?? null,
@@ -220,12 +217,12 @@ export async function saveInvoice(input: Record<string, unknown>): Promise<Actio
         history: [{ _id: newId(), action: "created", by: user._id, byName: user.name, at: new Date() }],
       })
       .returning();
-    await audit(user, { action: "create", entity: "invoice", entityId: doc._id, ref: data.invoiceNo, summary: `Created draft invoice ${data.invoiceNo} for ${client.name}` });
+    await audit(user, { action: "create", entity: "invoice", entityId: doc._id, ref: draftNo, summary: `Created draft invoice ${draftNo} for ${client.name}` });
     return { id: doc._id };
   }, "Invoice saved");
 }
 
-type InvoiceFields = Pick<IInvoice, "invoiceNo" | "client" | "project" | "milestone" | "dueDate" | "total">;
+type InvoiceFields = Pick<IInvoice, "client" | "project" | "milestone" | "dueDate" | "total">;
 type BillingClient = { name: string; contactPerson: string | null; address: Address | null; gstin: string | null; email: string | null; phone: string | null };
 
 /**
@@ -299,22 +296,38 @@ async function updateIssuedInvoice(
   return updated._id;
 }
 
-/** Discards a draft invoice that was never issued. */
-export async function deleteDraftInvoice(id: string): Promise<ActionResult<null>> {
+/**
+ * Deletes an invoice for good. Drafts can be discarded by anyone who manages invoices; an issued, paid or cancelled
+ * invoice only by the super admin, together with every payment, refund and adjustment recorded against it.
+ */
+export async function deleteInvoice(id: string): Promise<ActionResult<null>> {
   return runAction(async () => {
     const user = await actionPermission("invoices.manage");
     const inv = await loadInvoice(id);
-    const deleted = await db().delete(Invoice).where(and(eq(Invoice._id, id), eq(Invoice.status, "draft"))).returning({ id: Invoice._id });
-    if (deleted.length === 0) throw new ActionError("Only draft invoices can be deleted.");
-    await audit(user, { action: "delete", entity: "invoice", entityId: inv._id, ref: label(inv), summary: `Deleted draft invoice ${label(inv)}` });
+    if (inv.status !== "draft" && !user.isSuperAdmin) throw new ActionError("Only the super admin can delete an issued invoice. Cancel it instead.");
+    // One batch (one D1 transaction): the invoice goes only while nothing changed since it was loaded, and its
+    // payments only once the invoice is gone.
+    const [deleted] = await db().batch([
+      db()
+        .delete(Invoice)
+        .where(and(eq(Invoice._id, id), eq(Invoice.status, inv.status), eq(Invoice.amountPaid, inv.amountPaid), eq(Invoice.amountRefunded, inv.amountRefunded), eq(Invoice.adjustments, inv.adjustments)))
+        .returning({ id: Invoice._id }),
+      db()
+        .delete(Payment)
+        .where(and(eq(Payment.invoice, id), sql`not exists (select 1 from ${Invoice} where ${Invoice._id} = ${id})`))
+        .returning({ id: Payment._id }),
+    ]);
+    if (deleted.length === 0) throw new ActionError("This invoice was just updated by someone else. Refresh and try again.");
+
+    // A cancelled invoice already released its milestone; the check inside only releases one still pointing here.
+    if (inv.project && inv.milestone) await setMilestoneInvoiced(inv.project, inv.milestone, inv._id, false);
+    const what = inv.status === "draft" ? "draft invoice" : `${inv.status.replace("_", " ")} invoice`;
+    await audit(user, { action: "delete", entity: "invoice", entityId: inv._id, ref: label(inv), summary: `Deleted ${what} ${label(inv)} and the payments recorded against it` });
     return null;
-  }, "Draft deleted");
+  }, "Invoice deleted");
 }
 
-/**
- * Issues a draft: locks its number (drafts saved before numbers were entered by hand get the next automatic one),
- * snapshots the billing details and marks the milestone invoiced.
- */
+/** Issues a draft: gives it the next invoice number (INV0001 …), snapshots the billing details and marks the milestone invoiced. */
 export async function issueInvoice(id: string): Promise<ActionResult<{ invoiceNo: string }>> {
   return runAction(async () => {
     const user = await actionPermission("invoices.manage");
@@ -353,29 +366,25 @@ export async function issueInvoice(id: string): Promise<ActionResult<{ invoiceNo
         billedTo = latest;
       }
       if (claimed.items.length === 0 || claimed.total <= 0) throw new ActionError("Add line items with a total above zero before issuing.");
-      if (claimed.invoiceNo) invoiceNo = claimed.invoiceNo;
-      else {
-        const n = (await getSettings()).numbering;
-        const fy = fiscalYear(zonedDateTime(claimed.issueDate, "12:00"));
-        const seq = await nextSeq(n.invoiceIncludeFiscalYear ? `invoice:${fy}` : "invoice");
-        invoiceNo = `${n.invoicePrefix}${n.invoiceIncludeFiscalYear ? `${fy}-` : ""}${String(seq).padStart(n.invoicePadding, "0")}`;
-      }
-      await db()
-        .update(Invoice)
-        .set({
-          invoiceNo,
-          balance: balanceOf({ total: claimed.total, amountPaid: 0, amountRefunded: 0, adjustments: 0 }),
-          billingSnapshot: {
-            name: billedTo.name,
-            contactPerson: billedTo.contactPerson ?? undefined,
-            address: formatAddress(billedTo.address ?? undefined),
-            gstin: billedTo.gstin ?? undefined,
-            email: billedTo.email ?? undefined,
-            phone: billedTo.phone ?? undefined,
-          },
-          history: jsonPush(Invoice.history, { _id: newId(), action: "issued", by: user._id, byName: user.name, at: new Date(), note: invoiceNo }),
-        })
-        .where(eq(Invoice._id, id));
+      invoiceNo = await withNextNumber("invoice", async (no) => {
+        await db()
+          .update(Invoice)
+          .set({
+            invoiceNo: no,
+            balance: balanceOf({ total: claimed.total, amountPaid: 0, amountRefunded: 0, adjustments: 0 }),
+            billingSnapshot: {
+              name: billedTo.name,
+              contactPerson: billedTo.contactPerson ?? undefined,
+              address: formatAddress(billedTo.address ?? undefined),
+              gstin: billedTo.gstin ?? undefined,
+              email: billedTo.email ?? undefined,
+              phone: billedTo.phone ?? undefined,
+            },
+            history: jsonPush(Invoice.history, { _id: newId(), action: "issued", by: user._id, byName: user.name, at: new Date(), note: no }),
+          })
+          .where(eq(Invoice._id, id));
+        return no;
+      });
     } catch (error) {
       // Only drafts lack a billing snapshot, so this undoes the claim only when issuing did not complete.
       await db()
@@ -496,7 +505,7 @@ function assertDateNotFuture(date: string, field = "date") {
   if (date > todayKey()) throw new ActionError("The date cannot be in the future.", { [field]: "Cannot be in the future" });
 }
 
-export async function recordPayment(id: string, input: Record<string, unknown>): Promise<ActionResult<{ paymentNo: string }>> {
+export async function recordPayment(id: string, input: Record<string, unknown>): Promise<ActionResult<{ paymentNo: string; receiptNo: string }>> {
   return runAction(async () => {
     const user = await actionPermission("invoices.payments");
     const data = parse(paymentSchema, input);
@@ -505,20 +514,21 @@ export async function recordPayment(id: string, input: Record<string, unknown>):
     assertDateNotFuture(data.date);
     const amount = round2(data.amount);
     if (amount > inv.balance + 0.004) throw new ActionError(`The amount exceeds the balance due (${inr(inv.balance, true)}).`, { amount: `Maximum ${inr(inv.balance, true)}` });
-    // The unique index catches a race; this gives the usual case a clear message.
-    const [taken] = await db().select({ id: Payment._id }).from(Payment).where(eq(Payment.receiptNo, data.receiptNo)).limit(1);
-    if (taken) throw new ActionError(`Receipt number ${data.receiptNo} is already used.`, { receiptNo: "Already used by another payment" });
 
-    const res = await applyMoneyEvent(inv, { type: "payment", receiptNo: data.receiptNo, date: data.date, amount, method: data.method, reference: data.reference, note: data.note }, user);
-    await audit(user, { action: "payment", entity: "payment", entityId: inv._id, ref: label(inv), summary: `Recorded payment ${res.paymentNo} (receipt ${data.receiptNo}, ${data.method}) on ${label(inv)}` });
+    // The receipt number (PAY0001 …) is taken with the payment; a clash with a payment saved at the same moment retries.
+    const { receiptNo, res } = await withNextNumber("receipt", async (no) => ({
+      receiptNo: no,
+      res: await applyMoneyEvent(inv, { type: "payment", receiptNo: no, date: data.date, amount, method: data.method, reference: data.reference, note: data.note }, user),
+    }));
+    await audit(user, { action: "payment", entity: "payment", entityId: inv._id, ref: label(inv), summary: `Recorded payment ${res.paymentNo} (receipt ${receiptNo}, ${data.method}) on ${label(inv)}` });
     const recipients = await usersWithPermission("invoices.manage");
     await notify(
       recipients,
-      { type: "invoice", title: `Payment received: ${inr(amount, true)}`, body: `${label(inv)} · Receipt ${data.receiptNo} · ${data.method}${data.reference ? ` · ${data.reference}` : ""}. Balance ${inr(res.balance, true)}.`, link: `/invoices/${inv._id}` },
+      { type: "invoice", title: `Payment received: ${inr(amount, true)}`, body: `${label(inv)} · Receipt ${receiptNo} · ${data.method}${data.reference ? ` · ${data.reference}` : ""}. Balance ${inr(res.balance, true)}.`, link: `/invoices/${inv._id}` },
       [user._id],
     );
-    return { paymentNo: res.paymentNo };
-  }, "Payment recorded");
+    return { paymentNo: res.paymentNo, receiptNo };
+  }, (d) => `Payment recorded · Receipt ${d.receiptNo}`);
 }
 
 export async function recordRefund(id: string, input: Record<string, unknown>): Promise<ActionResult<{ paymentNo: string }>> {
@@ -556,4 +566,37 @@ export async function recordAdjustment(id: string, input: Record<string, unknown
     await notifyPermission("invoices.manage", { type: "invoice", title: `Invoice adjusted: ${inr(amount, true)}`, body: `${label(inv)} · ${data.note}`, link: `/invoices/${inv._id}` }, [user._id]);
     return { paymentNo: res.paymentNo };
   }, "Adjustment recorded");
+}
+
+/** Emails an issued invoice to the client (or any address) from the company mailbox, with the invoice PDF attached. */
+export async function emailInvoice(id: string, input: Record<string, unknown>): Promise<ActionResult<null>> {
+  return runAction(async () => {
+    const user = await actionPermission("invoices.manage");
+    const data = parse(emailSchema, input);
+    const inv = await loadInvoice(id);
+    if (inv.status === "draft") throw new ActionError("Issue the invoice before sending it.");
+    const [client] = await db().select({ confidential: Client.confidential, owner: Client.owner }).from(Client).where(eq(Client._id, inv.client)).limit(1);
+    if (client && !canSeeClient(user, client)) throw new ActionError("Invoice not found.");
+
+    const { doc, filename } = await invoicePdf(inv, { showContract: true });
+    try {
+      await deliverMail({
+        to: data.to,
+        cc: data.cc,
+        replyTo: user.email || undefined,
+        subject: data.subject,
+        text: data.message,
+        attachments: [{ filename, content: Buffer.from(doc.output("arraybuffer")), contentType: "application/pdf" }],
+      });
+    } catch (error) {
+      console.error("[invoice] email failed", error);
+      throw new ActionError(error instanceof Error && error.message.includes("not configured") ? "Email is not set up on the server yet. Use WhatsApp or the PDF link instead." : "The mail server did not accept the message. Check the address and try again.");
+    }
+    await db()
+      .update(Invoice)
+      .set({ history: jsonPush(Invoice.history, { _id: newId(), action: "emailed", by: user._id, byName: user.name, at: new Date(), note: [data.to, data.cc].filter(Boolean).join(", ") }) })
+      .where(eq(Invoice._id, id));
+    await audit(user, { action: "export", entity: "invoice", entityId: inv._id, ref: label(inv), summary: `Emailed invoice ${label(inv)} to ${data.to}${data.cc ? ` (cc ${data.cc})` : ""}` });
+    return null;
+  }, "Invoice emailed");
 }

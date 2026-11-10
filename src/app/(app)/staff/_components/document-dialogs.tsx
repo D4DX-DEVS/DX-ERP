@@ -9,6 +9,7 @@ import { FileUpload } from "@/components/ui/file-upload";
 import { ActionForm, Field, FormActions, SubmitButton, useServerAction } from "@/components/ui/form";
 import { Checkbox, Input, Select, Switch } from "@/components/ui/input";
 import { deleteDocument, registerDocument, setDocumentUploadOpen } from "../[id]/actions";
+import { PASSPORT_PHOTO_CATEGORY, PHOTO_MIME } from "../_lib/documents";
 
 export interface CategoryOption {
   key: string;
@@ -37,7 +38,8 @@ export function UploadDocumentButton({
   iconOnly?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [category, setCategory] = useState(replace?.category ?? "");
+  // A category's own Upload button passes just that category: start with it chosen.
+  const [category, setCategory] = useState(replace?.category ?? (categories.length === 1 ? categories[0].key : ""));
   const cat = categories.find((c) => c.key === category);
 
   return (
@@ -82,7 +84,18 @@ export function UploadDocumentButton({
         {cat ? (
           <>
             <Field label="File" name="fileId" required>
-              <FileUpload name="fileId" multiple={false} label="Choose file" context={{ entityType: "user", entityId: personId, confidential: cat.confidential }} />
+              {cat.key === PASSPORT_PHOTO_CATEGORY ? (
+                <FileUpload
+                  name="fileId"
+                  multiple={false}
+                  accept={PHOTO_MIME.join(",")}
+                  label="Choose photo"
+                  hint="Recent passport-size photo (35 × 45 mm), face clearly visible, plain light background · JPG or PNG"
+                  context={{ entityType: "user", entityId: personId, confidential: cat.confidential }}
+                />
+              ) : (
+                <FileUpload name="fileId" multiple={false} label="Choose file" context={{ entityType: "user", entityId: personId, confidential: cat.confidential }} />
+              )}
             </Field>
             {cat.hasExpiry && (
               <Field label="Expiry date" name="expiryDate" hint="Reminders are sent before it expires">

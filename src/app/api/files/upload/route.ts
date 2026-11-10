@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { can, getCurrentUser } from "@/lib/auth/session";
 import { storeFile } from "@/lib/files";
-import { ALLOWED_MIME, MAX_UPLOAD_BYTES } from "@/lib/storage";
+import { ALLOWED_MIME, AUDIO_MIME, MAX_UPLOAD_BYTES } from "@/lib/storage";
 import { MAX_UPLOAD_LABEL } from "@/lib/upload-limit";
 import { env } from "@/lib/env";
 import { isObjectId } from "@/lib/validation";
@@ -42,6 +42,8 @@ const SIGNATURES: Record<string, number[][]> = {
   "application/msword": [[0xd0, 0xcf, 0x11, 0xe0], [0x50, 0x4b]],
   "application/vnd.ms-excel": [[0xd0, 0xcf, 0x11, 0xe0], [0x50, 0x4b]],
   "application/vnd.ms-powerpoint": [[0xd0, 0xcf, 0x11, 0xe0], [0x50, 0x4b]],
+  "audio/webm": [[0x1a, 0x45, 0xdf, 0xa3]],
+  "audio/ogg": [[0x4f, 0x67, 0x67, 0x53]],
 };
 
 function matchesSignature(mime: string, buffer: Buffer): boolean {
@@ -87,7 +89,8 @@ export async function POST(request: Request) {
 
   // Browser-declared type, normalised (so `image/svg+xml; charset=utf-8` cannot slip past the SVG block).
   const mime = (file.type.split(";")[0] ?? "").trim().toLowerCase() || "application/octet-stream";
-  if (isAvatar || isCompany ? !mime.startsWith("image/") || mime === "image/svg+xml" : !ALLOWED_MIME.has(mime)) {
+  const allowed = isAvatar || isCompany ? mime.startsWith("image/") && mime !== "image/svg+xml" : ALLOWED_MIME.has(mime) || (entityType === "project" && AUDIO_MIME.has(mime));
+  if (!allowed) {
     return NextResponse.json({ ok: false, error: "This file type is not allowed" }, { status: 415 });
   }
 

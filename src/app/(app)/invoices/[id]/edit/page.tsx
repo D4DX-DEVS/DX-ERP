@@ -28,7 +28,6 @@ export default async function EditInvoicePage({ params }: { params: Promise<{ id
   const matching = options.paymentTerms.find((t) => t.days === inv.paymentTermDays);
   const initial: InvoiceFormInitial = {
     id,
-    invoiceNo: inv.invoiceNo ?? "",
     client: inv.client,
     project: inv.project ?? "",
     contract: inv.contract ?? "",
@@ -55,7 +54,6 @@ export default async function EditInvoicePage({ params }: { params: Promise<{ id
         taxes={options.taxes}
         paymentTerms={options.paymentTerms}
         billing={options.billing}
-        lastInvoiceNo={options.lastInvoiceNo}
         issued={inv.status !== "draft"}
       />
     </PageBody>

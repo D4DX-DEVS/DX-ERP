@@ -8,22 +8,35 @@ import { Dialog } from "@/components/ui/dialog";
 import { ActionForm, Field, FormGrid, FormActions, SubmitButton } from "@/components/ui/form";
 import { Input, Select, Textarea } from "@/components/ui/input";
 import { inr } from "@/lib/format";
-import { cancelInvoice, deleteDraftInvoice, issueInvoice, recordAdjustment, recordPayment, recordRefund } from "./actions";
+import { cancelInvoice, deleteInvoice, issueInvoice, recordAdjustment, recordPayment, recordRefund } from "./actions";
 import { INVOICE_PAYMENT_METHODS } from "./totals";
 
 export function IssueInvoiceButton({ id }: { id: string }) {
   return (
-    <ActionButton action={() => issueInvoice(id)} confirm="Issue this invoice? It takes its invoice number and records the client's current billing details." successMessage="Invoice issued">
+    <ActionButton action={() => issueInvoice(id)} confirm="Issue this invoice? It takes the next invoice number (INV0001 …) and records the client's current billing details." successMessage="Invoice issued">
       Issue invoice
     </ActionButton>
   );
 }
 
-export function DeleteDraftButton({ id }: { id: string }) {
+/** Drafts: anyone who manages invoices. Issued, paid or cancelled invoices: the super admin (checked again on the server). */
+export function DeleteInvoiceButton({ id, label, draft, payments }: { id: string; label: string; draft: boolean; payments: number }) {
   const router = useRouter();
+  const confirm = draft
+    ? "Delete this draft permanently? Drafts that were never issued can be removed safely."
+    : `Delete invoice ${label} permanently?${payments > 0 ? ` The ${payments === 1 ? "payment" : `${payments} payments, refunds and adjustments`} recorded against it will be deleted too.` : ""} Its number is not reused unless it is the latest one. This cannot be undone.`;
   return (
-    <ActionButton variant="danger-outline" action={() => deleteDraftInvoice(id)} confirm="Delete this draft permanently? Drafts that were never issued can be removed safely." successMessage="Draft deleted" onSuccess={() => router.push("/invoices")}>
-      Delete draft
+    <ActionButton
+      variant="danger-outline"
+      action={() => deleteInvoice(id)}
+      confirm={confirm}
+      confirmTitle={draft ? "Delete draft" : "Delete invoice"}
+      confirmLabel="Delete"
+      confirmTone="danger"
+      successMessage={draft ? "Draft deleted" : "Invoice deleted"}
+      onSuccess={() => router.push("/invoices")}
+    >
+      {draft ? "Delete draft" : "Delete invoice"}
     </ActionButton>
   );
 }
@@ -43,7 +56,7 @@ export function CancelInvoiceButton({ id }: { id: string }) {
   );
 }
 
-export function RecordPaymentDialog({ id, balance, today, lastReceiptNo, label = "Record payment" }: { id: string; balance: number; today: string; lastReceiptNo?: string; label?: string }) {
+export function RecordPaymentDialog({ id, balance, today, label = "Record payment" }: { id: string; balance: number; today: string; label?: string }) {
   const [open, setOpen] = useState(false);
   return (
     <Dialog
@@ -51,13 +64,10 @@ export function RecordPaymentDialog({ id, balance, today, lastReceiptNo, label =
       onOpenChange={setOpen}
       size="sm"
       title="Record payment"
-      description={`Balance due ${inr(balance, true)}. Part payments are fine; the balance is updated automatically.`}
+      description={`Balance due ${inr(balance, true)}. Part payments are fine; the balance is updated automatically. A receipt number (PAY0001 …) is assigned when you save.`}
       trigger={<Button>{label}</Button>}
     >
       <ActionForm action={(input) => recordPayment(id, input)} successMessage="Payment recorded" onSuccess={() => setOpen(false)}>
-        <Field label="Receipt number" name="receiptNo" required hint={`Up to 16 letters, digits, - or /.${lastReceiptNo ? ` Last used: ${lastReceiptNo}` : ""}`}>
-          <Input id="receiptNo" name="receiptNo" maxLength={16} className="uppercase" autoComplete="off" />
-        </Field>
         <FormGrid>
           <Field label="Amount (₹)" name="amount" required>
             <Input id="amount" name="amount" type="number" inputMode="decimal" min={0.01} max={balance} step="0.01" defaultValue={balance} />

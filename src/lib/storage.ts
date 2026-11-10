@@ -33,6 +33,9 @@ export const ALLOWED_MIME = new Set([
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 ]);
 
+/** Voice messages recorded in project chat (MediaRecorder: WebM or Ogg Opus, or MP4/AAC on Safari); accepted for project files only. */
+export const AUDIO_MIME = new Set(["audio/webm", "audio/ogg", "audio/mp4"]);
+
 export function safeName(name: string): string {
   const base = name.normalize("NFKD").replace(/[^\w.\- ]+/g, "").replace(/\s+/g, "-").slice(-120);
   return base || "file";

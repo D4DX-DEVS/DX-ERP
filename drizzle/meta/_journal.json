@@ -57,6 +57,13 @@
       "when": 1794030467817,
       "tag": "0007_payment_receipt_no",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1794314745109,
+      "tag": "0008_project_chat_auto_numbers",
+      "breakpoints": true
     }
   ]
 }

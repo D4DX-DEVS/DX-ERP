@@ -5,7 +5,7 @@ import { fmtDate } from "@/lib/time";
 import { Alert } from "@/components/ui/page";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Chip, Tag } from "@/components/ui/chip";
-import { expiryText } from "../_lib/documents";
+import { expiryText, PASSPORT_PHOTO_CATEGORY } from "../_lib/documents";
 import type { DocView, DocumentsData } from "../_lib/documents-data";
 import { DeleteDocumentButton, DocumentAccessSwitch, UploadDocumentButton, type CategoryOption } from "./document-dialogs";
 import { BANK_CATEGORY } from "../_lib/bank";
@@ -187,6 +187,7 @@ function DocTile({ doc, personId, perms, categories, showCategory }: { doc: DocV
       name={doc.name}
       size={doc.size}
       meta={`v${doc.version}`}
+      photo={doc.category === PASSPORT_PHOTO_CATEGORY}
       uploadedAt={doc.uploadedAt}
       uploadedByName={doc.uploadedByName}
       note={doc.notes}

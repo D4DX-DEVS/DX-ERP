@@ -36,6 +36,7 @@ import { isObjectId, zs } from "@/lib/validation";
 import { adviseRotationForUser } from "@/lib/vault/service";
 import { AUTO_ONBOARDING_KEY, salaryTotals } from "../_lib/constants";
 import { documentActor } from "../_lib/document-actor";
+import { PASSPORT_PHOTO_CATEGORY, PHOTO_MIME } from "../_lib/documents";
 import {
   autoCompleteSteps,
   buildSalary,
@@ -438,6 +439,7 @@ export async function registerDocument(input: Record<string, unknown>): Promise<
     if (!file || file.deletedAt || file.entityType !== "user" || file.entityId !== data.personId) throw new ActionError("Uploaded file not found. Please upload it again.", { fileId: "Upload again" });
     if (file.uploadedBy !== user.id) throw new ActionError("You can only register files you uploaded.");
     if (file.category) throw new ActionError("This file is already registered.");
+    if (category.key === PASSPORT_PHOTO_CATEGORY && !PHOTO_MIME.includes(file.mime)) throw new ActionError("The passport size photo must be a JPG, PNG or WebP image.", { fileId: "Upload a photo" });
 
     const set: Partial<typeof StoredFile.$inferInsert> = {
       category: category.key,

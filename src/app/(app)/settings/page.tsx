@@ -5,7 +5,6 @@ import { Segmented } from "@/components/ui/tabs";
 import { PageBody, PageHeader } from "@/components/ui/page";
 import { can, requirePagePermission, type CurrentUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { fiscalYear } from "@/lib/counters";
 import { env } from "@/lib/env";
 import { cn } from "@/lib/cn";
 import { kioskStatus } from "@/lib/domain/kiosk";
@@ -295,7 +294,7 @@ async function SectionBody({ section, sp, user }: { section: string; sp: SearchP
     case "numbering":
       return (
         <>
-          <NumberingForm key={stamp(settings.numbering)} numbering={settings.numbering} fiscalYear={fiscalYear()} />
+          <NumberingForm key={stamp(settings.numbering)} numbering={settings.numbering} />
           <TaxesForm key={stamp([settings.taxes, settings.paymentTerms])} taxes={settings.taxes} paymentTerms={settings.paymentTerms} />
           <TemplatesForm key={stamp(settings.documents)} documents={settings.documents} />
         </>

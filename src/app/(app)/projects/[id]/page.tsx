@@ -1,5 +1,5 @@
 import { forbidden, notFound } from "next/navigation";
-import { Bug, CheckSquare, Flag, History, KeyRound, LayoutDashboard, Paperclip, Pencil, Plus, Users } from "lucide-react";
+import { Bug, CheckSquare, Flag, History, KeyRound, LayoutDashboard, MessagesSquare, Paperclip, Pencil, Plus, Users } from "lucide-react";
 import { and, eq, isNull } from "drizzle-orm";
 import { can, requireUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
@@ -39,6 +39,8 @@ import { milestoneOverdue, projectHealth } from "../health";
 import { HealthBadge } from "../project-ui";
 import { projectTaskStats } from "../stats";
 import { addProjectComment } from "../actions";
+import { canChat, chatUnread } from "./chat-data";
+import { ChatTab } from "./chat-tab";
 import { FilesPanel, type ProjectFileView } from "./files-panel";
 import { MilestonesPanel, type MilestoneView } from "./milestones-panel";
 import { Overview } from "./overview";
@@ -49,7 +51,7 @@ import { VaultTab } from "./vault-tab";
 
 export const metadata = { title: "Project" };
 
-const TABS = ["overview", "tasks", "milestones", "team", "files", "secrets", "activity"] as const;
+const TABS = ["overview", "tasks", "chat", "milestones", "team", "files", "secrets", "activity"] as const;
 type Tab = (typeof TABS)[number];
 const FLOW = ["pending", "in_progress", "client_review", "approved", "delivered"];
 
@@ -76,14 +78,16 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
   // The vault follows team membership only — org-wide project viewers don't get the Secrets tab.
   const secretsRole = vaultRole(user, project);
   const tabParam = param(sp, "tab");
-  // QA engineers get the overview (and the QA issues link) only.
-  const tab: Tab = caps.full && (TABS as readonly string[]).includes(tabParam) && (tabParam !== "secrets" || secretsRole) ? (tabParam as Tab) : "overview";
+  // The chat is open to everyone on the project (QA engineers on the team too); otherwise QA engineers get the overview (and the QA issues link) only.
+  const chat = canChat(user, project);
+  const tabAllowed = (key: string) => key === "overview" || (key === "chat" ? chat : caps.full && (key !== "secrets" || Boolean(secretsRole)));
+  const tab: Tab = (TABS as readonly string[]).includes(tabParam) && tabAllowed(tabParam) ? (tabParam as Tab) : "overview";
   const closedTaskKeys = keysInCategories(settings.taskStatuses, TASK_CLOSED_CATEGORIES);
   const visibleTasks = await taskFilter(user);
   const category = categoryOf(settings.projectStatuses, project.status);
   const canDeleteProject = can(user, "projects.delete");
 
-  const [stats, people, client, contract, proposal, taskCount, openIssues, hasWork] = await Promise.all([
+  const [stats, people, client, contract, proposal, taskCount, openIssues, hasWork, unread] = await Promise.all([
     projectTaskStats([project._id], settings),
     peopleMap([project.manager, ...project.team.map((m) => m.user)]),
     project.client && !caps.restricted
@@ -99,6 +103,8 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
           db().select({ id: TimesheetEntry._id }).from(TimesheetEntry).where(eq(TimesheetEntry.project, project._id)).limit(1),
         ]).then(([t, e]) => t.length > 0 || e.length > 0)
       : false,
+    // The open chat marks itself read, so its tab shows no count.
+    chat && tab !== "chat" ? chatUnread(project._id, user._id) : 0,
   ]);
   const progress = stats.get(id) ?? { progress: 0, total: 0, done: 0 };
   const health = projectHealth({ category, startDate: project.startDate ?? undefined, targetDate: project.targetDate ?? undefined, progress: progress.progress, milestones: project.milestones, today });
@@ -110,13 +116,14 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
   const tabItems = [
     { key: "overview", label: "Overview", Icon: LayoutDashboard },
     { key: "tasks", label: "Tasks", Icon: CheckSquare, count: taskCount },
+    { key: "chat", label: "Chat", Icon: MessagesSquare, count: unread ? (unread > 99 ? "99+" : unread) : undefined },
     { key: "milestones", label: "Milestones", Icon: Flag, count: project.milestones.length || undefined },
     { key: "team", label: "Team", Icon: Users },
     { key: "files", label: "Files", Icon: Paperclip, count: project.attachments.length || undefined },
     ...(secretsRole ? [{ key: "secrets", label: "Secrets", Icon: KeyRound, count: undefined }] : []),
     { key: "activity", label: "Activity", Icon: History },
   ]
-    .filter((t) => caps.full || t.key === "overview")
+    .filter((t) => tabAllowed(t.key))
     .map(({ Icon, ...t }) => ({
       href: t.key === "overview" ? `/projects/${id}` : `/projects/${id}?tab=${t.key}`,
       label: t.label,
@@ -198,6 +205,8 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
       {tab === "overview" && <Overview user={user} project={project} caps={caps} settings={settings} stats={progress} />}
 
       {tab === "tasks" && <TasksTab user={user} project={project} settings={settings} sp={sp} />}
+
+      {tab === "chat" && <ChatTab user={user} project={project} />}
 
       {tab === "milestones" && <MilestonesTab project={project} caps={caps} today={today} />}
 

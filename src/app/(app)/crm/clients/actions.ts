@@ -25,7 +25,8 @@ const clientFields = {
   type: z.enum(["company", "individual"], { error: "Choose company or individual" }),
   contactPerson: zs.optText(200),
   contactDesignation: zs.optText(200),
-  email: zs.optEmail(),
+  // Required: invoices are emailed to this address.
+  email: zs.email("Email"),
   phone: zs.optText(40),
   altPhone: zs.optText(40),
   website: zs.optText(200),
@@ -146,7 +147,7 @@ export async function updateClient(id: string, input: Record<string, unknown>): 
       type: data.type,
       contactPerson: data.contactPerson ?? null,
       contactDesignation: data.contactDesignation ?? null,
-      email: data.email ?? null,
+      email: data.email,
       phone: data.phone ?? null,
       altPhone: data.altPhone ?? null,
       website: data.website ?? null,

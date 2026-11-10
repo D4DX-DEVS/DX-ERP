@@ -28,6 +28,7 @@ export function FileTile({
   meta,
   note,
   actions,
+  photo,
   children,
 }: {
   /** What the file is (certificate / document type). Omitted when the file name says enough. */
@@ -42,15 +43,22 @@ export function FileTile({
   meta?: string;
   note?: string;
   actions?: ReactNode;
+  /** Show the image itself (passport-size proportions) instead of the type badge. */
+  photo?: boolean;
   children?: ReactNode;
 }) {
   const kind = fileKind(name);
   const href = `/api/files/${file}`;
   return (
     <div className="flex min-w-0 items-start gap-3 rounded-xl border border-line bg-white p-3 transition-colors hover:border-brand-200">
-      <span className={cn("grid size-10 shrink-0 place-items-center rounded-lg text-[10px] font-bold tracking-wide", kind.className)} aria-hidden>
-        {kind.label}
-      </span>
+      {photo ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={href} alt="" className="h-[60px] w-12 shrink-0 rounded-md border border-line bg-field object-cover" />
+      ) : (
+        <span className={cn("grid size-10 shrink-0 place-items-center rounded-lg text-[10px] font-bold tracking-wide", kind.className)} aria-hidden>
+          {kind.label}
+        </span>
+      )}
       <div className="min-w-0 flex-1">
         {title && <div className="text-[13px] leading-5 font-semibold text-ink">{title}</div>}
         <a href={href} target="_blank" rel="noopener noreferrer" className={cn("block break-words hover:underline", title ? "text-xs text-brand-600" : "text-[13px] font-semibold text-ink hover:text-brand-600")}>

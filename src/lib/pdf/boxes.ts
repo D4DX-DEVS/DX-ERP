@@ -5,7 +5,7 @@ import { pdfText, PDF_COLORS, type BrandedDoc } from "./base";
 
 /**
  * Layout pieces shared by the invoice and receipt PDFs: bordered info boxes, the amount-in-words +
- * totals block and the signature block (with the company seal and signature from Configuration).
+ * totals block and the signature block (with the signature, and on receipts the company seal, from Configuration).
  */
 
 export function addressLines(a?: { line1?: string; line2?: string; city?: string; state?: string; postalCode?: string; country?: string }): string[] {
@@ -167,10 +167,11 @@ function imageFormat(bytes: Uint8Array): PdfImage["format"] | null {
 }
 
 /**
- * Reads the company seal and signature (Configuration → Company profile) from storage for a PDF. An image that can't be
- * read is logged and left out, so the document still downloads.
+ * Reads the company seal and signature (Configuration → Company profile) from storage for a PDF — only the `parts`
+ * asked for (invoices carry the signature alone). An image that can't be read is logged and left out, so the document
+ * still downloads.
  */
-export async function loadSignImages(company: AppSettings["company"]): Promise<SignImages> {
+export async function loadSignImages(company: AppSettings["company"], parts: (keyof SignImages)[] = ["seal", "signature"]): Promise<SignImages> {
   const read = async (image: CompanyImage | undefined, what: string): Promise<PdfImage | undefined> => {
     if (!image) return undefined;
     try {
@@ -183,7 +184,10 @@ export async function loadSignImages(company: AppSettings["company"]): Promise<S
       return undefined;
     }
   };
-  const [seal, signature] = await Promise.all([read(company.seal, "seal"), read(company.signature, "signature")]);
+  const [seal, signature] = await Promise.all([
+    parts.includes("seal") ? read(company.seal, "seal") : undefined,
+    parts.includes("signature") ? read(company.signature, "signature") : undefined,
+  ]);
   return { seal, signature };
 }
 
@@ -202,8 +206,8 @@ function drawFitted(b: BrandedDoc, image: PdfImage, maxW: number, maxH: number, 
 }
 
 /**
- * "For <company>", the signature line with "Authorised Signatory" under it and, from Configuration, the signature
- * printed on the line (else it is left blank to sign by hand) and the company seal to its left.
+ * "For <company>" with "Authorised Signatory" below it and, from Configuration, the signature between the two (else the
+ * space is left blank to sign by hand) and the company seal to its left. No rule is drawn under the signature.
  */
 export function signatureBlock(b: BrandedDoc, y: number, companyName: string, images: SignImages = {}): void {
   const { doc } = b;
@@ -214,14 +218,11 @@ export function signatureBlock(b: BrandedDoc, y: number, companyName: string, im
   doc.setFontSize(9);
   doc.setTextColor(...PDF_COLORS.ink);
   doc.text(pdfText(`For ${companyName}`), rightX, y + 4, { align: "right" });
-  doc.setDrawColor(...PDF_COLORS.muted);
-  doc.setLineWidth(0.3);
-  doc.line(rightX - lineW, y + 24, rightX, y + 24);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8.5);
   doc.setTextColor(...PDF_COLORS.muted);
   doc.text("Authorised Signatory", rightX, y + 28.5, { align: "right" });
-  // The signature sits on the line, centred over it; the seal stands to the left of the line, level with the block.
+  // The signature sits just above "Authorised Signatory", centred over the 70 mm block; the seal stands to its left.
   if (images.signature) drawFitted(b, images.signature, lineW - 10, 17, (w, h) => ({ x: rightX - lineW / 2 - w / 2, y: y + 24.5 - h }));
   if (images.seal) drawFitted(b, images.seal, 27, 27, (w, h) => ({ x: rightX - lineW - 6 - w, y: y + 15 - h / 2 }));
 }

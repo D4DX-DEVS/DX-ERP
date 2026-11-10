@@ -411,9 +411,6 @@ const prefix = (label: string) =>
   z.preprocess((v) => (typeof v === "string" ? v.trim() : v), z.string().max(24, `${label} is too long`).regex(/^[A-Za-z0-9\-_/.]*$/, "Use letters, numbers and - _ / . only"));
 
 const numberingSchema = z.object({
-  invoicePrefix: prefix("Invoice prefix"),
-  invoicePadding: zs.num("Number length", { min: 1, max: 8 }),
-  invoiceIncludeFiscalYear: zs.bool(),
   proposalPrefix: prefix("Proposal prefix"),
   certificatePrefix: prefix("Certificate prefix"),
 });
@@ -422,7 +419,7 @@ export async function saveNumbering(input: Record<string, unknown>): Promise<Sav
   return runAction(async () => {
     const user = await actionPermission("settings.manage");
     const data = parse(numberingSchema, input);
-    return saveConfig(user, "numbering", "Document numbering", { ...data, invoicePadding: Math.round(data.invoicePadding) });
+    return saveConfig(user, "numbering", "Document numbering", data);
   }, "Numbering saved");
 }
 

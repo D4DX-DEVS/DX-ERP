@@ -2,6 +2,10 @@
 import type { DocumentCategory } from "@/lib/config-defaults";
 import { diffDays } from "@/lib/time";
 
+/** Category key of the passport-size photo: an image file, shown as a thumbnail. */
+export const PASSPORT_PHOTO_CATEGORY = "passport_photo";
+export const PHOTO_MIME = ["image/png", "image/jpeg", "image/webp"];
+
 export type ExpiryState = "none" | "valid" | "expiring" | "expired";
 
 export interface ExpiryInfo {

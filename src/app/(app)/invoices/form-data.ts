@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, desc, eq, isNotNull, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { Client, Contract, Invoice, Project } from "@/lib/models";
+import { Client, Contract, Project } from "@/lib/models";
 import { can, type CurrentUser } from "@/lib/auth/session";
 import type { TaxRate } from "@/lib/config-defaults";
 import { getSettings } from "@/lib/settings";
@@ -21,15 +21,13 @@ export async function loadInvoiceFormOptions(
   paymentTerms: { label: string; days: number }[];
   defaults: { notes: string; terms: string };
   billing: BillingInfo & { canConfigure: boolean };
-  /** Most recent invoice number in use, shown as a hint for the next one. */
-  lastInvoiceNo?: string;
 }> {
   const settings = await getSettings();
   const showContracts = can(user, "contracts.view");
   const privileged = can(user, "contracts.manage") || can(user, "crm.confidential");
   // Restricted clients (and their projects / contracts) are offered only to people who may see them.
   const hidden = await hiddenClientIds(user);
-  const [clients, projects, contracts, [last]] = await Promise.all([
+  const [clients, projects, contracts] = await Promise.all([
     db()
       .select({ _id: Client._id, name: Client.name, clientNo: Client.clientNo, address: Client.address })
       .from(Client)
@@ -50,12 +48,6 @@ export async function loadInvoiceFormOptions(
           .orderBy(desc(Contract.createdAt))
           .limit(1000)
       : Promise.resolve(null),
-    db()
-      .select({ invoiceNo: Invoice.invoiceNo })
-      .from(Invoice)
-      .where(and(isNotNull(Invoice.invoiceNo), invoiceId ? ne(Invoice._id, invoiceId) : undefined))
-      .orderBy(desc(Invoice.createdAt))
-      .limit(1),
   ]);
   return {
     clients: clients.map((c) => ({ id: c._id, name: c.name, clientNo: c.clientNo, state: c.address?.state })),
@@ -74,6 +66,5 @@ export async function loadInvoiceFormOptions(
     paymentTerms: settings.paymentTerms,
     defaults: { notes: settings.documents.invoiceNotes, terms: settings.documents.invoiceTerms },
     billing: { ...billingInfo(settings), canConfigure: can(user, "settings.manage") },
-    lastInvoiceNo: last?.invoiceNo ?? undefined,
   };
 }

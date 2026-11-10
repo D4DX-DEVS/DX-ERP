@@ -11,7 +11,7 @@ import { Attendance, AttendanceCorrection, AttendanceKiosk } from "./attendance"
 import { Movement } from "./movement";
 import { LeaveType, LeaveBalance, LeaveRequest } from "./leave";
 import { PayrollRun, Payslip, SalaryAdvance } from "./payroll";
-import { Project } from "./project";
+import { Project, ProjectMessage } from "./project";
 import { Task, TimesheetEntry, Issue } from "./work";
 import { Client, Lead, Activity } from "./crm";
 import { Proposal, Contract } from "./sales";
@@ -46,6 +46,7 @@ export const BACKUP_TABLES = {
   Payslip,
   SalaryAdvance,
   Project,
+  ProjectMessage,
   Task,
   TimesheetEntry,
   Issue,

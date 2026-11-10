@@ -12,10 +12,10 @@ export { ActionError, type ActionResult };
  * Wraps a server action body: converts known errors into an
  * `ActionResult`, and lets Next.js control-flow errors (redirect / notFound) propagate.
  */
-export async function runAction<T>(fn: () => Promise<T>, message?: string): Promise<ActionResult<T>> {
+export async function runAction<T>(fn: () => Promise<T>, message?: string | ((data: T) => string)): Promise<ActionResult<T>> {
   try {
     const data = await fn();
-    return { ok: true, data, message };
+    return { ok: true, data, message: typeof message === "function" ? message(data) : message };
   } catch (error) {
     unstable_rethrow(error);
     if (error instanceof ActionError) {

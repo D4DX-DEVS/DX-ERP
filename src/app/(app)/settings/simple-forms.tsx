@@ -18,7 +18,7 @@ import {
   saveNotifications,
   saveNumbering,
 } from "./actions";
-import { CERTIFICATE_PLACEHOLDERS, invoicePreview, MONTH_NAMES, SATURDAY_WEEKS, WEEKDAYS } from "./constants";
+import { CERTIFICATE_PLACEHOLDERS, MONTH_NAMES, SATURDAY_WEEKS, WEEKDAYS } from "./constants";
 import { CGrid, PillCheck, SaveRow, SettingsCard } from "./ui";
 
 /* ───────────────────────────── Company ───────────────────────────── */
@@ -82,7 +82,7 @@ export function CompanyForm({ company, storageConfigured }: { company: AppSettin
         <div className="flex flex-col gap-3 border-t border-line-soft pt-4">
           <div>
             <div className="text-[13px] font-semibold text-ink-2">Seal &amp; signature</div>
-            <p className="mt-0.5 text-xs text-muted">Printed above &ldquo;Authorised Signatory&rdquo; on issued invoices and on receipts.</p>
+            <p className="mt-0.5 text-xs text-muted">The signature is printed above &ldquo;Authorised Signatory&rdquo; on issued invoices and on receipts; the seal on receipts only.</p>
           </div>
           {storageConfigured ? (
             <CGrid>
@@ -272,26 +272,13 @@ export function LeaveSettingsForm({ leave }: { leave: AppSettings["leave"] }) {
 
 /* ───────────────────────────── Numbering ───────────────────────────── */
 
-export function NumberingForm({ numbering, fiscalYear }: { numbering: AppSettings["numbering"]; fiscalYear: string }) {
-  const [prefix, setPrefix] = useState(numbering.invoicePrefix);
-  const [padding, setPadding] = useState(String(numbering.invoicePadding));
-  const [fiscal, setFiscal] = useState(numbering.invoiceIncludeFiscalYear);
+export function NumberingForm({ numbering }: { numbering: AppSettings["numbering"] }) {
   return (
     <SettingsCard title="Document numbering" description="Prefixes for numbers generated on new documents. Existing documents keep their numbers.">
       <ActionForm action={saveNumbering}>
-        <CGrid cols={3}>
-          <Field label="Invoice prefix" name="invoicePrefix">
-            <Input id="invoicePrefix" name="invoicePrefix" value={prefix} onChange={(e) => setPrefix(e.target.value)} maxLength={24} />
-          </Field>
-          <Field label="Number length" name="invoicePadding" required hint="Digits, zero-padded.">
-            <Input id="invoicePadding" name="invoicePadding" type="number" min={1} max={8} value={padding} onChange={(e) => setPadding(e.target.value)} />
-          </Field>
-          <div className="flex items-end pb-1.5">
-            <Switch name="invoiceIncludeFiscalYear" checked={fiscal} onChange={(e) => setFiscal(e.target.checked)} label="Include fiscal year" description="April–March, e.g. 2026-27" />
-          </div>
-        </CGrid>
-        <div className="rounded-xl bg-brand-50 px-4 py-3 text-[13px] text-ink-2" aria-live="polite">
-          Next invoice number looks like <strong className="font-mono text-ink">{invoicePreview(prefix, Number(padding), fiscal, fiscalYear)}</strong>
+        <div className="rounded-xl bg-brand-50 px-4 py-3 text-[13px] text-ink-2">
+          Invoices are numbered <strong className="font-mono text-ink">INV0001</strong>, <strong className="font-mono text-ink">INV0002</strong> … when they are issued, and
+          payment receipts <strong className="font-mono text-ink">PAY0001</strong>, <strong className="font-mono text-ink">PAY0002</strong> … when a payment is recorded.
         </div>
         <CGrid>
           <Field label="Proposal prefix" name="proposalPrefix" hint="Proposals read like PRP-0001.">

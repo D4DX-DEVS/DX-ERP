@@ -62,8 +62,3 @@ export const PIPELINE_CATEGORIES = ["open", "won", "lost"] as const;
 export const EMPLOYMENT_CATEGORIES = ["active", "leave", "notice", "exited", "inactive"] as const;
 
 export const CERTIFICATE_PLACEHOLDERS = ["{name}", "{firstName}", "{company}", "{role}", "{start}", "{end}"] as const;
-
-/** Fiscal-year aware preview of an invoice number (mirrors lib/counters formatting). */
-export function invoicePreview(prefix: string, padding: number, fiscal: boolean, fy: string): string {
-  return `${prefix}${fiscal ? `${fy}-` : ""}${String(1).padStart(Math.max(1, Math.min(8, padding || 1)), "0")}`;
-}

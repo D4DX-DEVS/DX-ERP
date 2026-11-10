@@ -108,7 +108,7 @@ export interface AppSettings {
     name: string;
     legalName: string;
     logo?: string;
-    /** Company seal and authorised signature, printed on issued invoices and on receipts. */
+    /** Company seal (receipts only) and authorised signature (issued invoices and receipts). */
     seal?: CompanyImage;
     signature?: CompanyImage;
     address: string;
@@ -169,9 +169,6 @@ export interface AppSettings {
   companyAssetCategories: string[];
   leadSources: string[];
   numbering: {
-    invoicePrefix: string;
-    invoicePadding: number;
-    invoiceIncludeFiscalYear: boolean;
     proposalPrefix: string;
     certificatePrefix: string;
   };
@@ -318,6 +315,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     { key: "inactive", label: "Inactive", tone: "gray", category: "inactive" },
   ],
   documentCategories: [
+    { key: "passport_photo", label: "Passport size photo", required: true, appliesTo: ["employee", "trainee", "intern"], hasExpiry: false, confidential: false },
     { key: "id_proof", label: "ID proof (Aadhaar / Passport)", required: true, appliesTo: ["employee", "trainee", "intern"], hasExpiry: false, confidential: true },
     { key: "pan", label: "PAN card", required: true, appliesTo: ["employee", "trainee"], hasExpiry: false, confidential: true },
     { key: "address_proof", label: "Address proof", required: true, appliesTo: ["employee", "trainee", "intern"], hasExpiry: false, confidential: true },
@@ -334,9 +332,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   companyAssetCategories: ["Air conditioner", "Inverter / UPS", "Battery", "Generator", "Furniture", "Appliance", "Printer / copier", "Network equipment", "CCTV / security", "Electrical fitting", "Vehicle", "Other"],
   leadSources: ["Website", "Referral", "LinkedIn", "Cold outreach", "Existing client", "Event", "Partner", "Other"],
   numbering: {
-    invoicePrefix: "INV-",
-    invoicePadding: 4,
-    invoiceIncludeFiscalYear: true,
     proposalPrefix: "PRP-",
     certificatePrefix: "D4DX/INT/",
   },
@@ -355,7 +350,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   bank: { accountName: "", bankName: "", branch: "", accountNumber: "", ifsc: "", upiId: "" },
   documents: {
     invoiceNotes: "Thank you for your business.",
-    invoiceTerms: "Payment is due by the due date shown. Please quote the invoice number with your payment.",
+    invoiceTerms: "Payment is due by the specified date. Please include the invoice number with your payment.",
     proposalTerms: "This proposal is valid until the date shown. Prices exclude applicable taxes unless stated.",
     payslipFooter: "This is a system-generated payslip and does not require a signature.",
     certificateText:

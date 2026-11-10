@@ -47,7 +47,6 @@ export interface ContractOption {
 
 export interface InvoiceFormInitial {
   id?: string;
-  invoiceNo: string;
   client: string;
   project: string;
   contract: string;
@@ -85,7 +84,6 @@ export function InvoiceForm({
   taxes,
   paymentTerms,
   billing,
-  lastInvoiceNo,
   issued = false,
 }: {
   initial: InvoiceFormInitial;
@@ -96,7 +94,6 @@ export function InvoiceForm({
   taxes: TaxRate[];
   paymentTerms: { label: string; days: number }[];
   billing: BillingInfo & { canConfigure: boolean };
-  lastInvoiceNo?: string;
   /** Editing an invoice that has already been issued (or paid, or cancelled). */
   issued?: boolean;
 }) {
@@ -171,12 +168,12 @@ export function InvoiceForm({
       className="gap-5"
     >
       <Card>
-        <CardHeader title="Billing details" subtitle="Who is being billed and what the invoice relates to." />
+        <CardHeader
+          title="Billing details"
+          subtitle={issued ? "Who is being billed and what the invoice relates to." : "Who is being billed and what the invoice relates to. The invoice number (INV0001 …) is assigned when it is issued."}
+        />
         <CardBody>
           <FormGrid>
-            <Field label="Invoice number" name="invoiceNo" required hint={`Up to 16 letters, digits, - or /.${lastInvoiceNo ? ` Last used: ${lastInvoiceNo}` : ""}`}>
-              <Input id="invoiceNo" name="invoiceNo" defaultValue={initial.invoiceNo} maxLength={16} className="uppercase" autoComplete="off" />
-            </Field>
             <Field label="Client" name="client" required>
               <Select id="client" name="client" value={client} onChange={(e) => pickClient(e.target.value)}>
                 <option value="">Select client</option>

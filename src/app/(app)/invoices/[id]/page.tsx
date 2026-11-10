@@ -1,13 +1,15 @@
 import Link from "next/link";
 import { forbidden, notFound } from "next/navigation";
-import { Download, Pencil } from "lucide-react";
-import { desc, eq, isNotNull } from "drizzle-orm";
+import { Copy, Download, Pencil } from "lucide-react";
+import { desc, eq } from "drizzle-orm";
 import { can, requirePagePermission } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { Client, Contract, Invoice, Payment, Project } from "@/lib/models";
 import { inr, plural, round2 } from "@/lib/format";
 import { fmtDate, fmtDateTime, diffDays, todayKey } from "@/lib/time";
 import { getSettings } from "@/lib/settings";
+import { env } from "@/lib/env";
+import { invoiceShareUrl, SHARE_LINK_DAYS } from "@/lib/share-link";
 import { isObjectId } from "@/lib/validation";
 import { rupeesInWords } from "@/lib/payroll/words";
 import { Alert, PageBody, PageHeader, Progress } from "@/components/ui/page";
@@ -18,7 +20,8 @@ import { cn } from "@/lib/cn";
 import { canSeeClient } from "@/app/(app)/crm/_lib/access";
 import { billingInfo } from "../billing-info";
 import { computeTotals, effectiveStatus, lineTaxLabel } from "../totals";
-import { AdjustmentDialog, CancelInvoiceButton, DeleteDraftButton, IssueInvoiceButton, RecordPaymentDialog, RefundDialog } from "../invoice-actions";
+import { AdjustmentDialog, CancelInvoiceButton, DeleteInvoiceButton, IssueInvoiceButton, RecordPaymentDialog, RefundDialog } from "../invoice-actions";
+import { ShareInvoice } from "../share-invoice";
 
 export const metadata = { title: "Invoice" };
 
@@ -36,7 +39,7 @@ interface TimelineEvent {
   tone?: "green" | "red" | "purple";
 }
 
-const HISTORY_TITLES: Record<string, string> = { created: "Draft created", edited: "Edited", issued: "Issued", cancelled: "Cancelled" };
+const HISTORY_TITLES: Record<string, string> = { created: "Draft created", edited: "Edited", issued: "Issued", cancelled: "Cancelled", emailed: "Emailed" };
 
 export default async function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePagePermission("invoices.view");
@@ -45,7 +48,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   const [inv] = await db().select().from(Invoice).where(eq(Invoice._id, id)).limit(1);
   if (!inv) notFound();
 
-  const [settings, [client], [project], [contract], payments, [lastReceipt]] = await Promise.all([
+  const [settings, [client], [project], [contract], payments] = await Promise.all([
     getSettings(),
     db()
       .select({
@@ -69,8 +72,6 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
       ? db().select({ contractNo: Contract.contractNo, title: Contract.title }).from(Contract).where(eq(Contract._id, inv.contract)).limit(1)
       : [],
     db().select().from(Payment).where(eq(Payment.invoice, inv._id)).orderBy(desc(Payment.createdAt)),
-    // Most recent receipt number in use, shown as a hint for the next one.
-    db().select({ receiptNo: Payment.receiptNo }).from(Payment).where(isNotNull(Payment.receiptNo)).orderBy(desc(Payment.createdAt)).limit(1),
   ]);
   if (client && !canSeeClient(user, client)) forbidden();
 
@@ -112,14 +113,15 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
     ...inv.history.map<TimelineEvent>((h) => ({
       at: new Date(h.at).getTime(),
       title: `${HISTORY_TITLES[h.action] ?? h.action}${h.action === "issued" && h.note ? ` · ${h.note}` : ""}`,
-      sub: [fmtDateTime(h.at), h.byName ? `by ${h.byName}` : undefined, h.action === "cancelled" ? h.note : undefined].filter(Boolean).join(" · "),
+      sub: [fmtDateTime(h.at), h.byName ? `by ${h.byName}` : undefined, h.action === "cancelled" ? h.note : undefined, h.action === "emailed" && h.note ? `to ${h.note}` : undefined].filter(Boolean).join(" · "),
     })),
   ].sort((a, b) => b.at - a.at);
 
   const canRefund = money && netPaid > 0 && !isDraft && !cancelled;
   const canAdjust = money && payable;
   const canCancel = manage && !isDraft && !cancelled && netPaid <= 0;
-  const canDelete = manage && isDraft;
+  // Drafts: anyone who manages invoices. Issued, paid or cancelled invoices: the super admin only.
+  const canDelete = manage && (isDraft || user.isSuperAdmin);
   const overdueDays = status === "overdue" ? diffDays(inv.dueDate, today) : 0;
 
   return (
@@ -134,9 +136,27 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         }
         actions={
           <>
-            <a href={`/api/pdf/invoice/${id}`} target="_blank" rel="noopener noreferrer" className={buttonClass("secondary")}>
-              <Download className="size-4" aria-hidden /> Invoice PDF
-            </a>
+            {isDraft ? (
+              <a href={`/api/pdf/invoice/${id}`} target="_blank" rel="noopener noreferrer" className={buttonClass("secondary")}>
+                <Download className="size-4" aria-hidden /> Invoice PDF
+              </a>
+            ) : (
+              <ShareInvoice
+                id={id}
+                label={label}
+                shareUrl={invoiceShareUrl(id)}
+                linkDays={SHARE_LINK_DAYS}
+                company={settings.company.legalName || settings.company.name}
+                client={{ name: billing.name, contact: billing.contactPerson, email: billing.email ?? client?.email ?? undefined, phone: billing.phone ?? client?.phone ?? undefined }}
+                summary={{
+                  date: fmtDate(inv.issueDate),
+                  total: inr(inv.total, true),
+                  due: cancelled ? undefined : fmtDate(inv.dueDate),
+                  balance: !cancelled && inv.balance > 0 && inv.balance < inv.total ? inr(inv.balance, true) : undefined,
+                }}
+                canEmail={manage && env.smtp.configured}
+              />
+            )}
             {!isDraft && inv.amountPaid > 0 && (
               <a href={`/api/pdf/receipt/${id}`} target="_blank" rel="noopener noreferrer" className={buttonClass("secondary")}>
                 <Download className="size-4" aria-hidden /> Receipt PDF
@@ -147,8 +167,13 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                 Edit
               </ButtonLink>
             )}
+            {manage && (
+              <ButtonLink variant="secondary" href={`/invoices/new?clone=${id}`} icon={<Copy className="size-4" aria-hidden />}>
+                Clone
+              </ButtonLink>
+            )}
             {manage && isDraft && <IssueInvoiceButton id={id} />}
-            {money && payable && <RecordPaymentDialog id={id} balance={inv.balance} today={today} lastReceiptNo={lastReceipt?.receiptNo ?? undefined} />}
+            {money && payable && <RecordPaymentDialog id={id} balance={inv.balance} today={today} />}
           </>
         }
       />
@@ -328,7 +353,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                 {canRefund && <RefundDialog id={id} maxAmount={netPaid} today={today} />}
                 {canAdjust && <AdjustmentDialog id={id} balance={inv.balance} today={today} />}
                 {canCancel && <CancelInvoiceButton id={id} />}
-                {canDelete && <DeleteDraftButton id={id} />}
+                {canDelete && <DeleteInvoiceButton id={id} label={label} draft={isDraft} payments={payments.length} />}
               </CardBody>
             </Card>
           )}

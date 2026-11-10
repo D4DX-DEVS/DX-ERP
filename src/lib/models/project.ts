@@ -1,5 +1,5 @@
 import { index, sqliteTable, uniqueIndex } from "drizzle-orm/sqlite-core";
-import { bool, json, num, pk, ref, text, timestamps, type CommentEntry, type FileRef, type HistoryEntry, type Id } from "./_base";
+import { bool, date, json, num, pk, ref, text, timestamps, type CommentEntry, type FileRef, type HistoryEntry, type Id } from "./_base";
 
 export type Priority = "low" | "medium" | "high" | "urgent";
 export const PRIORITIES: Priority[] = ["low", "medium", "high", "urgent"];
@@ -97,3 +97,53 @@ export const Project = sqliteTable(
   ],
 );
 export type IProject = typeof Project.$inferSelect;
+
+/** The message a chat message replies to, copied when sent so the quote survives the original being deleted. */
+export interface ChatReplyRef {
+  _id: Id;
+  user: Id;
+  userName: string;
+  text?: string;
+  voice?: boolean;
+}
+
+/** A voice note on a chat message; the audio is a StoredFile of the project (entityType "project"). */
+export interface ChatVoice {
+  file: Id;
+  size: number;
+  mime: string;
+  seconds: number;
+}
+
+/**
+ * Project chat: the project manager, team members and the super admin talk about the project. Writes must trim `text`.
+ * A deleted message keeps its row (text and voice cleared, `deletedAt` set) so replies to it and polling clients see it go.
+ */
+export const ProjectMessage = sqliteTable(
+  "project_messages",
+  {
+    _id: pk(),
+    project: ref().notNull(),
+    user: ref().notNull(),
+    userName: text().notNull(),
+    text: text(),
+    /** People @mentioned in the text (notified). */
+    mentions: json<Id[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    replyTo: json<ChatReplyRef>(),
+    voice: json<ChatVoice>(),
+    deletedAt: date(),
+    ...timestamps(),
+  },
+  (t) => [index("project_messages_project_created").on(t.project, t.createdAt), index("project_messages_project_updated").on(t.project, t.updatedAt)],
+);
+export type IProjectMessage = typeof ProjectMessage.$inferSelect;
+
+/** How far each person has read a project's chat (`_id` = "<project>:<user>"), for the unread count on the Chat tab. */
+export const ProjectChatRead = sqliteTable("project_chat_reads", {
+  _id: text().primaryKey(),
+  project: ref().notNull(),
+  user: ref().notNull(),
+  lastReadAt: date().notNull(),
+});
