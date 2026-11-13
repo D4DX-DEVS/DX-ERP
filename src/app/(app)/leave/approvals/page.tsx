@@ -65,12 +65,13 @@ export default async function LeaveApprovalsPage({ searchParams }: { searchParam
   const pendingFilter = access.approve
     ? and(inList(LeaveRequest.status, PENDING), ne(LeaveRequest.user, user._id))
     : and(eq(LeaveRequest.status, "pending_manager"), inList(LeaveRequest.user, access.reportIds), ne(LeaveRequest.user, user._id));
-  // History: everyone with org-wide access, otherwise the manager's direct reports.
-  const scope = access.viewAll || access.approve ? undefined : inList(LeaveRequest.user, access.reportIds);
+  // History: everyone with org-wide access, otherwise the manager's own requests and their direct reports'.
+  const ownAndReports = [user._id, ...access.reportIds];
+  const scope = access.viewAll || access.approve ? undefined : inList(LeaveRequest.user, ownAndReports);
   const historyFilter = and(scope, tab === "approved" ? eq(LeaveRequest.status, "approved") : tab === "rejected" ? eq(LeaveRequest.status, "rejected") : undefined);
 
-  // Comp-off claims: HR decides any; a reporting manager decides their reports' claims.
-  const claimScope = access.viewAll || access.approve ? undefined : inList(CompOffClaim.user, access.reportIds);
+  // Comp-off claims: HR decides any; a reporting manager decides their reports' claims and sees their own.
+  const claimScope = access.viewAll || access.approve ? undefined : inList(CompOffClaim.user, ownAndReports);
   const claimPendingFilter = and(eq(CompOffClaim.status, "pending"), ne(CompOffClaim.user, user._id), access.approve ? undefined : inList(CompOffClaim.user, access.reportIds));
 
   const [leavePending, claimPending] = await Promise.all([db().$count(LeaveRequest, pendingFilter), db().$count(CompOffClaim, claimPendingFilter)]);
