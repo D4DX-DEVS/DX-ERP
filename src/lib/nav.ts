@@ -11,6 +11,7 @@ export type NavIcon =
   | "timesheets"
   | "projects"
   | "tasks"
+  | "dailyUpdates"
   | "qa"
   | "crm"
   | "proposals"
@@ -82,6 +83,8 @@ export function buildNav({ user, isManager, isMentor, badges }: NavContext): Nav
 
   const work: NavItem[] = [];
   work.push(item("tasks", intern ? "My tasks" : "Tasks", "/tasks", "tasks"));
+  // Everyone posts their own; team leads and `daily_updates.view_all` holders also read others' (scoped on the page).
+  work.push(item("daily-updates", "Daily updates", "/daily-updates", "dailyUpdates"));
   // Everyone without `projects.manage` (staff, interns, trainees) gets a read-only view of the projects they are on; QA engineers see every project.
   work.push(item("projects", canAny(user, ["projects.manage", "qa.projects"]) ? "Projects" : "My projects", "/projects", "projects"));
   if (!intern || can(user, "qa.view_all")) work.push(item("qa", "QA & issues", "/qa", "qa"));

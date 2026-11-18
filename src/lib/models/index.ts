@@ -12,7 +12,7 @@ import { Movement } from "./movement";
 import { LeaveType, LeaveBalance, LeaveRequest } from "./leave";
 import { PayrollRun, Payslip, SalaryAdvance } from "./payroll";
 import { Project, ProjectMessage } from "./project";
-import { Task, TimesheetEntry, Issue } from "./work";
+import { Task, TimesheetEntry, Issue, DailyUpdate } from "./work";
 import { Client, Lead, Activity } from "./crm";
 import { Proposal, Contract } from "./sales";
 import { Invoice, Payment, Expense } from "./finance";
@@ -50,6 +50,7 @@ export const BACKUP_TABLES = {
   Task,
   TimesheetEntry,
   Issue,
+  DailyUpdate,
   Client,
   Lead,
   Activity,

@@ -110,6 +110,30 @@ export const TimesheetEntry = sqliteTable(
 );
 export type ITimesheetEntry = typeof TimesheetEntry.$inferSelect;
 
+/**
+ * One person's daily update for one project on one day: the points they worked on. A day's update spans
+ * several rows (one per project); saving the day replaces its rows. Writes must trim each point.
+ */
+export const DailyUpdate = sqliteTable(
+  "dailyupdates",
+  {
+    _id: pk(),
+    user: ref().notNull(),
+    date: text().notNull(),
+    project: ref().notNull(),
+    points: json<string[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    ...timestamps(),
+  },
+  (t) => [
+    uniqueIndex("dailyupdates_user_date_project").on(t.user, t.date, t.project),
+    index("dailyupdates_date").on(t.date),
+    index("dailyupdates_project").on(t.project),
+  ],
+);
+export type IDailyUpdate = typeof DailyUpdate.$inferSelect;
+
 export type IssueStatus = "open" | "assigned" | "in_progress" | "fixed" | "ready_for_testing" | "reopened" | "verified" | "closed";
 export const ISSUE_STATUSES: IssueStatus[] = ["open", "assigned", "in_progress", "fixed", "ready_for_testing", "reopened", "verified", "closed"];
 export type IssueSeverity = "critical" | "major" | "minor" | "trivial";
