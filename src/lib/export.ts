@@ -12,6 +12,8 @@ export interface ExportColumn<T> {
   /** money → ₹ formatting in xlsx / Rs. in PDF; number → numeric cell */
   type?: "text" | "number" | "money";
   width?: number;
+  /** Multi-line text: wrapped in Excel, and the PDF switches to landscape to give it room. */
+  wrap?: boolean;
 }
 
 export interface ExportInput<T> {
@@ -83,6 +85,7 @@ export async function exportResponse<T>(input: ExportInput<T>): Promise<Response
       col.width = c.width ?? Math.min(48, Math.max(10, c.header.length + 4));
       if (c.type === "money") col.numFmt = '"₹"#,##,##0.00';
       if (c.type === "number") col.numFmt = "#,##0.##";
+      if (c.wrap) col.alignment = { wrapText: true, vertical: "top" };
     });
     ws.views = [{ state: "frozen", ySplit: 4 }];
     const buffer = await wb.xlsx.writeBuffer();
@@ -96,7 +99,7 @@ export async function exportResponse<T>(input: ExportInput<T>): Promise<Response
   }
 
   const settings = await getSettings();
-  const b = createDoc({ title: input.title, company: settings.company, orientation: input.columns.length > 6 ? "landscape" : "portrait", meta: [`Generated ${fmtDateTime(new Date())}`, `${input.rows.length} records`], subtitle: input.subtitle });
+  const b = createDoc({ title: input.title, company: settings.company, orientation: input.columns.length > 6 || input.columns.some((c) => c.wrap) ? "landscape" : "portrait", meta: [`Generated ${fmtDateTime(new Date())}`, `${input.rows.length} records`], subtitle: input.subtitle });
   table(b, {
     startY: b.y,
     head: [input.columns.map((c) => c.header)],

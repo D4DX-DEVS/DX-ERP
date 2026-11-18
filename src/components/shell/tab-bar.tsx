@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { usePathname } from "next/navigation";
 import { Dialog as D } from "radix-ui";
-import { Bell, CheckSquare, Clock, Home, LayoutGrid, X } from "lucide-react";
+import { Bell, Clock, Home, LayoutGrid, NotebookPen, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { NavSection } from "@/lib/nav";
 import { useLiveUnread } from "@/lib/unread";
@@ -13,7 +13,7 @@ import { NAV_ICONS } from "./nav-icon";
 import { isActive, SignOutButton } from "./sidebar";
 import type { ShellUser } from "./types";
 
-/** Bottom tab bar for phones (<768px): Home · Time · Tasks · Inbox · More. */
+/** Bottom tab bar for phones (<768px): Home · Time · Updates (daily updates) · Inbox · More. Tasks stays under More. */
 export function TabBar({ sections, user, unread }: { sections: NavSection[]; user: ShellUser; unread: number }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -21,7 +21,7 @@ export function TabBar({ sections, user, unread }: { sections: NavSection[]; use
   const tabs = [
     { key: "home", label: "Home", href: "/dashboard", icon: Home },
     { key: "time", label: "Time", href: "/attendance", icon: Clock },
-    { key: "tasks", label: "Tasks", href: "/tasks", icon: CheckSquare },
+    { key: "updates", label: "Updates", href: "/daily-updates", icon: NotebookPen },
     { key: "inbox", label: "Inbox", href: "/notifications", icon: Bell, badge: inbox },
   ];
   const tabClass = (active: boolean) =>

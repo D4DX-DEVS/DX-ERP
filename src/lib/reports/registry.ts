@@ -1,6 +1,7 @@
 import "server-only";
 import { can, type CurrentUser } from "@/lib/auth/session";
 import { crmReports } from "./crm";
+import { dailyWorkReport } from "./daily-updates";
 import { financeReports } from "./finance";
 import { hrReports } from "./hr";
 import { movementReports } from "./movement";
@@ -8,7 +9,7 @@ import { projectReports } from "./projects";
 import { REPORT_GROUPS, type ReportDefinition, type ReportGroup } from "./types";
 
 /** Typed registry of every report (FRS §8.9, §19). Order within a group is the order shown in the catalogue. */
-export const REPORTS: ReportDefinition[] = [...hrReports, ...movementReports, ...projectReports, ...crmReports, ...financeReports];
+export const REPORTS: ReportDefinition[] = [...hrReports, ...movementReports, ...projectReports, dailyWorkReport, ...crmReports, ...financeReports];
 
 const BY_KEY = new Map(REPORTS.map((r) => [r.key, r]));
 

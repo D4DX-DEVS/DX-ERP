@@ -100,7 +100,7 @@ export default async function ReportPage({ params, searchParams }: { params: Pro
               visible.map((row, i) => (
                 <Tr key={i}>
                   {result.columns.map((c, ci) => (
-                    <Td key={`${ci}-${c.header}`} align={c.type === "number" || c.type === "money" ? "right" : "left"} className={cn(!c.type || c.type === "text" ? "max-w-[22rem]" : "whitespace-nowrap")}>
+                    <Td key={`${ci}-${c.header}`} align={c.type === "number" || c.type === "money" ? "right" : "left"} className={cn(!c.type || c.type === "text" ? "max-w-[22rem] whitespace-pre-line" : "whitespace-nowrap")}>
                       {renderCell(c.value(row), c.type)}
                     </Td>
                   ))}

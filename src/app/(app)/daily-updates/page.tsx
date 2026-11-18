@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
-import { NotebookPen, Pencil } from "lucide-react";
+import { FileChartColumn, NotebookPen, Pencil } from "lucide-react";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ClearFilters, DateFilter, FilterBar, Pagination, SelectFilter } from "@/components/ui/filters";
@@ -9,6 +9,7 @@ import { isStaff, requireUser, type CurrentUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { DailyUpdate, Project, User } from "@/lib/models";
 import { dateParam, idParam, PAGE_SIZE, pageParam, param, type SearchParams } from "@/lib/query";
+import { canOpenReport, getReport } from "@/lib/reports/registry";
 import { getSettings } from "@/lib/settings";
 import { inList } from "@/lib/sql";
 import { addDays, fmtDate, todayKey } from "@/lib/time";
@@ -215,6 +216,22 @@ export default async function DailyUpdatesPage({ searchParams }: { searchParams:
   const scope = await dailyUpdateScope(user);
   const tab = !staff || (scope.hasTeam && param(sp, "tab") === "team") ? "team" : "mine";
   const teamLabel = scope.all ? "All updates" : "Team updates";
+  // Admins get the organisation-wide work report (Reports module), opened with the filters in use here.
+  const report = getReport("daily-work");
+  const reportQuery = new URLSearchParams(
+    [
+      ["from", dateParam(sp, "from")],
+      ["to", dateParam(sp, "to")],
+      ["person", idParam(sp, "person")],
+      ["project", idParam(sp, "project")],
+    ].filter((e): e is [string, string] => Boolean(e[1])),
+  ).toString();
+  const reportButton =
+    tab === "team" && scope.all && report && canOpenReport(user, report) ? (
+      <ButtonLink href={`/reports/daily-work${reportQuery ? `?${reportQuery}` : ""}`} variant="secondary" icon={<FileChartColumn className="size-4" aria-hidden />}>
+        Work report
+      </ButtonLink>
+    ) : undefined;
 
   return (
     <PageBody>
@@ -222,6 +239,7 @@ export default async function DailyUpdatesPage({ searchParams }: { searchParams:
         overline="Work"
         title="Daily updates"
         description={tab === "mine" ? "Post what you worked on each day, project by project." : scope.all ? "Everyone's daily updates." : "Daily updates from the people you lead and the projects you manage."}
+        actions={reportButton}
       />
       {staff && scope.hasTeam && (
         <LinkTabs
