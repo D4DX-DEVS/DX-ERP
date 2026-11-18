@@ -4,25 +4,26 @@ import Link from "next/link";
 import { useState } from "react";
 import { usePathname } from "next/navigation";
 import { Dialog as D } from "radix-ui";
-import { Bell, Clock, Home, LayoutGrid, NotebookPen, X } from "lucide-react";
+import { Clock, FolderKanban, Home, LayoutGrid, NotebookPen, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { NavSection } from "@/lib/nav";
-import { useLiveUnread } from "@/lib/unread";
 import { Avatar } from "@/components/ui/avatar";
 import { NAV_ICONS } from "./nav-icon";
 import { isActive, SignOutButton } from "./sidebar";
 import type { ShellUser } from "./types";
 
-/** Bottom tab bar for phones (<768px): Home · Time · Updates (daily updates) · Inbox · More. Tasks stays under More. */
-export function TabBar({ sections, user, unread }: { sections: NavSection[]; user: ShellUser; unread: number }) {
+/**
+ * Bottom tab bar for phones (<768px): Home · Time · Updates (daily updates) · Projects · More. Tasks stays under More;
+ * notifications are the top bar's bell.
+ */
+export function TabBar({ sections, user }: { sections: NavSection[]; user: ShellUser }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  const inbox = useLiveUnread(unread);
   const tabs = [
     { key: "home", label: "Home", href: "/dashboard", icon: Home },
     { key: "time", label: "Time", href: "/attendance", icon: Clock },
     { key: "updates", label: "Updates", href: "/daily-updates", icon: NotebookPen },
-    { key: "inbox", label: "Inbox", href: "/notifications", icon: Bell, badge: inbox },
+    { key: "projects", label: "Projects", href: "/projects", icon: FolderKanban },
   ];
   const tabClass = (active: boolean) =>
     cn("flex flex-1 flex-col items-center justify-center gap-1 rounded-[10px] text-[11px] font-semibold", active ? "text-brand-600" : "text-muted");
@@ -35,12 +36,7 @@ export function TabBar({ sections, user, unread }: { sections: NavSection[]; use
           const active = isActive(pathname, t.href);
           return (
             <Link key={t.key} href={t.href} className={tabClass(active)} aria-current={active ? "page" : undefined}>
-              <span className="relative">
-                <Icon className="size-[22px]" strokeWidth={1.8} />
-                {t.badge ? (
-                  <span className="absolute -top-1 -right-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-outside px-1 text-[10px] font-bold text-white">{t.badge > 99 ? "99+" : t.badge}</span>
-                ) : null}
-              </span>
+              <Icon className="size-[22px]" strokeWidth={1.8} />
               {t.label}
             </Link>
           );

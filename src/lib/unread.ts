@@ -1,5 +1,3 @@
-import { useEffect, useState } from "react";
-
 /**
  * Browser events that keep the top-bar unread badge and the notifications inbox in step without waiting for the
  * badge's next poll. Client-only: call from event handlers or effects.
@@ -37,14 +35,3 @@ export function onUnreadEvents(handlers: { changed?: (delta: number) => void; po
   };
 }
 
-/** Unread count for a badge that does not poll itself: follows the server value, local changes and the top bar's polls. */
-export function useLiveUnread(initial: number): number {
-  const [count, setCount] = useState(initial);
-  const [seen, setSeen] = useState(initial);
-  if (seen !== initial) {
-    setSeen(initial);
-    setCount(initial);
-  }
-  useEffect(() => onUnreadEvents({ changed: (delta) => setCount((c) => Math.max(0, c + delta)), polled: setCount }), []);
-  return count;
-}

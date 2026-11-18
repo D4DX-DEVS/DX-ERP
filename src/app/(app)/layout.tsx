@@ -81,7 +81,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           {children}
         </main>
       </div>
-      <TabBar sections={sections} user={shellUser} unread={unread} />
+      <TabBar sections={sections} user={shellUser} />
       <NavigationTracker />
       <RowLinks />
     </div>
