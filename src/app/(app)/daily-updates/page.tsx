@@ -11,8 +11,9 @@ import { DailyUpdate, Project, User } from "@/lib/models";
 import { dateParam, idParam, PAGE_SIZE, pageParam, param, type SearchParams } from "@/lib/query";
 import { getSettings } from "@/lib/settings";
 import { inList } from "@/lib/sql";
-import { fmtDate, todayKey } from "@/lib/time";
+import { addDays, fmtDate, todayKey } from "@/lib/time";
 import { loggableProjectIds, peopleMap, PROJECT_CLOSED_CATEGORIES, type Filter } from "@/lib/work-access";
+import { DayPicker } from "./day-picker";
 import { dailyUpdateScope } from "./scope";
 import { DayUpdateCard, type DayUpdate } from "./update-card";
 import { UpdateEditor, type ProjectOption } from "./update-editor";
@@ -110,11 +111,12 @@ async function MyUpdates({ user, sp }: { user: CurrentUser; sp: SearchParams }) 
     <>
       <Card>
         <CardHeader
-          title={date === today ? "Today's update" : `Update for ${fmtDate(date, "EEE, d MMM yyyy")}`}
-          subtitle={dayRows.length ? "Already posted — edit the points and save to update it." : "Pick a date, add the projects you worked on and list your points under each."}
+          title="Your update"
+          subtitle={dayRows.length ? "Posted — edit the points and save to update it." : "Add the projects you worked on and list your points."}
+          action={<DayPicker date={date} today={today} label={fmtDate(date, date.slice(0, 4) === today.slice(0, 4) ? "EEE, d MMM" : "d MMM yyyy")} prev={addDays(date, -1)} next={date < today ? addDays(date, 1) : undefined} />}
         />
         <CardBody>
-          <UpdateEditor key={date} date={date} today={today} projects={projects} initial={initial} exists={dayRows.length > 0} />
+          <UpdateEditor key={date} date={date} projects={projects} initial={initial} exists={dayRows.length > 0} />
         </CardBody>
       </Card>
 
