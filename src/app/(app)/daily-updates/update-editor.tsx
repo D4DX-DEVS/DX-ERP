@@ -143,23 +143,11 @@ export function UpdateEditor({
 
   return (
     <ActionForm action={saveDailyUpdate} values={{ date, entries: entries.map((e) => ({ project: e.project, points: e.points.map((p) => p.text) })) }} successMessage="Daily update saved">
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)] sm:gap-4">
-        <Field label="Date" name="date" required>
-          <Input id="date" type="date" max={today} value={date} onChange={(e) => e.target.value && router.push(e.target.value === today ? "/daily-updates" : `/daily-updates?date=${e.target.value}`)} />
-        </Field>
-        <Field label="Projects" name="projects" required hint={projects.length ? "Only the projects you're assigned to are listed. Add as many as you worked on." : undefined}>
-          <Select id="projects" value="" onChange={(e) => addProject(e.target.value)} disabled={available.length === 0 || entries.length >= MAX_PROJECTS}>
-            <option value="">{projects.length === 0 ? "You're not assigned to any project yet" : available.length === 0 ? "All your projects are added" : "Add a project…"}</option>
-            {available.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-      </div>
+      <Field label="Date" name="date" required className="sm:max-w-56">
+        <Input id="date" type="date" max={today} value={date} onChange={(e) => e.target.value && router.push(e.target.value === today ? "/daily-updates" : `/daily-updates?date=${e.target.value}`)} />
+      </Field>
 
-      {entries.length > 0 ? (
+      {entries.length > 0 && (
         <div className="flex flex-col gap-3">
           {entries.map((entry) => (
             <ProjectBlock
@@ -173,8 +161,25 @@ export function UpdateEditor({
             />
           ))}
         </div>
-      ) : (
-        <p className="rounded-xl border border-dashed border-line-strong px-4 py-6 text-center text-sm text-muted">Pick the projects you worked on, then add your points under each.</p>
+      )}
+
+      {/* The picker sits below the last project, so the next project is added where the points end — no scrolling back up. */}
+      {(entries.length === 0 || available.length > 0) && (
+        <Field
+          label={entries.length ? "Add another project" : "Project"}
+          name="projects"
+          required={entries.length === 0}
+          hint={entries.length ? undefined : projects.length ? "Only the projects you're assigned to are listed. Add as many as you worked on." : undefined}
+        >
+          <Select id="projects" value="" onChange={(e) => addProject(e.target.value)} disabled={available.length === 0 || entries.length >= MAX_PROJECTS}>
+            <option value="">{projects.length === 0 ? "You're not assigned to any project yet" : entries.length ? "Add another project…" : "Select a project…"}</option>
+            {available.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
       )}
 
       <FormActions className="justify-between">
