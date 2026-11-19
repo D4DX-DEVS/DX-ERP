@@ -10,7 +10,7 @@ import { DailyUpdate, newId, Project } from "@/lib/models";
 import { inList, notInList } from "@/lib/sql";
 import { fmtDate, todayKey } from "@/lib/time";
 import { zs } from "@/lib/validation";
-import { loggableProjectIds } from "@/lib/work-access";
+import { dailyUpdateProjectIds } from "./scope";
 import { MAX_POINTS, MAX_PROJECTS, POINT_MAX } from "./limits";
 
 /** Rows per insert statement: 7 columns each, D1 allows 100 bound parameters. */
@@ -40,7 +40,7 @@ export async function saveDailyUpdate(input: Record<string, unknown>): Promise<A
     if (entries.size === 0) throw new ActionError("Add at least one project with what you worked on.", { projects: "Pick a project" });
 
     const [loggable, existing, projects] = await Promise.all([
-      loggableProjectIds(user),
+      dailyUpdateProjectIds(user),
       db().select({ project: DailyUpdate.project }).from(DailyUpdate).where(and(eq(DailyUpdate.user, user._id), eq(DailyUpdate.date, data.date))),
       db().select({ id: Project._id, projectNo: Project.projectNo }).from(Project).where(inList(Project._id, [...entries.keys()])),
     ]);

@@ -13,9 +13,9 @@ import { canOpenReport, getReport } from "@/lib/reports/registry";
 import { getSettings } from "@/lib/settings";
 import { inList } from "@/lib/sql";
 import { addDays, fmtDate, todayKey } from "@/lib/time";
-import { loggableProjectIds, peopleMap, PROJECT_CLOSED_CATEGORIES, type Filter } from "@/lib/work-access";
+import { peopleMap, PROJECT_CLOSED_CATEGORIES, type Filter } from "@/lib/work-access";
 import { DayPicker } from "./day-picker";
-import { dailyUpdateScope } from "./scope";
+import { dailyUpdateProjectIds, dailyUpdateScope, updatesAllProjects } from "./scope";
 import { DayUpdateCard, type DayUpdate } from "./update-card";
 import { UpdateEditor, type ProjectOption } from "./update-editor";
 
@@ -103,7 +103,7 @@ async function MyUpdates({ user, sp }: { user: CurrentUser; sp: SearchParams }) 
   const mine = eq(DailyUpdate.user, user._id);
 
   const [loggable, dayRows, settings] = await Promise.all([
-    loggableProjectIds(user),
+    dailyUpdateProjectIds(user),
     db().select({ project: DailyUpdate.project, points: DailyUpdate.points }).from(DailyUpdate).where(and(mine, eq(DailyUpdate.date, date))),
     getSettings(),
   ]);
@@ -132,7 +132,7 @@ async function MyUpdates({ user, sp }: { user: CurrentUser; sp: SearchParams }) 
         action={<DayPicker date={date} today={today} label={dayLabel(date, today)} prev={addDays(date, -1)} next={date < today ? addDays(date, 1) : undefined} />}
       />
       <CardBody>
-        <UpdateEditor key={date} date={date} projects={projects} initial={initial} exists={dayRows.length > 0} />
+        <UpdateEditor key={date} date={date} projects={projects} initial={initial} exists={dayRows.length > 0} allProjects={updatesAllProjects(user)} />
       </CardBody>
     </Card>
   );

@@ -143,7 +143,7 @@ function AddProject({ options, disabled, onAdd }: { options: ProjectOption[]; di
 }
 
 /** The signed-in person's update for one day: pick projects, then list points under each. */
-export function UpdateEditor({ date, projects, initial, exists }: { date: string; projects: ProjectOption[]; initial: { project: string; points: string[] }[]; exists: boolean }) {
+export function UpdateEditor({ date, projects, initial, exists, allProjects = false }: { date: string; projects: ProjectOption[]; initial: { project: string; points: string[] }[]; exists: boolean; allProjects?: boolean }) {
   const [entries, setEntries] = useState<Entry[]>(() =>
     initial.map((e) => ({ project: e.project, points: (e.points.length ? e.points : [""]).map((text, i) => ({ key: `${e.project}-${i}`, text })) })),
   );
@@ -204,7 +204,7 @@ export function UpdateEditor({ date, projects, initial, exists }: { date: string
           </div>
         </div>
       )}
-      {entries.length === 0 && projects.length > 0 && <p className="-mt-1 text-xs text-muted">Only the projects you&apos;re assigned to are listed. Add each one you worked on.</p>}
+      {entries.length === 0 && projects.length > 0 && <p className="-mt-1 text-xs text-muted">{allProjects ? "Every running project is listed." : "Only the projects you're assigned to are listed."} Add each one you worked on.</p>}
     </ActionForm>
   );
 }

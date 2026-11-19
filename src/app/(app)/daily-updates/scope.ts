@@ -2,9 +2,24 @@ import "server-only";
 import { eq, or, type SQL } from "drizzle-orm";
 import { can, type CurrentUser } from "@/lib/auth/session";
 import { db } from "@/lib/db";
-import { DailyUpdate, Project, User } from "@/lib/models";
+import { DailyUpdate, Project, User, type Id } from "@/lib/models";
 import { inList, jsonPath } from "@/lib/sql";
-import type { Filter } from "@/lib/work-access";
+import { loggableProjectIds, type Filter } from "@/lib/work-access";
+
+/** The Quality Analyst department tests every project (matched by department name, ignoring case). */
+const QA_DEPARTMENT = "quality analyst";
+
+/** Quality Analyst department members and QA engineers (`qa.projects`) post daily updates on any project. */
+export function updatesAllProjects(user: CurrentUser): boolean {
+  return can(user, "qa.projects") || user.departmentName?.trim().toLowerCase() === QA_DEPARTMENT;
+}
+
+/** Projects a user may post daily updates for: every project for QA, otherwise the projects they may log time on. */
+export async function dailyUpdateProjectIds(user: CurrentUser): Promise<Id[]> {
+  if (!updatesAllProjects(user)) return loggableProjectIds(user);
+  const rows = await db().select({ id: Project._id }).from(Project);
+  return rows.map((r) => r.id);
+}
 
 export interface DailyUpdateScope {
   /** Everyone's updates (`daily_updates.view_all`, the super admin). */
