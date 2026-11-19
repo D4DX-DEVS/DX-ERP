@@ -43,13 +43,34 @@ function isStandalone(): boolean {
   return window.matchMedia("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
 }
 
+/** "Not now" on the install offer keeps it away on this device for a week, across reloads. */
+const SNOOZE_KEY = "pwa-install-snoozed-until";
+const SNOOZE_MS = 7 * 24 * 60 * 60_000;
+
+function installSnoozed(): boolean {
+  try {
+    return Number(localStorage.getItem(SNOOZE_KEY)) > Date.now();
+  } catch {
+    return false;
+  }
+}
+
+function snoozeInstall() {
+  try {
+    localStorage.setItem(SNOOZE_KEY, String(Date.now() + SNOOZE_MS));
+  } catch {
+    // Storage blocked: the offer just comes back on the next reload.
+  }
+}
+
 if (typeof window !== "undefined") {
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-  state = { ...state, iosInstall: ios && !isStandalone() };
+  const snoozed = installSnoozed();
+  state = { ...state, iosInstall: ios && !isStandalone() && !snoozed };
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault(); // our own popup replaces the browser's mini-infobar
     installEvent = event as InstallPromptEvent;
-    update({ canInstall: true });
+    if (!snoozed) update({ canInstall: true });
   });
   window.addEventListener("appinstalled", () => {
     installEvent = null;
@@ -142,7 +163,10 @@ export function PwaPrompt() {
   if (pathname.startsWith("/kiosk/")) return null;
 
   const mode = pwa.updateReady && !dismissed.update ? "update" : (pwa.canInstall || pwa.iosInstall) && !dismissed.install && !navigated ? "install" : null;
-  const close = () => setDismissed((d) => ({ ...d, [mode === "update" ? "update" : "install"]: true }));
+  const close = () => {
+    if (mode === "install") snoozeInstall();
+    setDismissed((d) => ({ ...d, [mode === "update" ? "update" : "install"]: true }));
+  };
 
   const install = async () => {
     setBusy(true);

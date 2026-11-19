@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
-import { FileChartColumn, NotebookPen, Pencil } from "lucide-react";
+import { FileChartColumn, NotebookPen } from "lucide-react";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ClearFilters, DateFilter, FilterBar, Pagination, SelectFilter } from "@/components/ui/filters";
@@ -22,6 +22,23 @@ import { UpdateEditor, type ProjectOption } from "./update-editor";
 export const metadata = { title: "Daily updates" };
 
 const projectLabel = (p: { projectNo: string | null; title: string | null }) => (p.title ? `${p.projectNo} · ${p.title}` : "Removed project");
+
+/** "Wed, 18 Nov" this year, "18 Nov 2025" before. */
+const dayLabel = (date: string, today: string) => fmtDate(date, date.slice(0, 4) === today.slice(0, 4) ? "EEE, d MMM" : "d MMM yyyy");
+
+/** Days the Team tab shows: its From / To filters, or just today when neither is set. `day` is set for a single day. */
+interface TeamPeriod {
+  from?: string;
+  to?: string;
+  day?: string;
+}
+
+function teamPeriod(sp: SearchParams, today: string): TeamPeriod {
+  const from = dateParam(sp, "from");
+  const to = dateParam(sp, "to");
+  if (!from && !to) return { from: today, to: today, day: today };
+  return { from, to, day: from && from === to ? from : undefined };
+}
 
 /**
  * Pages through (person, day) groups matching `where`, newest day first, and returns them with their projects and points.
@@ -83,14 +100,12 @@ async function MyUpdates({ user, sp }: { user: CurrentUser; sp: SearchParams }) 
   const today = todayKey();
   const requested = dateParam(sp, "date");
   const date = requested && requested < today ? requested : today;
-  const page = pageParam(sp);
   const mine = eq(DailyUpdate.user, user._id);
 
-  const [loggable, dayRows, settings, history] = await Promise.all([
+  const [loggable, dayRows, settings] = await Promise.all([
     loggableProjectIds(user),
     db().select({ project: DailyUpdate.project, points: DailyUpdate.points }).from(DailyUpdate).where(and(mine, eq(DailyUpdate.date, date))),
     getSettings(),
-    dayUpdates(mine, page, false),
   ]);
 
   // Assigned projects that are still running, plus any project already in this day's update.
@@ -108,58 +123,30 @@ async function MyUpdates({ user, sp }: { user: CurrentUser; sp: SearchParams }) 
     .sort((a, b) => order.get(a.project)! - order.get(b.project)!)
     .map((r) => ({ project: r.project, points: r.points }));
 
+  // Only the chosen day's update: earlier days are reached with the day picker.
   return (
-    <>
-      <Card>
-        <CardHeader
-          title="Your update"
-          subtitle={dayRows.length ? "Posted — edit the points and save to update it." : "Add the projects you worked on and list your points."}
-          action={<DayPicker date={date} today={today} label={fmtDate(date, date.slice(0, 4) === today.slice(0, 4) ? "EEE, d MMM" : "d MMM yyyy")} prev={addDays(date, -1)} next={date < today ? addDays(date, 1) : undefined} />}
-        />
-        <CardBody>
-          <UpdateEditor key={date} date={date} projects={projects} initial={initial} exists={dayRows.length > 0} />
-        </CardBody>
-      </Card>
-
-      <section className="flex flex-col gap-3">
-        <h2 className="font-display text-[15px] font-semibold text-ink sm:text-[17px]">My recent updates</h2>
-        {history.days.length === 0 ? (
-          <Card>
-            <EmptyState icon={<NotebookPen className="size-5" />} title="No updates yet" description="Your posted updates will show here." />
-          </Card>
-        ) : (
-          <>
-            {history.days.map((d) => (
-              <DayUpdateCard
-                key={d.key}
-                update={d}
-                action={
-                  d.date === date ? undefined : (
-                    <ButtonLink href={d.date === today ? "/daily-updates" : `/daily-updates?date=${d.date}`} variant="ghost" size="icon-sm" aria-label={`Edit update for ${fmtDate(d.date)}`}>
-                      <Pencil className="size-4" aria-hidden />
-                    </ButtonLink>
-                  )
-                }
-              />
-            ))}
-            {history.total > PAGE_SIZE && (
-              <Card>
-                <Pagination page={page} pageSize={PAGE_SIZE} total={history.total} />
-              </Card>
-            )}
-          </>
-        )}
-      </section>
-    </>
+    <Card>
+      <CardHeader
+        title={date === today && !dayRows.length ? "What did you work on today?" : "Your update"}
+        subtitle={dayRows.length ? "Posted — edit the points and save to update it." : "Add the projects you worked on and list your points."}
+        action={<DayPicker date={date} today={today} label={dayLabel(date, today)} prev={addDays(date, -1)} next={date < today ? addDays(date, 1) : undefined} />}
+      />
+      <CardBody>
+        <UpdateEditor key={date} date={date} projects={projects} initial={initial} exists={dayRows.length > 0} />
+      </CardBody>
+    </Card>
   );
 }
 
-async function TeamUpdates({ scope, sp }: { scope: Filter; sp: SearchParams }) {
+async function TeamUpdates({ scope, sp, period, today }: { scope: Filter; sp: SearchParams; period: TeamPeriod; today: string }) {
   const page = pageParam(sp);
-  const from = dateParam(sp, "from");
-  const to = dateParam(sp, "to");
+  const { from, to, day } = period;
   const person = idParam(sp, "person");
   const project = idParam(sp, "project");
+  // Day links keep the tab and the person / project filters; the day replaces any period.
+  const keep = new URLSearchParams([["tab", "team"], ...(person ? [["person", person]] : []), ...(project ? [["project", project]] : [])]).toString();
+  const short = (d: string) => fmtDate(d, d.slice(0, 4) === today.slice(0, 4) ? "d MMM" : "d MMM yyyy");
+  const periodLabel = from && to ? `${short(from)} – ${short(to)}` : from ? `From ${short(from)}` : `Until ${short(to!)}`;
   const where = and(
     scope,
     person ? eq(DailyUpdate.user, person) : undefined,
@@ -182,16 +169,34 @@ async function TeamUpdates({ scope, sp }: { scope: Filter; sp: SearchParams }) {
 
   return (
     <>
-      <FilterBar>
-        <DateFilter param="from" label="From" />
-        <DateFilter param="to" label="To" />
-        <SelectFilter param="person" allLabel="All people" label="Person" options={people.map((p) => ({ value: p.id, label: p.name }))} />
-        <SelectFilter param="project" allLabel="All projects" label="Project" options={projects.map((p) => ({ value: p.id, label: projectLabel(p) }))} />
-        <ClearFilters keep={["tab"]} />
-      </FilterBar>
+      <div className="flex flex-col gap-2 md:flex-row md:items-center">
+        <div className="flex items-center gap-1">
+          {day ? (
+            <DayPicker date={day} today={today} label={dayLabel(day, today)} prev={addDays(day, -1)} next={day < today ? addDays(day, 1) : undefined} keep={keep} range className="h-10" />
+          ) : (
+            <DayPicker date={to && to < today ? to : today} today={today} label={periodLabel} period keep={keep} range className="h-10" />
+          )}
+          {day !== today && (
+            <ButtonLink href={`/daily-updates?${keep}`} variant="ghost" size="sm" scroll={false}>
+              Today
+            </ButtonLink>
+          )}
+        </div>
+        <FilterBar>
+          <DateFilter param="from" label="From" />
+          <DateFilter param="to" label="To" />
+          <SelectFilter param="person" allLabel="All people" label="Person" options={people.map((p) => ({ value: p.id, label: p.name }))} />
+          <SelectFilter param="project" allLabel="All projects" label="Project" options={projects.map((p) => ({ value: p.id, label: projectLabel(p) }))} />
+          <ClearFilters keep={["tab"]} />
+        </FilterBar>
+      </div>
       {list.days.length === 0 ? (
         <Card>
-          <EmptyState icon={<NotebookPen className="size-5" />} title="No updates found" description={from || to || person || project ? "Try clearing the filters." : "Updates your team posts will show here."} />
+          <EmptyState
+            icon={<NotebookPen className="size-5" />}
+            title={day === today ? "No updates yet today" : day ? `No updates on ${dayLabel(day, today)}` : "No updates found"}
+            description={person || project ? "Try clearing the filters." : day === today ? "Updates your team posts today will show here." : day ? "Try the previous day or pick a period." : "Try a wider period."}
+          />
         </Card>
       ) : (
         <>
@@ -216,12 +221,14 @@ export default async function DailyUpdatesPage({ searchParams }: { searchParams:
   const scope = await dailyUpdateScope(user);
   const tab = !staff || (scope.hasTeam && param(sp, "tab") === "team") ? "team" : "mine";
   const teamLabel = scope.all ? "All updates" : "Team updates";
+  const today = todayKey();
+  const period = teamPeriod(sp, today);
   // Admins get the organisation-wide work report (Reports module), opened with the filters in use here.
   const report = getReport("daily-work");
   const reportQuery = new URLSearchParams(
     [
-      ["from", dateParam(sp, "from")],
-      ["to", dateParam(sp, "to")],
+      ["from", period.from],
+      ["to", period.to],
       ["person", idParam(sp, "person")],
       ["project", idParam(sp, "project")],
     ].filter((e): e is [string, string] => Boolean(e[1])),
@@ -249,7 +256,7 @@ export default async function DailyUpdatesPage({ searchParams }: { searchParams:
           ]}
         />
       )}
-      {tab === "mine" ? <MyUpdates user={user} sp={sp} /> : <TeamUpdates scope={scope.filter} sp={sp} />}
+      {tab === "mine" ? <MyUpdates user={user} sp={sp} /> : <TeamUpdates scope={scope.filter} sp={sp} period={period} today={today} />}
     </PageBody>
   );
 }

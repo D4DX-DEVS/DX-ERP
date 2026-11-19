@@ -1,12 +1,16 @@
+import Form from "next/form";
 import Link from "next/link";
 import { buttonClass } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import type { ResolvedFilter } from "@/lib/reports/filters";
 
-/** Plain GET form: filters live in the URL so a report view is bookmarkable and exportable. */
+/**
+ * GET form: filters live in the URL so a report view is bookmarkable and exportable. `next/form` applies them with a
+ * client-side navigation, so the app shell (and its install / update popups) is not reloaded on every apply.
+ */
 export function FilterForm({ action, filters }: { action: string; filters: ResolvedFilter[] }) {
   return (
-    <form method="get" action={action} className="flex flex-col gap-4 rounded-[14px] border border-line bg-white p-4 sm:p-5">
+    <Form action={action} className="flex flex-col gap-4 rounded-[14px] border border-line bg-white p-4 sm:p-5">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {filters.map(({ def, value, options }) => {
           const id = `filter-${def.key}`;
@@ -39,6 +43,6 @@ export function FilterForm({ action, filters }: { action: string; filters: Resol
           Apply filters
         </button>
       </div>
-    </form>
+    </Form>
   );
 }

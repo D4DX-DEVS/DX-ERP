@@ -68,7 +68,8 @@ export default async function ReportPage({ params, searchParams }: { params: Pro
         }
       />
 
-      {report.filters.length > 0 && <FilterForm action={`/reports/${report.key}`} filters={resolved} />}
+      {/* Keyed by the applied filters: after a client-side apply or Reset the fields show the new values. */}
+      {report.filters.length > 0 && <FilterForm key={query.toString()} action={`/reports/${report.key}`} filters={resolved} />}
 
       {result.summary && result.summary.length > 0 && (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
